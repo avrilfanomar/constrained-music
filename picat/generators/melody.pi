@@ -1,0 +1,313 @@
+% melody.pi - Constraint-based melody generation
+% Phase 1: Core melody generator using Picat's CP module
+
+module melody.
+
+import music_types.
+import temporal.
+import scale_utils.
+import basic.
+import cp.
+
+% ==============================================================================
+% MAIN MELODY GENERATION
+% ==============================================================================
+
+% Generate a melody given a configuration
+% Config: config(meter, key_root, mode, num_bars, notes_per_bar, tempo_bpm, voice)
+generate_melody(Config, Melody) =>
+    % Extract configuration
+    Config = $config(
+        meter = Meter,
+        key_root = Root,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = _Tempo,
+        voice = Voice
+    ),
+
+    % Calculate total notes
+    TotalNotes = NumBars * NotesPerBar,
+
+    % Get voice range
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+
+    % Get valid scale notes within voice range
+    ScaleNotes = scale_notes_in_range(Root, Mode, LowMidi, HighMidi),
+
+    % Create constraint variables for pitches
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Apply melodic constraints
+    apply_melodic_constraints(Pitches, Root, Mode, ScaleNotes),
+
+    % Solve with first-fail heuristic
+    solve([ff], Pitches),
+
+    % Build melody structure from solved pitches
+    BeatsPerBar = beats_per_bar(Meter),
+    Melody = build_melody(Pitches, NumBars, NotesPerBar, BeatsPerBar, VoiceId).
+
+% ==============================================================================
+% CONSTRAINT APPLICATION
+% ==============================================================================
+
+apply_melodic_constraints(Pitches, Root, _Mode, ScaleNotes) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Constraint 1: Maximum interval between consecutive notes (5 semitones)
+    % Encourages stepwise motion and small skips
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< 5
+    end,
+
+    % Constraint 2: Start on tonic, 3rd, or 5th (stable tones)
+    % Pre-compute valid starting notes from ScaleNotes
+    StablePitchClasses = [RootClass, (RootClass + 4) mod 12, (RootClass + 7) mod 12],
+    ValidStartNotes = [N : N in ScaleNotes, member(N mod 12, StablePitchClasses)],
+    Pitches[1] :: ValidStartNotes,
+
+    % Constraint 3: End on tonic
+    % Pre-compute valid ending notes from ScaleNotes
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes,
+
+    % Constraint 4: After a leap (>= 4 semitones), prefer contrary motion
+    foreach(I in 1..Len-2)
+        % Use constraint expressions directly (not intermediate variables)
+        ($abs(Pitches[I+1] - Pitches[I]) #>= 4) #=>
+            ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
+    end,
+
+    % Constraint 5: No more than 2 consecutive repeated notes
+    foreach(I in 1..Len-2)
+        #~(Pitches[I] #= Pitches[I+1] #/\ Pitches[I+1] #= Pitches[I+2])
+    end,
+
+    % Constraint 6: Ensure some variety - at least 3 different pitches
+    nvalue(N, Pitches),
+    N #>= 3.
+
+% ==============================================================================
+% MELODY BUILDING
+% ==============================================================================
+
+% Build melody from solved pitch list
+build_melody(Pitches, _NumBars, NotesPerBar, _BeatsPerBar, VoiceId) = Melody =>
+    Melody = [build_note(Pitches[I], I, NotesPerBar, VoiceId) : I in 1..length(Pitches)].
+
+% Helper to build a single note with evaluated expressions
+build_note(MidiPitch, Index, NotesPerBar, VoiceId) = Note =>
+    Octave = MidiPitch // 12 - 1,
+    Bar = ((Index - 1) // NotesPerBar) + 1,
+    Beat = ((Index - 1) mod NotesPerBar) + 1,
+    Note = $note(
+        $pitch(midi, MidiPitch, Octave),
+        $duration(1, NotesPerBar),
+        $time_pos(Bar, Beat, 0),
+        VoiceId,
+        80
+    ).
+
+% ==============================================================================
+% MULTIPLE SOLUTION GENERATION
+% ==============================================================================
+
+% Generate multiple melodies (up to Count)
+generate_melodies(Config, Count, Melodies) =>
+    generate_melodies_helper(Config, Count, [], Melodies).
+
+generate_melodies_helper(_, 0, Acc, Melodies) =>
+    Melodies = reverse(Acc).
+generate_melodies_helper(Config, Count, Acc, Melodies) =>
+    Count > 0,
+    if generate_melody_once(Config, Melody) then
+        generate_melodies_helper(Config, Count - 1, [Melody | Acc], Melodies)
+    else
+        Melodies = reverse(Acc)
+    end.
+
+% Non-deterministic version for findall
+generate_melody_once(Config, Melody) =>
+    Config = $config(
+        meter = Meter,
+        key_root = Root,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = _Tempo,
+        voice = Voice
+    ),
+    TotalNotes = NumBars * NotesPerBar,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(Root, Mode, LowMidi, HighMidi),
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+    apply_melodic_constraints(Pitches, Root, Mode, ScaleNotes),
+    solve([ff], Pitches),
+    BeatsPerBar = beats_per_bar(Meter),
+    Melody = build_melody(Pitches, NumBars, NotesPerBar, BeatsPerBar, VoiceId).
+
+% ==============================================================================
+% CUSTOMIZABLE GENERATION
+% ==============================================================================
+
+% Generate with custom constraint level
+% Level: relaxed, standard, strict
+generate_melody_with_level(Config, Level, Melody) =>
+    Config = $config(
+        meter = Meter,
+        key_root = Root,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = _Tempo,
+        voice = Voice
+    ),
+    TotalNotes = NumBars * NotesPerBar,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(Root, Mode, LowMidi, HighMidi),
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+    apply_constraints_by_level(Pitches, Root, Mode, Level, ScaleNotes),
+    solve([ff], Pitches),
+    BeatsPerBar = beats_per_bar(Meter),
+    Melody = build_melody(Pitches, NumBars, NotesPerBar, BeatsPerBar, VoiceId).
+
+apply_constraints_by_level(Pitches, Root, Mode, relaxed, ScaleNotes) =>
+    apply_relaxed_constraints(Pitches, Root, Mode, ScaleNotes).
+apply_constraints_by_level(Pitches, Root, Mode, standard, ScaleNotes) =>
+    apply_melodic_constraints(Pitches, Root, Mode, ScaleNotes).
+apply_constraints_by_level(Pitches, Root, Mode, strict, ScaleNotes) =>
+    apply_strict_constraints(Pitches, Root, Mode, ScaleNotes).
+
+% Relaxed constraints - allow more freedom
+apply_relaxed_constraints(Pitches, Root, _Mode, ScaleNotes) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Only max interval constraint
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< 7  % Up to perfect fifth
+    end,
+
+    % End on tonic - pre-compute valid ending notes
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes.
+
+% Strict constraints - more musical rules
+apply_strict_constraints(Pitches, Root, _Mode, ScaleNotes) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Constraint 1: Maximum interval of 4 semitones (major third)
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< 4
+    end,
+
+    % Constraint 2: Start and end on tonic - pre-compute valid notes
+    ValidTonicNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[1] :: ValidTonicNotes,
+    Pitches[Len] :: ValidTonicNotes,
+
+    % Constraint 3: Penultimate note is scale degree 2 or 7 (leading tone)
+    if Len > 1 then
+        PenultimatePitchClasses = [(RootClass + 2) mod 12, (RootClass + 11) mod 12],
+        ValidPenultimateNotes = [N : N in ScaleNotes, member(N mod 12, PenultimatePitchClasses)],
+        Pitches[Len-1] :: ValidPenultimateNotes
+    end,
+
+    % Constraint 4: After any leap, move stepwise in opposite direction
+    foreach(I in 1..Len-2)
+        % Use constraint expressions directly (not intermediate variables)
+        ($abs(Pitches[I+1] - Pitches[I]) #>= 3) #=>
+            ($abs(Pitches[I+2] - Pitches[I+1]) #=< 2 #/\
+             (Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #< 0)
+    end,
+
+    % Constraint 5: No repeated notes
+    foreach(I in 1..Len-1)
+        Pitches[I] #!= Pitches[I+1]
+    end,
+
+    % Constraint 6: At least 4 different pitches
+    nvalue(N, Pitches),
+    N #>= 4,
+
+    % Constraint 7: Climax in middle third
+    ThirdStart = Len // 3 + 1,
+    ThirdEnd = 2 * Len // 3,
+    MaxPitch = max(Pitches),
+    sum([Pitches[I] #= MaxPitch : I in ThirdStart..ThirdEnd]) #>= 1.
+
+% ==============================================================================
+% UTILITY FUNCTIONS
+% ==============================================================================
+
+% Extract just the MIDI pitches from a melody
+melody_to_pitches(Melody) = Pitches =>
+    Pitches = [P : $note($pitch(midi, P, _), _, _, _, _) in Melody].
+
+% Get melody as simple list for external processing
+melody_to_list(Melody) = List =>
+    List = [
+        [MidiPitch, DurNum, DurDen, Bar, Beat, VoiceId, Vel] :
+        $note($pitch(midi, MidiPitch, _), $duration(DurNum, DurDen),
+              $time_pos(Bar, Beat, _), VoiceId, Vel) in Melody
+    ].
+
+% Calculate total duration of melody in beats
+melody_duration_beats(Melody, BeatsPerWhole) = Total =>
+    Durs = [duration_to_beats(Dur, BeatsPerWhole) : $note(_, Dur, _, _, _) in Melody],
+    Total = sum(Durs).
+
+% Get pitch range of melody
+melody_range(Melody) = Range =>
+    Pitches = melody_to_pitches(Melody),
+    Range = max(Pitches) - min(Pitches).
+
+% Count intervals of each type in melody
+melody_interval_histogram(Melody) = Hist =>
+    Pitches = melody_to_pitches(Melody),
+    Len = length(Pitches),
+    Intervals = [$abs(Pitches[I+1] - Pitches[I]) : I in 1..Len-1],
+    Hist = new_map(),
+    foreach(Int in Intervals)
+        Hist.put(Int, Hist.get(Int, 0) + 1)
+    end.
+
+% ==============================================================================
+% OUTPUT FORMATTING
+% ==============================================================================
+
+% Print melody in readable format
+print_melody(Melody) =>
+    NoteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+    foreach(Note in Melody)
+        Note = $note($pitch(midi, Midi, _), $duration(DurN, DurD),
+                     $time_pos(Bar, Beat, _), Voice, Vel),
+        NoteName = NoteNames[(Midi mod 12) + 1],
+        Octave = Midi // 12 - 1,
+        printf("Bar %d, Beat %d: %s%d (dur=%d/%d, voice=%d, vel=%d)%n",
+               Bar, Beat, NoteName, Octave, DurN, DurD, Voice, Vel)
+    end.
+
+% Print melody in compact format
+print_melody_compact(Melody) =>
+    NoteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+    Notes = [NoteNames[(Midi mod 12) + 1] ++ to_string(Midi // 12 - 1) :
+             $note($pitch(midi, Midi, _), _, _, _, _) in Melody],
+    println(join(Notes, " -> ")).
+
+% Print just the pitch sequence
+print_pitch_sequence(Melody) =>
+    Pitches = melody_to_pitches(Melody),
+    println(Pitches).
+
+% Helper: join list with separator
+join([], _) = "".
+join([X], _) = X.
+join([X|Rest], Sep) = X ++ Sep ++ join(Rest, Sep).

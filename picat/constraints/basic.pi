@@ -1,0 +1,247 @@
+% basic.pi - Basic constraint templates for music generation
+% Phase 1: Constraint building blocks for future phases
+
+module basic.
+
+import cp.
+
+% ==============================================================================
+% INTERVAL CONSTRAINTS
+% ==============================================================================
+
+% Constrain interval between two notes
+interval_constraint(Note1, Note2, MinInterval, MaxInterval) =>
+    Diff = $abs(Note2 - Note1),
+    Diff #>= MinInterval,
+    Diff #=< MaxInterval.
+
+% Constrain to stepwise motion (0-2 semitones)
+stepwise(Note1, Note2) =>
+    interval_constraint(Note1, Note2, 0, 2).
+
+% Constrain to small interval (0-4 semitones, includes thirds)
+small_interval(Note1, Note2) =>
+    interval_constraint(Note1, Note2, 0, 4).
+
+% Constrain to skip (3-4 semitones, thirds)
+skip(Note1, Note2) =>
+    interval_constraint(Note1, Note2, 3, 4).
+
+% Constrain to leap (5-7 semitones, fourth to fifth)
+leap(Note1, Note2) =>
+    interval_constraint(Note1, Note2, 5, 7).
+
+% Constrain to large leap (8+ semitones)
+large_leap(Note1, Note2) =>
+    $abs(Note2 - Note1) #>= 8.
+
+% Forbid specific interval
+forbid_interval(Note1, Note2, ForbiddenInterval) =>
+    $abs(Note2 - Note1) #!= ForbiddenInterval.
+
+% Forbid tritone (6 semitones)
+no_tritone(Note1, Note2) =>
+    forbid_interval(Note1, Note2, 6).
+
+% ==============================================================================
+% RANGE CONSTRAINTS
+% ==============================================================================
+
+% Constrain note to a range
+in_range(Note, Low, High) =>
+    Note #>= Low,
+    Note #=< High.
+
+% Constrain list of notes to a range
+all_in_range([], _, _) => true.
+all_in_range([N|Rest], Low, High) =>
+    in_range(N, Low, High),
+    all_in_range(Rest, Low, High).
+
+% Constrain to voice range (using voice structure)
+in_voice_range(Note, range(Low, High)) =>
+    in_range(Note, Low, High).
+
+% ==============================================================================
+% CONTOUR CONSTRAINTS
+% ==============================================================================
+
+% Ascending motion
+ascending(Note1, Note2) =>
+    Note2 #> Note1.
+
+% Descending motion
+descending(Note1, Note2) =>
+    Note2 #< Note1.
+
+% Stationary (same pitch)
+stationary(Note1, Note2) =>
+    Note2 #= Note1.
+
+% Non-descending (ascending or stationary)
+non_descending(Note1, Note2) =>
+    Note2 #>= Note1.
+
+% Non-ascending (descending or stationary)
+non_ascending(Note1, Note2) =>
+    Note2 #=< Note1.
+
+% ==============================================================================
+% DIRECTION CONSTRAINTS
+% ==============================================================================
+
+% After a leap, move in opposite direction (step or leap recovery)
+leap_recovery(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-2)
+        Interval1 = Notes[I+1] - Notes[I],
+        Interval2 = Notes[I+2] - Notes[I+1],
+        % If interval >= 5 semitones, next interval should be in opposite direction
+        ($abs(Interval1) #>= 5) #=> (Interval1 * Interval2 #< 0)
+    end.
+
+% Avoid consecutive leaps in same direction
+no_consecutive_same_direction_leaps(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-2)
+        Interval1 = Notes[I+1] - Notes[I],
+        Interval2 = Notes[I+2] - Notes[I+1],
+        % If both are leaps (>= 5), they shouldn't both be positive or both negative
+        (($abs(Interval1) #>= 5) #/\ ($abs(Interval2) #>= 5)) #=>
+            (Interval1 * Interval2 #=< 0)
+    end.
+
+% ==============================================================================
+% REPETITION CONSTRAINTS
+% ==============================================================================
+
+% No immediate repetition
+no_immediate_repeat(Notes) =>
+    foreach(I in 1..length(Notes)-1)
+        Notes[I] #!= Notes[I+1]
+    end.
+
+% Allow at most N consecutive repetitions
+max_consecutive_repeats(Notes, MaxReps) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-MaxReps)
+        % At least one of the next MaxReps+1 notes must be different from the first
+        sum([Notes[I] #= Notes[J] : J in I+1..I+MaxReps]) #< MaxReps
+    end.
+
+% Limit total repetitions of any single pitch
+max_total_repeats(Notes, MaxTotal) =>
+    Len = length(Notes),
+    foreach(I in 1..Len)
+        sum([Notes[I] #= Notes[J] : J in 1..Len]) #=< MaxTotal
+    end.
+
+% ==============================================================================
+% STRUCTURAL CONSTRAINTS
+% ==============================================================================
+
+% Start on specific note
+starts_on(Notes, TargetNote) =>
+    Notes[1] #= TargetNote.
+
+% End on specific note
+ends_on(Notes, TargetNote) =>
+    Notes[length(Notes)] #= TargetNote.
+
+% Start on one of specified notes
+starts_on_one_of(Notes, TargetNotes) =>
+    member(Notes[1], TargetNotes).
+
+% End on one of specified notes
+ends_on_one_of(Notes, TargetNotes) =>
+    member(Notes[length(Notes)], TargetNotes).
+
+% Start and end on same pitch class
+same_pitch_class_endpoints(Notes) =>
+    Len = length(Notes),
+    (Notes[1] mod 12) #= (Notes[Len] mod 12).
+
+% Climax constraint: highest note appears once in middle third
+single_climax(Notes) =>
+    Len = length(Notes),
+    ThirdStart = Len // 3 + 1,
+    ThirdEnd = 2 * Len // 3,
+    MaxNote = max([Notes[I] : I in 1..Len]),
+    % Max appears in middle third
+    sum([Notes[I] #= MaxNote : I in ThirdStart..ThirdEnd]) #>= 1,
+    % Max appears only once
+    sum([Notes[I] #= MaxNote : I in 1..Len]) #= 1.
+
+% ==============================================================================
+% VARIETY CONSTRAINTS
+% ==============================================================================
+
+% Minimum unique pitches
+min_unique_pitches(Notes, MinUnique) =>
+    nvalue(N, Notes),
+    N #>= MinUnique.
+
+% Maximum range (ambitus)
+max_range(Notes, MaxAmbitus) =>
+    MinNote = min(Notes),
+    MaxNote = max(Notes),
+    MaxNote - MinNote #=< MaxAmbitus.
+
+% Minimum range (ensure some variety)
+min_range(Notes, MinAmbitus) =>
+    MinNote = min(Notes),
+    MaxNote = max(Notes),
+    MaxNote - MinNote #>= MinAmbitus.
+
+% ==============================================================================
+% SCALE CONSTRAINTS (for use with domain variables)
+% ==============================================================================
+
+% Constrain note to pitch classes in a scale
+% ScaleClasses should be a list like [0, 2, 4, 5, 7, 9, 11] for C major
+in_scale_class(Note, RootClass, ScaleIntervals) =>
+    NoteClass = Note mod 12,
+    Offset = (NoteClass - RootClass + 12) mod 12,
+    member(Offset, ScaleIntervals).
+
+% Apply scale constraint to all notes
+all_in_scale(Notes, Root, ScaleIntervals) =>
+    RootClass = Root mod 12,
+    foreach(N in Notes)
+        in_scale_class(N, RootClass, ScaleIntervals)
+    end.
+
+% ==============================================================================
+% MOTION TYPE CONSTRAINTS
+% ==============================================================================
+
+% Prefer stepwise motion (soft constraint via reification)
+count_stepwise_motions(Notes, Count) =>
+    Len = length(Notes),
+    Count #= sum([$abs(Notes[I+1] - Notes[I]) #=< 2 : I in 1..Len-1]).
+
+% Count leaps
+count_leaps(Notes, Count) =>
+    Len = length(Notes),
+    Count #= sum([$abs(Notes[I+1] - Notes[I]) #>= 5 : I in 1..Len-1]).
+
+% Limit number of leaps
+max_leaps(Notes, MaxLeaps) =>
+    count_leaps(Notes, Count),
+    Count #=< MaxLeaps.
+
+% ==============================================================================
+% HELPER PREDICATES FOR CP
+% ==============================================================================
+
+% Absolute value for constraint variables
+abs_constraint(X, AbsX) =>
+    AbsX #= max(X, -X).
+
+% Max of a list
+max_of_list([X]) = X.
+max_of_list([X|Rest]) = max(X, max_of_list(Rest)).
+
+% Min of a list
+min_of_list([X]) = X.
+min_of_list([X|Rest]) = min(X, min_of_list(Rest)).

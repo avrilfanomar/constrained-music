@@ -1,0 +1,242 @@
+% temporal.pi - Temporal structure definitions
+% Phase 1: Musical representation layer
+
+module temporal.
+
+import music_types.
+
+% ==============================================================================
+% METER DEFINITION
+% ==============================================================================
+% Structure: meter(BeatsPerBar, BeatUnit)
+% BeatsPerBar: Number of beats per bar
+% BeatUnit: Note value that gets one beat (4 = quarter, 8 = eighth)
+
+% Common meters
+common_time() = $meter(4, 4).      % 4/4
+waltz_time() = $meter(3, 4).       % 3/4
+cut_time() = $meter(2, 2).         % 2/2 (alla breve)
+compound_duple() = $meter(6, 8).   % 6/8
+compound_triple() = $meter(9, 8).  % 9/8
+compound_quadruple() = $meter(12, 8). % 12/8
+five_four() = $meter(5, 4).        % 5/4
+seven_eight() = $meter(7, 8).      % 7/8
+
+% Get beats per bar from meter
+beats_per_bar(meter(Beats, _)) = Beats.
+
+% Get beat unit from meter
+beat_unit(meter(_, Unit)) = Unit.
+
+% Check if meter is compound (divisible by 3 groups)
+is_compound(meter(Beats, 8)) => Beats mod 3 == 0.
+is_compound(meter(_, _)) => fail.
+
+% Check if meter is simple
+is_simple(Meter) => not is_compound(Meter).
+
+% Get number of strong beats
+strong_beats(meter(4, 4)) = [1, 3].
+strong_beats(meter(3, 4)) = [1].
+strong_beats(meter(2, 2)) = [1].
+strong_beats(meter(6, 8)) = [1, 4].
+strong_beats(meter(9, 8)) = [1, 4, 7].
+strong_beats(meter(12, 8)) = [1, 4, 7, 10].
+strong_beats(meter(Beats, _)) = [1] => Beats > 0.
+
+% Check if a beat is strong
+is_strong_beat(Meter, Beat) =>
+    member(Beat, strong_beats(Meter)).
+
+% ==============================================================================
+% TEMPO
+% ==============================================================================
+% Structure: tempo(BPM, BeatUnit)
+
+% Common tempo markings
+tempo_largo() = $tempo(50, 4).
+tempo_adagio() = $tempo(70, 4).
+tempo_andante() = $tempo(90, 4).
+tempo_moderato() = $tempo(110, 4).
+tempo_allegro() = $tempo(130, 4).
+tempo_presto() = $tempo(180, 4).
+
+% Get milliseconds per beat
+ms_per_beat(tempo(BPM, _)) = Ms =>
+    Ms = 60000 / BPM.
+
+% Get seconds per bar
+seconds_per_bar(Tempo, Meter) = Seconds =>
+    MsPerBeat = ms_per_beat(Tempo),
+    Beats = beats_per_bar(Meter),
+    Seconds = (MsPerBeat * Beats) / 1000.
+
+% ==============================================================================
+% PHRASE STRUCTURE
+% ==============================================================================
+% Structure: phrase(Id, StartBar, Length, PhraseType)
+% PhraseType: antecedent, consequent, sentence, period, bridge, coda, etc.
+
+% Common phrase lengths (in bars)
+short_phrase_length() = 2.
+typical_phrase_length() = 4.
+extended_phrase_length() = 8.
+long_phrase_length() = 16.
+
+% Create a phrase
+make_phrase(Id, StartBar, Length, Type) = $phrase(Id, StartBar, Length, Type).
+
+% Get phrase end bar
+phrase_end_bar(phrase(_, Start, Length, _)) = Start + Length - 1.
+
+% Check if a bar is within a phrase
+bar_in_phrase(Bar, phrase(_, Start, Length, _)) =>
+    Bar >= Start, Bar < Start + Length.
+
+% Phrase types
+phrase_type(antecedent).    % Question phrase
+phrase_type(consequent).    % Answer phrase
+phrase_type(sentence).      % Single unified phrase
+phrase_type(bridge).        % Transitional phrase
+phrase_type(coda).          % Concluding phrase
+phrase_type(intro).         % Introduction
+phrase_type(verse).         % Verse section
+phrase_type(chorus).        % Chorus section
+
+% ==============================================================================
+% FORM TEMPLATES
+% ==============================================================================
+% Form is a list of section definitions
+% Structure: section(Name, StartBar, Length, RepeatCount)
+
+% Binary form (AB)
+form_ab(Bars) = Sections =>
+    Half = Bars // 2,
+    Sections = [
+        $section(a, 1, Half, 1),
+        $section(b, Half + 1, Bars - Half, 1)
+    ].
+
+% Ternary form (ABA)
+form_aba(Bars) = Sections =>
+    Third = Bars // 3,
+    Sections = [
+        $section(a, 1, Third, 1),
+        $section(b, Third + 1, Third, 1),
+        $section(a_prime, 2 * Third + 1, Bars - 2 * Third, 1)
+    ].
+
+% Rounded binary (AABB)
+form_aabb(Bars) = Sections =>
+    Quarter = Bars // 4,
+    Sections = [
+        $section(a, 1, Quarter, 2),
+        $section(b, 2 * Quarter + 1, Quarter, 2)
+    ].
+
+% Strophic form (AAA...)
+form_strophic(Bars, NumStrophes) = Sections =>
+    StropheLen = Bars // NumStrophes,
+    Sections = [
+        $section(strophe, (I - 1) * StropheLen + 1, StropheLen, 1) : I in 1..NumStrophes
+    ].
+
+% Verse-Chorus form
+form_verse_chorus(NumVerses, VerseLen, ChorusLen) = Sections =>
+    make_verse_chorus_sections(NumVerses, VerseLen, ChorusLen, 1, [], Sections).
+
+make_verse_chorus_sections(0, _, _, _, Acc, Sections) =>
+    Sections = reverse(Acc).
+make_verse_chorus_sections(N, VLen, CLen, StartBar, Acc, Sections) =>
+    N > 0,
+    VerseSection = $section(verse, StartBar, VLen, 1),
+    ChorusSection = $section(chorus, StartBar + VLen, CLen, 1),
+    NewAcc = [ChorusSection, VerseSection | Acc],
+    make_verse_chorus_sections(N - 1, VLen, CLen, StartBar + VLen + CLen, NewAcc, Sections).
+
+% Rondo form (ABACA)
+form_rondo(ALen, BLen, CLen) = Sections =>
+    Sections = [
+        $section(a, 1, ALen, 1),
+        $section(b, ALen + 1, BLen, 1),
+        $section(a, ALen + BLen + 1, ALen, 1),
+        $section(c, 2 * ALen + BLen + 1, CLen, 1),
+        $section(a, 2 * ALen + BLen + CLen + 1, ALen, 1)
+    ].
+
+% Get total bars in a form
+form_total_bars(Sections) = Total =>
+    Total = sum([Len * Rep : section(_, _, Len, Rep) in Sections]).
+
+% ==============================================================================
+% GENERATION BOUNDS
+% ==============================================================================
+% Structure: bounds(MinBars, MaxBars, MinNotesPerBar, MaxNotesPerBar)
+
+default_bounds() = $bounds(4, 16, 1, 8).
+minimal_bounds() = $bounds(2, 4, 1, 4).
+extended_bounds() = $bounds(8, 32, 1, 16).
+
+% Validate bounds
+valid_bounds(bounds(MinB, MaxB, MinN, MaxN)) =>
+    MinB > 0, MaxB >= MinB,
+    MinN > 0, MaxN >= MinN.
+
+% Check if a value is within bounds
+in_bounds(Value, Min, Max) => Value >= Min, Value =< Max.
+
+% ==============================================================================
+% RHYTHMIC PATTERNS
+% ==============================================================================
+% Common rhythmic patterns as lists of durations
+
+% Simple patterns (quarter notes in 4/4)
+pattern_all_quarters() = [$duration(1, 4), $duration(1, 4), $duration(1, 4), $duration(1, 4)].
+pattern_half_notes() = [$duration(1, 2), $duration(1, 2)].
+pattern_whole_note() = [$duration(1, 1)].
+
+% Syncopated patterns
+pattern_syncopated_1() = [$duration(1, 8), $duration(1, 4), $duration(1, 8), $duration(1, 4), $duration(1, 4)].
+pattern_dotted_quarter() = [$duration(3, 8), $duration(1, 8), $duration(3, 8), $duration(1, 8)].
+
+% Triplet feel (in 4/4, represented as tuplets conceptually)
+pattern_eighth_notes() = [$duration(1, 8) : _ in 1..8].
+
+% Calculate total duration of a pattern
+pattern_duration(Pattern) = Total =>
+    Total = fold(duration_add_fold, $duration(0, 1), Pattern).
+
+duration_add_fold(D1, D2) = R =>
+    R = duration_add(D1, D2).
+
+% Check if pattern fills a bar in given meter
+pattern_fills_bar(Pattern, Meter) =>
+    Total = pattern_duration(Pattern),
+    BeatsPerBar = beats_per_bar(Meter),
+    BeatUnit = beat_unit(Meter),
+    BarDuration = $duration(BeatsPerBar, BeatUnit),
+    duration_compare(Total, BarDuration) == 0.
+
+% ==============================================================================
+% TIME UTILITIES
+% ==============================================================================
+
+% Create a timeline of bar positions
+bar_positions(StartBar, EndBar, Meter, Tempo) = Positions =>
+    SecsPerBar = seconds_per_bar(Tempo, Meter),
+    Positions = [
+        (Bar, (Bar - StartBar) * SecsPerBar) : Bar in StartBar..EndBar
+    ].
+
+% Get beat position within a bar
+beat_position(TimePos, Meter) = BeatInBar =>
+    time_pos(_, Beat, Sub) = TimePos,
+    BeatInBar = Beat - 1 + Sub.
+
+% Check if time position is on a downbeat
+is_downbeat(time_pos(_, 1, 0)) => true.
+is_downbeat(_) => fail.
+
+% Calculate total time for a piece
+piece_duration(NumBars, Meter, Tempo) = DurationSecs =>
+    DurationSecs = seconds_per_bar(Tempo, Meter) * NumBars.

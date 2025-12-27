@@ -1,0 +1,214 @@
+% midi_utils.pi - MIDI number utilities
+% Phase 1: Musical representation layer
+
+module midi_utils.
+
+% ==============================================================================
+% NOTE NAME TO MIDI CONVERSION
+% ==============================================================================
+% Note names to MIDI (octave 4 = middle, where A4 = 69 = 440Hz)
+
+note_to_midi(c, Octave) = 12 * (Octave + 1).
+note_to_midi(cs, Octave) = 12 * (Octave + 1) + 1.
+note_to_midi(db, Octave) = 12 * (Octave + 1) + 1.
+note_to_midi(d, Octave) = 12 * (Octave + 1) + 2.
+note_to_midi(ds, Octave) = 12 * (Octave + 1) + 3.
+note_to_midi(eb, Octave) = 12 * (Octave + 1) + 3.
+note_to_midi(e, Octave) = 12 * (Octave + 1) + 4.
+note_to_midi(f, Octave) = 12 * (Octave + 1) + 5.
+note_to_midi(fs, Octave) = 12 * (Octave + 1) + 6.
+note_to_midi(gb, Octave) = 12 * (Octave + 1) + 6.
+note_to_midi(g, Octave) = 12 * (Octave + 1) + 7.
+note_to_midi(gs, Octave) = 12 * (Octave + 1) + 8.
+note_to_midi(ab, Octave) = 12 * (Octave + 1) + 8.
+note_to_midi(a, Octave) = 12 * (Octave + 1) + 9.
+note_to_midi(as, Octave) = 12 * (Octave + 1) + 10.
+note_to_midi(bb, Octave) = 12 * (Octave + 1) + 10.
+note_to_midi(b, Octave) = 12 * (Octave + 1) + 11.
+
+% ==============================================================================
+% MIDI TO NOTE NAME CONVERSION
+% ==============================================================================
+
+midi_to_note(Midi) = (NoteName, Octave) =>
+    Octave = Midi // 12 - 1,
+    NoteNum = Midi mod 12,
+    NoteNames = [c, cs, d, ds, e, f, fs, g, gs, a, as, b],
+    NoteName = NoteNames[NoteNum + 1].
+
+% Get just the note name (pitch class)
+midi_to_pitch_class(Midi) = NoteNum =>
+    NoteNum = Midi mod 12.
+
+% Get octave from MIDI number
+midi_to_octave(Midi) = Octave =>
+    Octave = Midi // 12 - 1.
+
+% ==============================================================================
+% MIDI TO FREQUENCY CONVERSION
+% ==============================================================================
+% A4 = MIDI 69 = 440Hz (standard tuning)
+
+midi_to_freq(Midi) = Freq =>
+    Freq = 440.0 * (2.0 ** ((Midi - 69) / 12.0)).
+
+% With custom reference frequency
+midi_to_freq(Midi, A4Freq) = Freq =>
+    Freq = A4Freq * (2.0 ** ((Midi - 69) / 12.0)).
+
+% Frequency to MIDI (rounds to nearest)
+freq_to_midi(Freq) = Midi =>
+    Midi = round(69 + 12 * log2(Freq / 440.0)).
+
+% Helper: log base 2
+log2(X) = log(X) / log(2).
+
+% ==============================================================================
+% MIDI VALIDATION
+% ==============================================================================
+
+valid_midi(Midi) => Midi >= 0, Midi =< 127.
+
+valid_velocity(Vel) => Vel >= 0, Vel =< 127.
+
+valid_channel(Ch) => Ch >= 0, Ch =< 15.
+
+% ==============================================================================
+% INTERVAL CALCULATIONS
+% ==============================================================================
+
+% Interval between two MIDI notes (absolute)
+interval(Midi1, Midi2) = abs(Midi2 - Midi1).
+
+% Directed interval (can be negative)
+directed_interval(Midi1, Midi2) = Midi2 - Midi1.
+
+% Interval class (0-6, for pitch class analysis)
+interval_class(Midi1, Midi2) = IC =>
+    Diff = abs((Midi2 - Midi1) mod 12),
+    IC = min(Diff, 12 - Diff).
+
+% ==============================================================================
+% INTERVAL NAMES
+% ==============================================================================
+
+interval_name(0) = unison.
+interval_name(1) = minor_second.
+interval_name(2) = major_second.
+interval_name(3) = minor_third.
+interval_name(4) = major_third.
+interval_name(5) = perfect_fourth.
+interval_name(6) = tritone.
+interval_name(7) = perfect_fifth.
+interval_name(8) = minor_sixth.
+interval_name(9) = major_sixth.
+interval_name(10) = minor_seventh.
+interval_name(11) = major_seventh.
+interval_name(12) = octave.
+interval_name(N) = compound(interval_name(N mod 12)) => N > 12.
+
+% Interval in semitones from name
+name_to_semitones(unison) = 0.
+name_to_semitones(minor_second) = 1.
+name_to_semitones(major_second) = 2.
+name_to_semitones(minor_third) = 3.
+name_to_semitones(major_third) = 4.
+name_to_semitones(perfect_fourth) = 5.
+name_to_semitones(tritone) = 6.
+name_to_semitones(perfect_fifth) = 7.
+name_to_semitones(minor_sixth) = 8.
+name_to_semitones(major_sixth) = 9.
+name_to_semitones(minor_seventh) = 10.
+name_to_semitones(major_seventh) = 11.
+name_to_semitones(octave) = 12.
+
+% ==============================================================================
+% CONSONANCE / DISSONANCE
+% ==============================================================================
+
+% Perfect consonances
+perfect_consonance(0).   % Unison
+perfect_consonance(7).   % Perfect fifth
+perfect_consonance(12).  % Octave
+
+% Imperfect consonances
+imperfect_consonance(3). % Minor third
+imperfect_consonance(4). % Major third
+imperfect_consonance(8). % Minor sixth
+imperfect_consonance(9). % Major sixth
+
+% Dissonances
+dissonance(1).  % Minor second
+dissonance(2).  % Major second
+dissonance(6).  % Tritone
+dissonance(10). % Minor seventh
+dissonance(11). % Major seventh
+
+% Check consonance of interval
+is_consonant(Interval) =>
+    I = Interval mod 12,
+    (perfect_consonance(I) ; imperfect_consonance(I)).
+
+is_dissonant(Interval) =>
+    I = Interval mod 12,
+    dissonance(I).
+
+% ==============================================================================
+% TRANSPOSITION
+% ==============================================================================
+
+% Transpose a MIDI note by semitones
+transpose(Midi, Semitones) = NewMidi =>
+    NewMidi = Midi + Semitones,
+    valid_midi(NewMidi).
+
+% Transpose to a specific octave
+to_octave(Midi, TargetOctave) = NewMidi =>
+    PitchClass = Midi mod 12,
+    NewMidi = (TargetOctave + 1) * 12 + PitchClass.
+
+% ==============================================================================
+% NOTE NAME FORMATTING
+% ==============================================================================
+
+% Format MIDI as string like "C4" or "F#5"
+midi_to_string(Midi) = Str =>
+    NoteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+    NoteName = NoteNames[(Midi mod 12) + 1],
+    Octave = Midi // 12 - 1,
+    Str = NoteName ++ to_string(Octave).
+
+% Parse string like "C4" to MIDI
+string_to_midi(Str) = Midi =>
+    % Simple parser for common formats
+    Len = length(Str),
+    if Len == 2 then
+        NotePart = [Str[1]],
+        OctavePart = [Str[2]]
+    elseif Len == 3 then
+        NotePart = [Str[1], Str[2]],
+        OctavePart = [Str[3]]
+    else
+        throw(invalid_note_string)
+    end,
+    NoteOffset = parse_note_name(NotePart),
+    Octave = to_int(OctavePart),
+    Midi = (Octave + 1) * 12 + NoteOffset.
+
+parse_note_name("C") = 0.
+parse_note_name("C#") = 1.
+parse_note_name("Db") = 1.
+parse_note_name("D") = 2.
+parse_note_name("D#") = 3.
+parse_note_name("Eb") = 3.
+parse_note_name("E") = 4.
+parse_note_name("F") = 5.
+parse_note_name("F#") = 6.
+parse_note_name("Gb") = 6.
+parse_note_name("G") = 7.
+parse_note_name("G#") = 8.
+parse_note_name("Ab") = 8.
+parse_note_name("A") = 9.
+parse_note_name("A#") = 10.
+parse_note_name("Bb") = 10.
+parse_note_name("B") = 11.

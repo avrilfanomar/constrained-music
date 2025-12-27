@@ -1,0 +1,200 @@
+% simple_melody.pi - Example usage of the melody generator
+% Run with: picat simple_melody.pi
+
+import music_types.
+import temporal.
+import melody.
+import scale_utils.
+
+main =>
+    println("=== Constrained Music Generation - Examples ==="),
+    println(""),
+
+    example_basic(),
+    example_minor_key(),
+    example_modes(),
+    example_constraint_levels(),
+    example_analysis().
+
+% ==============================================================================
+% EXAMPLE 1: Basic Major Melody
+% ==============================================================================
+
+example_basic =>
+    println("Example 1: Basic C Major Melody"),
+    println("================================"),
+    println("Configuration: C Major, 4/4 time, 4 bars, 4 notes per bar"),
+    println(""),
+
+    Config = $config(
+        meter = $meter(4, 4),
+        key_root = 60,          % C4 (middle C)
+        mode = major,
+        num_bars = 4,
+        notes_per_bar = 4,
+        tempo_bpm = 120,
+        voice = soprano_voice()
+    ),
+
+    generate_melody(Config, Melody),
+
+    println("Generated melody:"),
+    print_melody(Melody),
+    println(""),
+    println("Compact view:"),
+    print_melody_compact(Melody),
+    println(""),
+
+    % Analysis
+    Pitches = melody_to_pitches(Melody),
+    printf("Pitch range: %d semitones%n", max(Pitches) - min(Pitches)),
+    printf("Unique pitches: %d%n", length(remove_dups(Pitches))),
+    println(""),
+    println("").
+
+% ==============================================================================
+% EXAMPLE 2: Minor Key Melody
+% ==============================================================================
+
+example_minor_key =>
+    println("Example 2: G Natural Minor Melody"),
+    println("=================================="),
+    println("Configuration: G Minor, 4/4 time, 4 bars, 2 notes per bar (slower)"),
+    println(""),
+
+    Config = $config(
+        meter = $meter(4, 4),
+        key_root = 67,          % G4
+        mode = natural_minor,
+        num_bars = 4,
+        notes_per_bar = 2,
+        tempo_bpm = 80,
+        voice = alto_voice()
+    ),
+
+    generate_melody(Config, Melody),
+
+    println("Generated melody:"),
+    print_melody_compact(Melody),
+    println(""),
+    println("").
+
+% ==============================================================================
+% EXAMPLE 3: Different Modes
+% ==============================================================================
+
+example_modes =>
+    println("Example 3: Exploring Different Modes"),
+    println("====================================="),
+    println("Same parameters, different modes:"),
+    println(""),
+
+    Modes = [major, dorian, phrygian, lydian, mixolydian],
+
+    foreach(Mode in Modes)
+        Config = $config(
+            meter = $meter(4, 4),
+            key_root = 60,
+            mode = Mode,
+            num_bars = 2,
+            notes_per_bar = 4,
+            tempo_bpm = 100,
+            voice = $voice(1, melody, 0, $range(60, 77))
+        ),
+        generate_melody(Config, Melody),
+        printf("%w: ", Mode),
+        print_melody_compact(Melody)
+    end,
+    println(""),
+    println("").
+
+% ==============================================================================
+% EXAMPLE 4: Different Constraint Levels
+% ==============================================================================
+
+example_constraint_levels =>
+    println("Example 4: Constraint Levels (relaxed, standard, strict)"),
+    println("========================================================="),
+    println(""),
+
+    Config = $config(
+        meter = $meter(4, 4),
+        key_root = 60,
+        mode = major,
+        num_bars = 4,
+        notes_per_bar = 4,
+        tempo_bpm = 120,
+        voice = soprano_voice()
+    ),
+
+    Levels = [relaxed, standard, strict],
+
+    foreach(Level in Levels)
+        generate_melody_with_level(Config, Level, Melody),
+        printf("%w: ", Level),
+        print_melody_compact(Melody),
+
+        % Show some statistics
+        Pitches = melody_to_pitches(Melody),
+        Intervals = [abs(Pitches[I+1] - Pitches[I]) : I in 1..length(Pitches)-1],
+        AvgInterval = sum(Intervals) / length(Intervals),
+        printf("  (avg interval: %.1f semitones, range: %d)%n",
+               AvgInterval, max(Pitches) - min(Pitches))
+    end,
+    println(""),
+    println("").
+
+% ==============================================================================
+% EXAMPLE 5: Melody Analysis
+% ==============================================================================
+
+example_analysis =>
+    println("Example 5: Melody Analysis"),
+    println("==========================="),
+    println(""),
+
+    Config = default_config(),
+    generate_melody(Config, Melody),
+
+    println("Generated melody:"),
+    print_melody_compact(Melody),
+    println(""),
+
+    % Detailed analysis
+    Pitches = melody_to_pitches(Melody),
+    Len = length(Pitches),
+
+    println("Analysis:"),
+    printf("  Total notes: %d%n", Len),
+    printf("  Unique pitches: %d%n", length(remove_dups(Pitches))),
+    printf("  Pitch range: %d to %d (range: %d semitones)%n",
+           min(Pitches), max(Pitches), max(Pitches) - min(Pitches)),
+
+    % Interval analysis
+    Intervals = [abs(Pitches[I+1] - Pitches[I]) : I in 1..Len-1],
+    StepwiseCount = length([I : I in Intervals, I =< 2]),
+    SkipCount = length([I : I in Intervals, I >= 3, I =< 4]),
+    LeapCount = length([I : I in Intervals, I >= 5]),
+
+    printf("  Stepwise motions (0-2): %d%n", StepwiseCount),
+    printf("  Skips (3-4): %d%n", SkipCount),
+    printf("  Leaps (5+): %d%n", LeapCount),
+
+    % Direction analysis
+    Ascending = length([I : I in 1..Len-1, Pitches[I+1] > Pitches[I]]),
+    Descending = length([I : I in 1..Len-1, Pitches[I+1] < Pitches[I]]),
+    Stationary = length([I : I in 1..Len-1, Pitches[I+1] == Pitches[I]]),
+
+    printf("  Ascending: %d, Descending: %d, Stationary: %d%n",
+           Ascending, Descending, Stationary),
+
+    println(""),
+    println("=== Examples Complete ===").
+
+% ==============================================================================
+% HELPER FUNCTIONS
+% ==============================================================================
+
+% Remove duplicates from a list
+remove_dups([]) = [].
+remove_dups([H|T]) = [H|remove_dups([X : X in T, X != H])].

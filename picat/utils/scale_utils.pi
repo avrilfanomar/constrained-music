@@ -1,0 +1,229 @@
+% scale_utils.pi - Scale and mode utilities
+% Phase 1: Musical representation layer
+
+module scale_utils.
+
+% ==============================================================================
+% MODE INTERVAL DEFINITIONS
+% ==============================================================================
+% Intervals in semitones from the root
+
+% Major modes (Church modes)
+mode_intervals(major) = [0, 2, 4, 5, 7, 9, 11].
+mode_intervals(ionian) = [0, 2, 4, 5, 7, 9, 11].
+mode_intervals(dorian) = [0, 2, 3, 5, 7, 9, 10].
+mode_intervals(phrygian) = [0, 1, 3, 5, 7, 8, 10].
+mode_intervals(lydian) = [0, 2, 4, 6, 7, 9, 11].
+mode_intervals(mixolydian) = [0, 2, 4, 5, 7, 9, 10].
+mode_intervals(aeolian) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals(locrian) = [0, 1, 3, 5, 6, 8, 10].
+
+% Minor scales
+mode_intervals(minor) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals(natural_minor) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals(harmonic_minor) = [0, 2, 3, 5, 7, 8, 11].
+mode_intervals(melodic_minor) = [0, 2, 3, 5, 7, 9, 11].
+
+% Pentatonic scales
+mode_intervals(pentatonic_major) = [0, 2, 4, 7, 9].
+mode_intervals(pentatonic_minor) = [0, 3, 5, 7, 10].
+
+% Blues scale
+mode_intervals(blues) = [0, 3, 5, 6, 7, 10].
+
+% Whole tone scale
+mode_intervals(whole_tone) = [0, 2, 4, 6, 8, 10].
+
+% Chromatic scale
+mode_intervals(chromatic) = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].
+
+% Diminished scales
+mode_intervals(diminished_whole_half) = [0, 2, 3, 5, 6, 8, 9, 11].
+mode_intervals(diminished_half_whole) = [0, 1, 3, 4, 6, 7, 9, 10].
+
+% ==============================================================================
+% SCALE NOTE GENERATION
+% ==============================================================================
+
+% Get all notes in a scale (one octave)
+scale_notes(Root, Mode) = Notes =>
+    Intervals = mode_intervals(Mode),
+    Notes = [Root + I : I in Intervals].
+
+% Get scale notes across multiple octaves
+scale_notes_octaves(Root, Mode, NumOctaves) = Notes =>
+    Intervals = mode_intervals(Mode),
+    Notes = [Root + I + Oct * 12 : Oct in 0..NumOctaves-1, I in Intervals].
+
+% Get all scale notes within a MIDI range
+scale_notes_in_range(Root, Mode, LowMidi, HighMidi) = Notes =>
+    Intervals = mode_intervals(Mode),
+    RootClass = Root mod 12,
+    Notes = [Midi : Midi in LowMidi..HighMidi,
+             member((Midi - RootClass) mod 12, Intervals)].
+
+% ==============================================================================
+% SCALE MEMBERSHIP
+% ==============================================================================
+
+% Check if a MIDI note is in a given scale
+in_scale(Midi, Root, Mode) =>
+    Intervals = mode_intervals(Mode),
+    RootClass = Root mod 12,
+    NoteClass = (Midi - RootClass + 12) mod 12,
+    member(NoteClass, Intervals).
+
+% Check if note is NOT in scale (chromatic)
+chromatic_note(Midi, Root, Mode) =>
+    not in_scale(Midi, Root, Mode).
+
+% ==============================================================================
+% SCALE DEGREE CALCULATIONS
+% ==============================================================================
+
+% Get scale degree of a note (1-indexed)
+% Returns 0 if note is not in scale
+scale_degree(Midi, Root, Mode) = Degree =>
+    Intervals = mode_intervals(Mode),
+    RootClass = Root mod 12,
+    NoteClass = (Midi - RootClass + 12) mod 12,
+    if find_index(NoteClass, Intervals, Idx) then
+        Degree = Idx
+    else
+        Degree = 0
+    end.
+
+% Helper to find index in list
+find_index(Elem, List, Index) =>
+    find_index_helper(Elem, List, 1, Index).
+
+find_index_helper(Elem, [Elem|_], Idx, Idx) => true.
+find_index_helper(Elem, [_|Rest], CurrentIdx, Index) =>
+    find_index_helper(Elem, Rest, CurrentIdx + 1, Index).
+find_index_helper(_, [], _, _) => fail.
+
+% Get MIDI note from scale degree
+degree_to_midi(Root, Mode, Degree, Octave) = Midi =>
+    Intervals = mode_intervals(Mode),
+    ScaleSize = length(Intervals),
+    AdjustedDegree = ((Degree - 1) mod ScaleSize) + 1,
+    OctaveShift = (Degree - 1) // ScaleSize,
+    Midi = Root + Intervals[AdjustedDegree] + (Octave + OctaveShift) * 12.
+
+% ==============================================================================
+% SCALE RELATIONSHIPS
+% ==============================================================================
+
+% Get relative minor of a major scale
+relative_minor(MajorRoot) = MinorRoot =>
+    MinorRoot = (MajorRoot - 3 + 12) mod 12 + (MajorRoot // 12) * 12.
+
+% Get relative major of a minor scale
+relative_major(MinorRoot) = MajorRoot =>
+    MajorRoot = (MinorRoot + 3) mod 12 + (MinorRoot // 12) * 12.
+
+% Get parallel mode (same root, different mode)
+parallel_mode(Root, FromMode, ToMode) = (Root, ToMode) =>
+    _ = mode_intervals(FromMode),  % Validate from mode
+    _ = mode_intervals(ToMode).    % Validate to mode
+
+% ==============================================================================
+% DIATONIC FUNCTIONS
+% ==============================================================================
+
+% Get diatonic chord quality at each scale degree (for major scale)
+diatonic_quality(major, 1) = major.
+diatonic_quality(major, 2) = minor.
+diatonic_quality(major, 3) = minor.
+diatonic_quality(major, 4) = major.
+diatonic_quality(major, 5) = major.
+diatonic_quality(major, 6) = minor.
+diatonic_quality(major, 7) = diminished.
+
+diatonic_quality(minor, 1) = minor.
+diatonic_quality(minor, 2) = diminished.
+diatonic_quality(minor, 3) = major.
+diatonic_quality(minor, 4) = minor.
+diatonic_quality(minor, 5) = minor.  % In natural minor
+diatonic_quality(minor, 6) = major.
+diatonic_quality(minor, 7) = major.
+
+% Roman numeral names for scale degrees
+degree_name(1) = tonic.
+degree_name(2) = supertonic.
+degree_name(3) = mediant.
+degree_name(4) = subdominant.
+degree_name(5) = dominant.
+degree_name(6) = submediant.
+degree_name(7) = leading_tone.
+
+% ==============================================================================
+% SCALE ANALYSIS
+% ==============================================================================
+
+% Count notes from list that are in scale
+count_in_scale(Notes, Root, Mode) = Count =>
+    Count = length([N : N in Notes, in_scale(N, Root, Mode)]).
+
+% Get notes from list that are NOT in scale
+out_of_scale_notes(Notes, Root, Mode) = OutNotes =>
+    OutNotes = [N : N in Notes, not in_scale(N, Root, Mode)].
+
+% Calculate "fit" of a melody to a scale (percentage)
+scale_fit(Notes, Root, Mode) = Fit =>
+    Total = length(Notes),
+    InScale = count_in_scale(Notes, Root, Mode),
+    Fit = (InScale * 100) / Total.
+
+% ==============================================================================
+% NEIGHBOR NOTES
+% ==============================================================================
+
+% Get upper neighbor in scale
+upper_neighbor(Midi, Root, Mode) = Neighbor =>
+    ScaleNotes = scale_notes_in_range(Root, Mode, Midi + 1, Midi + 3),
+    Neighbor = head(ScaleNotes).
+
+% Get lower neighbor in scale
+lower_neighbor(Midi, Root, Mode) = Neighbor =>
+    ScaleNotes = scale_notes_in_range(Root, Mode, Midi - 3, Midi - 1),
+    Neighbor = last(ScaleNotes).
+
+% Get both neighbors
+neighbors(Midi, Root, Mode) = (Lower, Upper) =>
+    Lower = lower_neighbor(Midi, Root, Mode),
+    Upper = upper_neighbor(Midi, Root, Mode).
+
+% ==============================================================================
+% STEP SIZE ANALYSIS
+% ==============================================================================
+
+% Get step sizes within a scale
+scale_step_sizes(Mode) = Steps =>
+    Intervals = mode_intervals(Mode),
+    Len = length(Intervals),
+    Steps = [(Intervals[I+1] - Intervals[I]) : I in 1..Len-1] ++ [12 - Intervals[Len]].
+
+% Check if scale is symmetric
+is_symmetric_scale(Mode) =>
+    Steps = scale_step_sizes(Mode),
+    reverse(Steps) == Steps.
+
+% ==============================================================================
+% COMMON SCALE PATTERNS
+% ==============================================================================
+
+% Tonic triad notes for a mode
+tonic_triad_degrees(major) = [1, 3, 5].
+tonic_triad_degrees(minor) = [1, 3, 5].
+
+% Pentatonic subset of diatonic scale
+pentatonic_degrees(major) = [1, 2, 3, 5, 6].
+pentatonic_degrees(minor) = [1, 3, 4, 5, 7].
+
+% Get stable tones (tonic, mediant, dominant)
+stable_degrees() = [1, 3, 5].
+
+% Get tendency tones (leading tone, etc.)
+tendency_degrees(major) = [4, 7].
+tendency_degrees(minor) = [2, 6].

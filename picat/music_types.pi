@@ -1,0 +1,204 @@
+% music_types.pi - Core musical primitive definitions
+% Phase 1: Musical representation layer
+
+module music_types.
+
+% ==============================================================================
+% PITCH REPRESENTATION
+% ==============================================================================
+% Pitch can be represented in two ways:
+% 1. Absolute: MIDI number (0-127, where 60 = Middle C)
+% 2. Relative: Scale degree within a key
+%
+% Structure: pitch(Type, Value, Octave)
+% Type: midi or degree
+% Value: MIDI number (0-127) or scale degree (1-7)
+% Octave: Octave number (4 = middle octave)
+
+% MIDI note constants
+middle_c() = 60.
+midi_min() = 0.
+midi_max() = 127.
+
+% Convert scale degree to MIDI given root, mode, and octave
+degree_to_midi(Root, Mode, Degree, Octave) = Midi =>
+    Intervals = mode_intervals(Mode),
+    ScaleSize = length(Intervals),
+    BaseIndex = ((Degree - 1) mod ScaleSize) + 1,
+    BaseOffset = Intervals[BaseIndex],
+    OctaveOffset = ((Degree - 1) // ScaleSize) * 12,
+    Midi = Root + BaseOffset + (Octave - 4) * 12 + OctaveOffset.
+
+% Mode intervals (semitones from root)
+mode_intervals(major) = [0, 2, 4, 5, 7, 9, 11].
+mode_intervals(minor) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals(natural_minor) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals(harmonic_minor) = [0, 2, 3, 5, 7, 8, 11].
+mode_intervals(melodic_minor) = [0, 2, 3, 5, 7, 9, 11].
+mode_intervals(dorian) = [0, 2, 3, 5, 7, 9, 10].
+mode_intervals(phrygian) = [0, 1, 3, 5, 7, 8, 10].
+mode_intervals(lydian) = [0, 2, 4, 6, 7, 9, 11].
+mode_intervals(mixolydian) = [0, 2, 4, 5, 7, 9, 10].
+mode_intervals(locrian) = [0, 1, 3, 5, 6, 8, 10].
+mode_intervals(pentatonic_major) = [0, 2, 4, 7, 9].
+mode_intervals(pentatonic_minor) = [0, 3, 5, 7, 10].
+mode_intervals(blues) = [0, 3, 5, 6, 7, 10].
+
+% ==============================================================================
+% DURATION REPRESENTATION
+% ==============================================================================
+% Duration is represented as a fraction of a whole note
+% Structure: duration(Numerator, Denominator)
+
+% Common duration constants
+whole_note() = $duration(1, 1).
+half_note() = $duration(1, 2).
+quarter_note() = $duration(1, 4).
+eighth_note() = $duration(1, 8).
+sixteenth_note() = $duration(1, 16).
+dotted_half() = $duration(3, 4).
+dotted_quarter() = $duration(3, 8).
+dotted_eighth() = $duration(3, 16).
+
+% Duration arithmetic
+duration_to_beats(duration(N, D), BeatsPerWhole) = (N * BeatsPerWhole) / D.
+
+duration_add(duration(N1, D1), duration(N2, D2)) = duration(N, D) =>
+    N = N1 * D2 + N2 * D1,
+    D = D1 * D2.
+
+duration_multiply(duration(N, D), Factor) = duration(N * Factor, D).
+
+% Compare durations (returns -1, 0, or 1)
+duration_compare(duration(N1, D1), duration(N2, D2)) = Cmp =>
+    Left = N1 * D2,
+    Right = N2 * D1,
+    if Left < Right then Cmp = -1
+    elseif Left > Right then Cmp = 1
+    else Cmp = 0
+    end.
+
+% ==============================================================================
+% TIME POSITION
+% ==============================================================================
+% Time position within a piece
+% Structure: time_pos(Bar, Beat, Subdivision)
+% Bar: 1-indexed bar number
+% Beat: 1-indexed beat within bar
+% Subdivision: Fraction of beat (0.0 to 1.0)
+
+% Convert time position to absolute beat number
+time_to_absolute(time_pos(Bar, Beat, Sub), BeatsPerBar) = AbsBeat =>
+    AbsBeat = (Bar - 1) * BeatsPerBar + (Beat - 1) + Sub.
+
+% Convert absolute beat to time position
+absolute_to_time(AbsBeat, BeatsPerBar) = time_pos(Bar, Beat, Sub) =>
+    Bar = (AbsBeat // BeatsPerBar) + 1,
+    Remainder = AbsBeat mod BeatsPerBar,
+    Beat = floor(Remainder) + 1,
+    Sub = Remainder - floor(Remainder).
+
+% ==============================================================================
+% VOICE / INSTRUMENT
+% ==============================================================================
+% Structure: voice(Id, Name, MidiChannel, Range)
+% Id: Unique integer identifier
+% Name: Atom for the voice name
+% MidiChannel: MIDI channel (0-15)
+% Range: range(LowMidi, HighMidi)
+
+% Standard voice definitions
+soprano_voice() = $voice(1, soprano, 0, $range(60, 81)).   % C4-A5
+alto_voice() = $voice(2, alto, 1, $range(53, 74)).         % F3-D5
+tenor_voice() = $voice(3, tenor, 2, $range(48, 69)).       % C3-A4
+bass_voice() = $voice(4, bass, 3, $range(40, 60)).         % E2-C4
+
+% Instrument voices
+piano_voice() = $voice(5, piano, 0, $range(21, 108)).      % A0-C8
+violin_voice() = $voice(6, violin, 1, $range(55, 103)).    % G3-G7
+cello_voice() = $voice(7, cello, 2, $range(36, 76)).       % C2-E5
+flute_voice() = $voice(8, flute, 3, $range(60, 96)).       % C4-C7
+
+% Check if MIDI note is in voice range
+in_voice_range(Midi, voice(_, _, _, range(Low, High))) =>
+    Midi >= Low, Midi =< High.
+
+% ==============================================================================
+% CHORD ABSTRACTION
+% ==============================================================================
+% Structure: chord(Root, Quality, Inversion, Extensions)
+% Root: Scale degree (1-7) or MIDI note
+% Quality: major, minor, diminished, augmented, etc.
+% Inversion: 0 (root), 1 (first), 2 (second), 3 (third for 7ths)
+% Extensions: List of additional intervals
+
+% Chord interval patterns
+chord_intervals(major) = [0, 4, 7].
+chord_intervals(minor) = [0, 3, 7].
+chord_intervals(diminished) = [0, 3, 6].
+chord_intervals(augmented) = [0, 4, 8].
+chord_intervals(dominant7) = [0, 4, 7, 10].
+chord_intervals(major7) = [0, 4, 7, 11].
+chord_intervals(minor7) = [0, 3, 7, 10].
+chord_intervals(diminished7) = [0, 3, 6, 9].
+chord_intervals(half_diminished7) = [0, 3, 6, 10].
+chord_intervals(sus2) = [0, 2, 7].
+chord_intervals(sus4) = [0, 5, 7].
+
+% Get MIDI notes for a chord
+chord_to_midi(Root, Quality, Inversion) = Notes =>
+    BaseIntervals = chord_intervals(Quality),
+    Rotated = rotate_list(BaseIntervals, Inversion),
+    Notes = [Root + I : I in Rotated].
+
+% Rotate list by N positions
+rotate_list(List, 0) = List.
+rotate_list(List, N) = Rotated =>
+    Len = length(List),
+    ActualN = N mod Len,
+    Rotated = [List[((I + ActualN - 1) mod Len) + 1] : I in 1..Len].
+
+% ==============================================================================
+% NOTE (Complete musical event)
+% ==============================================================================
+% Structure: note(Pitch, Duration, TimePos, Voice, Velocity)
+% Pitch: pitch structure
+% Duration: duration structure
+% TimePos: time_pos structure
+% Voice: Voice ID (integer)
+% Velocity: MIDI velocity (1-127), 0 = rest
+
+% Create a simple note from MIDI values
+make_note(MidiPitch, DurNum, DurDen, Bar, Beat, VoiceId, Velocity) = Note =>
+    Note = $note(
+        $pitch(midi, MidiPitch, MidiPitch // 12 - 1),
+        $duration(DurNum, DurDen),
+        $time_pos(Bar, Beat, 0),
+        VoiceId,
+        Velocity
+    ).
+
+% Check if note is a rest
+is_rest(note(_, _, _, _, 0)) => true.
+is_rest(note(_, _, _, _, V)) => V =< 0.
+
+% Get MIDI pitch from note
+note_midi(note(pitch(midi, M, _), _, _, _, _)) = M.
+note_midi(note(pitch(degree, D, O), _, _, _, _)) = _ =>
+    throw($error(need_key_context, degree_pitch(D, O))).
+
+% ==============================================================================
+% CONFIGURATION STRUCTURE
+% ==============================================================================
+% Structure for melody generation parameters
+
+default_config() = Config =>
+    Config = $config(
+        meter = $meter(4, 4),
+        key_root = 60,
+        mode = major,
+        num_bars = 4,
+        notes_per_bar = 4,
+        tempo_bpm = 120,
+        voice = soprano_voice()
+    ).

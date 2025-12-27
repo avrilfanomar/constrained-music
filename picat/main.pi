@@ -1,0 +1,223 @@
+% main.pi - Entry point for constrained music generation
+% Phase 1: Basic melody generation with constraint programming
+
+module main.
+
+import music_types.
+import temporal.
+import melody.
+
+% ==============================================================================
+% MAIN ENTRY POINTS
+% ==============================================================================
+
+% Default entry point - generate a simple C major melody
+main =>
+    println("=== Constrained Music Generation - Phase 1 ==="),
+    println(""),
+    Config = default_config(),
+    println("Generating melody with default configuration:"),
+    print_config(Config),
+    println(""),
+    generate_melody(Config, Melody),
+    println("Generated melody:"),
+    print_melody(Melody),
+    println(""),
+    println("Compact view:"),
+    print_melody_compact(Melody).
+
+% Entry point with command-line arguments
+% Note: Picat 3.9 has a bug where arguments starting with '--' cause SIGSEGV
+% We support both formats: 'demo' and '--demo' for backwards compatibility
+main(Args) =>
+    if Args == ["help"] ; Args == ["-h"] ; Args == ["--help"] then
+        print_help()
+    elseif Args == ["demo"] ; Args == ["--demo"] then
+        run_demo()
+    elseif Args == ["multiple"] ; Args == ["--multiple"] then
+        run_multiple_generation()
+    elseif Args == ["test"] ; Args == ["--test"] then
+        run_quick_test()
+    else
+        println("Unknown arguments. Use 'help' for usage information."),
+        exit(1)
+    end.
+
+% ==============================================================================
+% DEMO AND TEST FUNCTIONS
+% ==============================================================================
+
+run_demo =>
+    println("=== Constrained Music Generation Demo ==="),
+    println(""),
+
+    % Demo 1: C Major melody
+    println("Demo 1: C Major, 4 bars, 4 notes per bar (soprano range)"),
+    println("--------------------------------------------------------"),
+    Config1 = $config(
+        meter = $meter(4, 4),
+        key_root = 60,          % C4
+        mode = major,
+        num_bars = 4,
+        notes_per_bar = 4,
+        tempo_bpm = 120,
+        voice = soprano_voice()
+    ),
+    generate_melody(Config1, Melody1),
+    print_melody_compact(Melody1),
+    println(""),
+
+    % Demo 2: G Minor melody
+    println("Demo 2: G Natural Minor, 4 bars, 2 notes per bar (alto range)"),
+    println("--------------------------------------------------------------"),
+    Config2 = $config(
+        meter = $meter(4, 4),
+        key_root = 67,          % G4
+        mode = natural_minor,
+        num_bars = 4,
+        notes_per_bar = 2,
+        tempo_bpm = 80,
+        voice = alto_voice()
+    ),
+    generate_melody(Config2, Melody2),
+    print_melody_compact(Melody2),
+    println(""),
+
+    % Demo 3: D Dorian melody
+    println("Demo 3: D Dorian, 8 bars, 2 notes per bar (tenor range)"),
+    println("--------------------------------------------------------"),
+    Config3 = $config(
+        meter = $meter(4, 4),
+        key_root = 62,          % D4
+        mode = dorian,
+        num_bars = 8,
+        notes_per_bar = 2,
+        tempo_bpm = 100,
+        voice = tenor_voice()
+    ),
+    generate_melody(Config3, Melody3),
+    print_melody_compact(Melody3),
+    println(""),
+
+    println("Demo complete!").
+
+run_multiple_generation =>
+    println("=== Multiple Solution Generation ==="),
+    println(""),
+    Config = default_config(),
+    println("Generating 5 different melodies with same configuration..."),
+    println(""),
+    generate_melodies(Config, 5, Melodies),
+    foreach(I in 1..length(Melodies))
+        printf("Solution %d: ", I),
+        print_melody_compact(Melodies[I])
+    end,
+    println(""),
+    printf("Generated %d unique melodies.%n", length(Melodies)).
+
+run_quick_test =>
+    println("=== Quick Test ==="),
+    println(""),
+    println("Testing basic melody generation..."),
+    Config = default_config(),
+    if generate_melody(Config, Melody) then
+        println("SUCCESS: Melody generated"),
+        printf("  Notes: %d%n", length(Melody)),
+        printf("  Range: %d semitones%n", melody_range(Melody)),
+        print_melody_compact(Melody)
+    else
+        println("FAILED: Could not generate melody")
+    end.
+
+% ==============================================================================
+% CONFIGURATION DISPLAY
+% ==============================================================================
+
+print_config(Config) =>
+    Config = $config(
+        meter = Meter,
+        key_root = KeyRoot,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = TempoBpm,
+        voice = Voice
+    ),
+    printf("  Meter: %w%n", Meter),
+    printf("  Key Root: %d (MIDI)%n", KeyRoot),
+    printf("  Mode: %w%n", Mode),
+    printf("  Bars: %d%n", NumBars),
+    printf("  Notes per bar: %d%n", NotesPerBar),
+    printf("  Tempo: %d BPM%n", TempoBpm),
+    printf("  Voice: %w%n", Voice).
+
+% ==============================================================================
+% HELP TEXT
+% ==============================================================================
+
+print_help =>
+    println("Constrained Music Generation - Phase 1"),
+    println(""),
+    println("Usage: picat main.pi [options]"),
+    println(""),
+    println("Options:"),
+    println("  (no args)   Generate a melody with default configuration"),
+    println("  demo        Run demonstration with multiple configurations"),
+    println("  multiple    Generate multiple solutions for same configuration"),
+    println("  test        Run a quick functionality test"),
+    println("  help, -h    Show this help message"),
+    println(""),
+    println("Note: Picat 3.9 has a bug with '--' prefixed args; use without '--'"),
+    println(""),
+    println("Examples:"),
+    println("  picat main.pi"),
+    println("  picat main.pi demo"),
+    println("  picat main.pi multiple").
+
+% ==============================================================================
+% PRESET CONFIGURATIONS
+% ==============================================================================
+
+% Classical-style configuration
+classical_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 60,
+    mode = major,
+    num_bars = 8,
+    notes_per_bar = 4,
+    tempo_bpm = 100,
+    voice = soprano_voice()
+).
+
+% Modal ambient configuration
+modal_ambient_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 62,
+    mode = dorian,
+    num_bars = 8,
+    notes_per_bar = 2,
+    tempo_bpm = 60,
+    voice = alto_voice()
+).
+
+% Minimalist configuration
+minimalist_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 60,
+    mode = pentatonic_major,
+    num_bars = 16,
+    notes_per_bar = 2,
+    tempo_bpm = 72,
+    voice = piano_voice()
+).
+
+% Children-friendly configuration
+children_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 60,
+    mode = major,
+    num_bars = 4,
+    notes_per_bar = 4,
+    tempo_bpm = 120,
+    voice = $voice(1, melody, 0, $range(60, 72))  % One octave range
+).

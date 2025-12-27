@@ -1,0 +1,302 @@
+% test_music_types.pi - Unit tests for music modules
+% Run with: picat test_music_types.pi
+
+import music_types.
+import midi_utils.
+import scale_utils.
+import temporal.
+import melody.
+
+main =>
+    println("=== Music Types Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_midi_conversions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_scale_functions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_duration_arithmetic() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_time_position() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_meter_functions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_voice_ranges() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_chord_intervals() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_melody_generation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed!")
+    else
+        println("Some tests failed."),
+        exit(1)
+    end.
+
+% ==============================================================================
+% MIDI CONVERSION TESTS
+% ==============================================================================
+
+test_midi_conversions =>
+    println("Testing MIDI conversions..."),
+
+    % Test middle C
+    assert_eq(middle_c(), 60, "middle_c"),
+
+    % Test note_to_midi
+    assert_eq(note_to_midi(c, 4), 60, "C4 = 60"),
+    assert_eq(note_to_midi(a, 4), 69, "A4 = 69"),
+    assert_eq(note_to_midi(c, 5), 72, "C5 = 72"),
+    assert_eq(note_to_midi(g, 3), 55, "G3 = 55"),
+
+    % Test midi_to_note
+    (NoteName, Octave) = midi_to_note(60),
+    assert_eq(NoteName, c, "MIDI 60 note name"),
+    assert_eq(Octave, 4, "MIDI 60 octave"),
+
+    % Test midi_to_freq
+    Freq = midi_to_freq(69),
+    assert_near(Freq, 440.0, 0.01, "A4 = 440Hz"),
+
+    % Test interval
+    assert_eq(interval(60, 64), 4, "C4 to E4 = 4 semitones"),
+    assert_eq(interval(60, 67), 7, "C4 to G4 = 7 semitones"),
+
+    println("  MIDI conversions: OK").
+
+% ==============================================================================
+% SCALE FUNCTION TESTS
+% ==============================================================================
+
+test_scale_functions =>
+    println("Testing scale functions..."),
+
+    % Test major scale intervals
+    MajorIntervals = mode_intervals(major),
+    assert_eq(MajorIntervals, [0, 2, 4, 5, 7, 9, 11], "major scale intervals"),
+
+    % Test minor scale intervals
+    MinorIntervals = mode_intervals(minor),
+    assert_eq(MinorIntervals, [0, 2, 3, 5, 7, 8, 10], "minor scale intervals"),
+
+    % Test scale_notes
+    CScale = scale_notes(60, major),
+    assert_eq(CScale, [60, 62, 64, 65, 67, 69, 71], "C major scale notes"),
+
+    % Test in_scale
+    assert_true(in_scale(60, 60, major), "C in C major"),
+    assert_true(in_scale(62, 60, major), "D in C major"),
+    assert_true(in_scale(64, 60, major), "E in C major"),
+    assert_false(in_scale(61, 60, major), "C# not in C major"),
+    assert_false(in_scale(63, 60, major), "D# not in C major"),
+
+    % Test scale_degree
+    assert_eq(scale_degree(60, 60, major), 1, "C is degree 1 in C major"),
+    assert_eq(scale_degree(64, 60, major), 3, "E is degree 3 in C major"),
+    assert_eq(scale_degree(67, 60, major), 5, "G is degree 5 in C major"),
+
+    % Test scale_notes_in_range
+    RangeNotes = scale_notes_in_range(60, major, 60, 72),
+    assert_eq(length(RangeNotes), 8, "C major notes in octave"),
+
+    println("  Scale functions: OK").
+
+% ==============================================================================
+% DURATION ARITHMETIC TESTS
+% ==============================================================================
+
+test_duration_arithmetic =>
+    println("Testing duration arithmetic..."),
+
+    % Test duration constants
+    Q = quarter_note(),
+    assert_eq(Q, $duration(1, 4), "quarter note"),
+
+    H = half_note(),
+    assert_eq(H, $duration(1, 2), "half note"),
+
+    % Test duration_to_beats
+    Beats = duration_to_beats($duration(1, 4), 4),
+    assert_near(Beats, 1.0, 0.001, "quarter = 1 beat in 4/4"),
+
+    Beats2 = duration_to_beats($duration(1, 2), 4),
+    assert_near(Beats2, 2.0, 0.001, "half = 2 beats in 4/4"),
+
+    % Test duration_add
+    Sum = duration_add($duration(1, 4), $duration(1, 4)),
+    assert_eq(Sum, $duration(8, 16), "1/4 + 1/4 = 8/16"),
+
+    % Test duration_compare
+    assert_eq(duration_compare($duration(1, 4), $duration(1, 2)), -1, "1/4 < 1/2"),
+    assert_eq(duration_compare($duration(1, 2), $duration(1, 4)), 1, "1/2 > 1/4"),
+    assert_eq(duration_compare($duration(2, 4), $duration(1, 2)), 0, "2/4 = 1/2"),
+
+    println("  Duration arithmetic: OK").
+
+% ==============================================================================
+% TIME POSITION TESTS
+% ==============================================================================
+
+test_time_position =>
+    println("Testing time position..."),
+
+    % Test time_to_absolute
+    Abs1 = time_to_absolute($time_pos(1, 1, 0), 4),
+    assert_near(Abs1, 0.0, 0.001, "bar 1 beat 1 = 0"),
+
+    Abs2 = time_to_absolute($time_pos(1, 3, 0), 4),
+    assert_near(Abs2, 2.0, 0.001, "bar 1 beat 3 = 2"),
+
+    Abs3 = time_to_absolute($time_pos(2, 1, 0), 4),
+    assert_near(Abs3, 4.0, 0.001, "bar 2 beat 1 = 4"),
+
+    % Test absolute_to_time
+    TimePos = absolute_to_time(5, 4),
+    TimePos = $time_pos(Bar, Beat, _Sub),
+    assert_eq(Bar, 2, "beat 5 is bar 2"),
+    assert_eq(Beat, 2, "beat 5 is beat 2 of bar"),
+
+    println("  Time position: OK").
+
+% ==============================================================================
+% METER FUNCTION TESTS
+% ==============================================================================
+
+test_meter_functions =>
+    println("Testing meter functions..."),
+
+    % Test beats_per_bar
+    assert_eq(beats_per_bar($meter(4, 4)), 4, "4/4 has 4 beats"),
+    assert_eq(beats_per_bar($meter(3, 4)), 3, "3/4 has 3 beats"),
+    assert_eq(beats_per_bar($meter(6, 8)), 6, "6/8 has 6 beats"),
+
+    % Test common meters
+    assert_eq(common_time(), $meter(4, 4), "common time is 4/4"),
+    assert_eq(waltz_time(), $meter(3, 4), "waltz time is 3/4"),
+
+    % Test is_compound
+    assert_true(is_compound($meter(6, 8)), "6/8 is compound"),
+    assert_true(is_compound($meter(9, 8)), "9/8 is compound"),
+    assert_false(is_compound($meter(4, 4)), "4/4 is not compound"),
+
+    % Test strong_beats
+    assert_eq(strong_beats($meter(4, 4)), [1, 3], "4/4 strong beats"),
+    assert_eq(strong_beats($meter(3, 4)), [1], "3/4 strong beats"),
+
+    println("  Meter functions: OK").
+
+% ==============================================================================
+% VOICE RANGE TESTS
+% ==============================================================================
+
+test_voice_ranges =>
+    println("Testing voice ranges..."),
+
+    % Test soprano range
+    Soprano = soprano_voice(),
+    Soprano = $voice(_, soprano, _, $range(Low, High)),
+    assert_eq(Low, 60, "soprano low"),
+    assert_eq(High, 81, "soprano high"),
+
+    % Test in_voice_range
+    assert_true(in_voice_range(65, Soprano), "65 in soprano range"),
+    assert_true(in_voice_range(60, Soprano), "60 in soprano range"),
+    assert_false(in_voice_range(55, Soprano), "55 not in soprano range"),
+    assert_false(in_voice_range(85, Soprano), "85 not in soprano range"),
+
+    println("  Voice ranges: OK").
+
+% ==============================================================================
+% CHORD INTERVAL TESTS
+% ==============================================================================
+
+test_chord_intervals =>
+    println("Testing chord intervals..."),
+
+    % Test major chord
+    assert_eq(chord_intervals(major), [0, 4, 7], "major chord intervals"),
+
+    % Test minor chord
+    assert_eq(chord_intervals(minor), [0, 3, 7], "minor chord intervals"),
+
+    % Test dominant 7th
+    assert_eq(chord_intervals(dominant7), [0, 4, 7, 10], "dominant7 intervals"),
+
+    % Test chord_to_midi
+    CMajor = chord_to_midi(60, major, 0),
+    assert_eq(CMajor, [60, 64, 67], "C major chord"),
+
+    println("  Chord intervals: OK").
+
+% ==============================================================================
+% MELODY GENERATION TESTS
+% ==============================================================================
+
+test_melody_generation =>
+    println("Testing melody generation..."),
+
+    Config = $config(
+        meter = $meter(4, 4),
+        key_root = 60,
+        mode = major,
+        num_bars = 2,
+        notes_per_bar = 4,
+        tempo_bpm = 120,
+        voice = soprano_voice()
+    ),
+
+    % Test basic generation
+    generate_melody(Config, Melody),
+    assert_eq(length(Melody), 8, "8 notes in 2 bars x 4 notes"),
+
+    % Test all notes are in scale
+    Pitches = melody_to_pitches(Melody),
+    AllInScale = all([in_scale(P, 60, major) : P in Pitches]),
+    assert_true(AllInScale, "all notes in C major scale"),
+
+    % Test notes are in voice range
+    Soprano = soprano_voice(),
+    Soprano = $voice(_, _, _, $range(Low, High)),
+    AllInRange = all([(P >= Low && P =< High) : P in Pitches]),
+    assert_true(AllInRange, "all notes in soprano range"),
+
+    % Test ending on tonic
+    LastPitch = Pitches[length(Pitches)],
+    assert_eq(LastPitch mod 12, 0, "ends on tonic"),
+
+    println("  Melody generation: OK").
+
+% ==============================================================================
+% ASSERTION HELPERS
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_near(Actual, Expected, Tolerance, Msg) =>
+    if abs(Actual - Expected) > Tolerance then
+        printf("FAIL: %s - expected ~%w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Cond, Msg) =>
+    if not Cond then
+        printf("FAIL: %s - expected true%n", Msg),
+        fail
+    end.
+
+assert_false(Cond, Msg) =>
+    if Cond then
+        printf("FAIL: %s - expected false%n", Msg),
+        fail
+    end.
+
+% Helper: check all elements of list satisfy condition
+all([]) => true.
+all([true|Rest]) => all(Rest).
+all([false|_]) => fail.
