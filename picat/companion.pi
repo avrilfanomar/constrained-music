@@ -83,20 +83,26 @@ generate_segments_helper([Seg | Rest], KeyRoot, SegIndex, CurrentBar, Acc) = Res
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
 
-    % Generate melody for this segment
+    % Generate melody for this segment (with fallback on failure)
+    if Acc == [] then
+        % First segment - no connection needed
+        once(generate_segment_melody(Params, KeyRoot, NumBars, SegmentMelody))
+    else
+        % Connect to previous segment, with fallback to unconnected if fails
+        PrevMelody = head(Acc),
+        PrevLastPitch = last_pitch(PrevMelody),
+        if once(generate_connected_segment_melody(Params, KeyRoot, NumBars, PrevLastPitch, SegmentMelody0)) then
+            SegmentMelody = SegmentMelody0
+        else
+            % Fallback: generate without connection constraint
+            once(generate_segment_melody(Params, KeyRoot, NumBars, SegmentMelody))
+        end
+    end,
+
+    % Print after successful generation to avoid repeated output on backtracking
     printf("  Segment %2d: bars %3d-%3d, tempo=%3d, mode=%-12w%n",
            SegIndex, CurrentBar + 1, CurrentBar + NumBars,
            get_tempo(Params), get_mode(Params)),
-
-    if Acc == [] then
-        % First segment - no connection needed
-        generate_segment_melody(Params, KeyRoot, NumBars, SegmentMelody)
-    else
-        % Connect to previous segment
-        PrevMelody = head(Acc),
-        PrevLastPitch = last_pitch(PrevMelody),
-        generate_connected_segment_melody(Params, KeyRoot, NumBars, PrevLastPitch, SegmentMelody)
-    end,
 
     % Adjust timing to absolute bar positions
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
