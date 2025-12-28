@@ -85,9 +85,9 @@ apply_melodic_constraints(Pitches, Root, _Mode, ScaleNotes) =>
             ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
     end,
 
-    % Constraint 5: No more than 2 consecutive repeated notes
-    foreach(I in 1..Len-2)
-        #~(Pitches[I] #= Pitches[I+1] #/\ Pitches[I+1] #= Pitches[I+2])
+    % Constraint 5: No consecutive repeated notes
+    foreach(I in 1..Len-1)
+        #~(Pitches[I] #= Pitches[I+1])
     end,
 
     % Constraint 6: Ensure some variety - at least 3 different pitches
@@ -331,6 +331,7 @@ generate_segment_melody(MusicParams, KeyRoot, NumBars, Melody) =>
     Voice = get_voice(MusicParams),
     VelBase = get_velocity_base(MusicParams),
     VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
 
     % Calculate total notes
     TotalNotes = NumBars * Density,
@@ -348,11 +349,12 @@ generate_segment_melody(MusicParams, KeyRoot, NumBars, Melody) =>
     % Apply mood-aware constraints
     apply_mood_constraints(Pitches, KeyRoot, Mode, MaxInterval, ScaleNotes),
 
-    % Solve with first-fail heuristic
-    solve([ff], Pitches),
+    % Solve with options based on randomness level
+    SolveOpts = solve_options_for_randomness(Randomness),
+    solve(SolveOpts, Pitches),
 
     % Build melody structure from solved pitches with mood-appropriate velocities
-    Melody = build_mood_melody(Pitches, NumBars, Density, VoiceId, VelBase, VelVar).
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
 % Apply constraints based on mood parameters
 apply_mood_constraints(Pitches, Root, _Mode, MaxInterval, ScaleNotes) =>
@@ -393,6 +395,34 @@ build_mood_melody(Pitches, NumBars, NotesPerBar, VoiceId, VelBase, VelVar) = Mel
     Melody = [build_mood_note(Pitches[I], I, NotesPerBar, VoiceId, VelBase, VelVar)
               : I in 1..length(Pitches)].
 
+% Build melody with randomness factor for velocity variations
+build_mood_melody_with_randomness(Pitches, _NumBars, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Melody =>
+    Melody = [build_mood_note_with_randomness(Pitches[I], I, NotesPerBar, VoiceId, VelBase, VelVar, Randomness)
+              : I in 1..length(Pitches)].
+
+% ==============================================================================
+% RANDOMNESS UTILITIES
+% ==============================================================================
+
+% Determine solve options based on randomness level
+% Randomness 0.0: deterministic first-fail
+% Randomness 0.5: mix of strategies
+% Randomness 1.0: fully random labeling
+solve_options_for_randomness(Randomness) = Opts =>
+    if Randomness >= 0.7 then
+        % High randomness: random variable and value selection
+        Opts = [rand, rand_var, rand_val]
+    elseif Randomness >= 0.4 then
+        % Medium randomness: first-fail with random value selection
+        Opts = [ff, rand_val]
+    elseif Randomness >= 0.1 then
+        % Low randomness: sometimes use random variable order
+        Opts = cond(rand01() < Randomness, [rand_var, ff], [ff])
+    else
+        % No randomness: deterministic first-fail
+        Opts = [ff]
+    end.
+
 % Build a single note with velocity variation for expressiveness
 build_mood_note(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar) = Note =>
     Octave = MidiPitch // 12 - 1,
@@ -403,6 +433,30 @@ build_mood_note(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar) = Note 
     % Downbeats slightly stronger, offbeats slightly softer
     VelOffset = cond(Beat == 1, VelVar // 2, -VelVar // 4),
     Velocity = max(40, min(127, VelBase + VelOffset)),
+
+    Note = $note(
+        $pitch(midi, MidiPitch, Octave),
+        $duration(1, NotesPerBar),
+        $time_pos(Bar, Beat, 0),
+        VoiceId,
+        Velocity
+    ).
+
+% Build a single note with random velocity variations
+% Randomness adds additional velocity perturbation on top of beat-based variation
+build_mood_note_with_randomness(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Note =>
+    Octave = MidiPitch // 12 - 1,
+    Bar = ((Index - 1) // NotesPerBar) + 1,
+    Beat = ((Index - 1) mod NotesPerBar) + 1,
+
+    % Beat-based velocity variation (deterministic part)
+    VelOffset = cond(Beat == 1, VelVar // 2, -VelVar // 4),
+
+    % Random perturbation scaled by randomness factor
+    % At full randomness, adds up to +/- 15 velocity units
+    RandomPerturbation = round((rand01() - 0.5) * 2 * 15 * Randomness),
+
+    Velocity = max(40, min(127, VelBase + VelOffset + RandomPerturbation)),
 
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
@@ -461,6 +515,7 @@ generate_connected_segment_melody(MusicParams, KeyRoot, NumBars, PrevLastPitch, 
     Voice = get_voice(MusicParams),
     VelBase = get_velocity_base(MusicParams),
     VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
 
     TotalNotes = NumBars * Density,
     Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
@@ -480,9 +535,11 @@ generate_connected_segment_melody(MusicParams, KeyRoot, NumBars, PrevLastPitch, 
         Pitches[1] :: ValidConnectionNotes
     end,
 
-    solve([ff], Pitches),
+    % Solve with options based on randomness level
+    SolveOpts = solve_options_for_randomness(Randomness),
+    solve(SolveOpts, Pitches),
 
-    Melody = build_mood_melody(Pitches, NumBars, Density, VoiceId, VelBase, VelVar).
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
 % ==============================================================================
 % MOOD TRANSITION UTILITIES

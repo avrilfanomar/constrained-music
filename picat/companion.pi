@@ -21,16 +21,25 @@ import util.
 % Main entry point with preset names
 main =>
     % Default demonstration: sad to energized
-    run_companion_presets(sad_depressed, energized, 300, "session.json").
+    run_companion_presets(calm_peaceful, energized, 300, "session.json").
 
-% Run companion with preset mood names
+% Run companion with preset mood names (no randomness)
 run_companion_presets(StartPreset, EndPreset, DurationSecs, OutputPath) =>
+    run_companion_presets(StartPreset, EndPreset, DurationSecs, OutputPath, 0.0).
+
+% Run companion with preset mood names and randomness
+run_companion_presets(StartPreset, EndPreset, DurationSecs, OutputPath, Randomness) =>
     StartMood = mood_preset(StartPreset),
     EndMood = mood_preset(EndPreset),
-    run_companion(StartMood, EndMood, DurationSecs, OutputPath).
+    run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness).
 
-% Main companion function with mood structures
+% Main companion function with mood structures (no randomness)
 run_companion(StartMood, EndMood, DurationSecs, OutputPath) =>
+    run_companion(StartMood, EndMood, DurationSecs, OutputPath, 0.0).
+
+% Main companion function with mood structures and randomness
+% Randomness: 0.0 = deterministic, 1.0 = maximum variation
+run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
     println("=== Music Companion ==="),
     nl,
 
@@ -46,11 +55,12 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath) =>
     printf("Generating emotional transition:%n"),
     printf("  From: "), print_mood(StartMood),
     printf("  To:   "), print_mood(EndMood),
-    printf("  Duration: %d seconds (%.1f minutes)%n%n", DurationSecs, DurationSecs / 60.0),
+    printf("  Duration: %d seconds (%.1f minutes)%n", DurationSecs, DurationSecs / 60.0),
+    printf("  Randomness: %.2f%n%n", Randomness),
 
-    % Plan the transition
+    % Plan the transition with randomness
     println("Planning transition path..."),
-    Segments = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out),
+    Segments = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out, Randomness),
     printf("  Created %d segments%n%n", length(Segments)),
 
     % Generate melodies for each segment
@@ -161,6 +171,7 @@ main(Args) =>
     EndPreset = get_arg(ParsedArgs, to, energized),
     Duration = get_arg(ParsedArgs, duration, 300),
     Output = get_arg(ParsedArgs, output, "session.json"),
+    Randomness = get_arg(ParsedArgs, randomness, 0.0),
 
     % Handle VA coordinates if provided
     FromVA = get_arg(ParsedArgs, from_va, none),
@@ -169,7 +180,7 @@ main(Args) =>
     ToVA = get_arg(ParsedArgs, to_va, none),
     EndMood = cond(ToVA != none, parse_va(ToVA), mood_preset(EndPreset)),
 
-    run_companion(StartMood, EndMood, Duration, Output).
+    run_companion(StartMood, EndMood, Duration, Output, Randomness).
 
 % Parse VA coordinate string like "-0.7,-0.3"
 parse_va(VAString) = Mood =>
@@ -221,6 +232,10 @@ set_arg(Map, "duration", Value) = Map =>
     Map.put(duration, to_integer(Value)).
 set_arg(Map, "output", Value) = Map =>
     Map.put(output, Value).
+set_arg(Map, "randomness", Value) = Map =>
+    Map.put(randomness, to_float(Value)).
+set_arg(Map, "random", Value) = Map =>
+    Map.put(randomness, to_float(Value)).
 set_arg(Map, Key, _Value) = Map =>
     printf("Warning: Unknown option '%s'%n", Key).
 
@@ -260,11 +275,15 @@ print_usage() =>
     println("  to_va=V,A        End mood as valence,arousal (e.g., 0.5,0.8)"),
     println("  duration=SECS    Duration in seconds (default: 300)"),
     println("  output=PATH      Output JSON file (default: session.json)"),
+    println("  randomness=VAL   Randomness factor 0.0-1.0 (default: 0.0)"),
+    println("                   0.0 = deterministic, 1.0 = maximum variation"),
+    println("                   Affects tempo, mode selection, velocity, and melodies"),
     nl,
     println("Examples:"),
     println("  picat companion.pi demo"),
     println("  picat companion.pi from=sad_depressed to=energized duration=300"),
     println("  picat companion.pi from_va=-0.7,-0.3 to_va=0.5,0.8 duration=600"),
+    println("  picat companion.pi from=calm_peaceful to=energized randomness=0.5"),
     nl,
     println("After generating the JSON file, run:"),
     println("  python scripts/midi_writer.py session.json session.mid").

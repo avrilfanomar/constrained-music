@@ -74,22 +74,31 @@ apply_easing(T, _) = ease_linear(T).
 % ==============================================================================
 
 % Calculate optimal number of segments based on duration
-% Aim for ~20-30 second segments for smooth transitions
+% Aim for ~15-20 second segments for faster melody switches
 calculate_num_segments(DurationSecs) = NumSegments =>
-    TargetSegmentDuration = 25,  % seconds
-    NumSegments = max(8, min(30, round(DurationSecs / TargetSegmentDuration))).
+    TargetSegmentDuration = 17,  % seconds (1.5x faster than original 25s)
+    NumSegments = max(8, min(45, round(DurationSecs / TargetSegmentDuration))).
 
-% Plan transition from start to end mood
+% Plan transition from start to end mood (without randomness)
 % Returns list of segment structures
 plan_transition(StartMood, EndMood, DurationSecs, EasingType) = Segments =>
+    plan_transition(StartMood, EndMood, DurationSecs, EasingType, 0.0, Segments).
+
+% Plan transition with randomness factor
+% Randomness: 0.0 = deterministic, 1.0 = maximum variation
+plan_transition(StartMood, EndMood, DurationSecs, EasingType, Randomness) = Segments =>
     NumSegments = calculate_num_segments(DurationSecs),
     SegmentDuration = DurationSecs / NumSegments,
 
-    Segments = [create_segment(I, NumSegments, SegmentDuration, StartMood, EndMood, EasingType)
+    Segments = [create_segment(I, NumSegments, SegmentDuration, StartMood, EndMood, EasingType, Randomness)
                 : I in 1..NumSegments].
 
-% Create a single segment
+% Create a single segment (without randomness)
 create_segment(Index, TotalSegments, SegmentDuration, StartMood, EndMood, EasingType) = Segment =>
+    create_segment(Index, TotalSegments, SegmentDuration, StartMood, EndMood, EasingType, 0.0, Segment).
+
+% Create a single segment with randomness
+create_segment(Index, TotalSegments, SegmentDuration, StartMood, EndMood, EasingType, Randomness) = Segment =>
     % Calculate the midpoint of this segment as a fraction [0, 1]
     T = (Index - 0.5) / TotalSegments,
 
@@ -99,8 +108,8 @@ create_segment(Index, TotalSegments, SegmentDuration, StartMood, EndMood, Easing
     % Interpolate mood
     SegmentMood = mood_lerp(StartMood, EndMood, EasedT),
 
-    % Convert mood to music parameters
-    Params = mood_to_params(SegmentMood),
+    % Convert mood to music parameters with randomness
+    Params = mood_to_params(SegmentMood, Randomness),
 
     % Calculate timing
     StartTime = (Index - 1) * SegmentDuration,
@@ -144,8 +153,8 @@ smooth_tempo_helper([S1, S2 | Rest], MaxJump, Acc) = Result =>
     end.
 
 % Helper to update tempo in params
-update_tempo(music_params(_, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss), NewTempo) =
-    $music_params(NewTempo, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss).
+update_tempo(music_params(_, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand), NewTempo) =
+    $music_params(NewTempo, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand).
 
 % Helper to update params in segment
 update_segment_params(segment(I, T, D, M, _, N), NewParams) =

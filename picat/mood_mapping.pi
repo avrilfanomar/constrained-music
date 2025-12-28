@@ -13,43 +13,75 @@ import music_types.
 % ==============================================================================
 % Contains all parameters derived from a mood point
 
-% music_params(Tempo, Mode, NoteDensity, MaxInterval, Voice, VelocityBase, VelocityVar, Legato, Dissonance)
+% music_params(Tempo, Mode, NoteDensity, MaxInterval, Voice, VelocityBase, VelocityVar, Legato, Dissonance, Randomness)
+% Randomness: 0.0 = fully deterministic, 1.0 = maximum randomness
 
 % Create default music params
-default_music_params() = $music_params(120, major, 4, 5, soprano_voice(), 80, 15, 0.9, 0.0).
+default_music_params() = $music_params(120, major, 4, 5, soprano_voice(), 80, 15, 0.9, 0.0, 0.0).
 
 % Accessors
-get_tempo(music_params(T, _, _, _, _, _, _, _, _)) = T.
-get_mode(music_params(_, M, _, _, _, _, _, _, _)) = M.
-get_note_density(music_params(_, _, D, _, _, _, _, _, _)) = D.
-get_max_interval(music_params(_, _, _, I, _, _, _, _, _)) = I.
-get_voice(music_params(_, _, _, _, V, _, _, _, _)) = V.
-get_velocity_base(music_params(_, _, _, _, _, VB, _, _, _)) = VB.
-get_velocity_var(music_params(_, _, _, _, _, _, VV, _, _)) = VV.
-get_legato(music_params(_, _, _, _, _, _, _, L, _)) = L.
-get_dissonance(music_params(_, _, _, _, _, _, _, _, D)) = D.
+get_tempo(music_params(T, _, _, _, _, _, _, _, _, _)) = T.
+get_mode(music_params(_, M, _, _, _, _, _, _, _, _)) = M.
+get_note_density(music_params(_, _, D, _, _, _, _, _, _, _)) = D.
+get_max_interval(music_params(_, _, _, I, _, _, _, _, _, _)) = I.
+get_voice(music_params(_, _, _, _, V, _, _, _, _, _)) = V.
+get_velocity_base(music_params(_, _, _, _, _, VB, _, _, _, _)) = VB.
+get_velocity_var(music_params(_, _, _, _, _, _, VV, _, _, _)) = VV.
+get_legato(music_params(_, _, _, _, _, _, _, L, _, _)) = L.
+get_dissonance(music_params(_, _, _, _, _, _, _, _, D, _)) = D.
+get_randomness(music_params(_, _, _, _, _, _, _, _, _, R)) = R.
 
 % ==============================================================================
 % MAIN MAPPING FUNCTION
 % ==============================================================================
 
-% Convert a mood to music parameters
+% Convert a mood to music parameters (deterministic version)
 mood_to_params(Mood) = Params =>
+    mood_to_params(Mood, 0.0, Params).
+
+% Convert a mood to music parameters with randomness factor
+% Randomness: 0.0 = deterministic, 1.0 = maximum variation
+mood_to_params(Mood, Randomness) = Params =>
     V = get_valence(Mood),
     A = get_arousal(Mood),
 
-    Tempo = tempo_from_va(V, A),
-    Mode = mode_from_va(V, A),
-    Density = density_from_va(V, A),
-    MaxInterval = interval_from_va(V, A),
+    % Apply randomness to tempo (up to +/- 15 BPM at full randomness)
+    BaseTempo = tempo_from_va(V, A),
+    TempoVariation = round((rand01() - 0.5) * 2 * 15 * Randomness),
+    Tempo = round(clamp(BaseTempo + TempoVariation, 60, 180)),
+
+    % Mode selection: deterministic or random from suitable modes
+    Mode = cond(rand01() < Randomness * 0.7,
+                random_mode_from_va(V, A),
+                mode_from_va(V, A)),
+
+    % Apply randomness to note density (up to +/- 2 notes at full randomness)
+    BaseDensity = density_from_va(V, A),
+    DensityVariation = round((rand01() - 0.5) * 2 * 2 * Randomness),
+    Density = round(clamp(BaseDensity + DensityVariation, 2, 8)),
+
+    % Apply randomness to max interval (up to +/- 2 semitones)
+    BaseInterval = interval_from_va(V, A),
+    IntervalVariation = round((rand01() - 0.5) * 2 * 2 * Randomness),
+    MaxInterval = round(clamp(BaseInterval + IntervalVariation, 2, 7)),
+
     Voice = voice_from_va(V, A),
-    VelBase = velocity_base_from_va(V, A),
-    VelVar = velocity_var_from_va(V, A),
+
+    % Apply randomness to velocity (up to +/- 10)
+    BaseVelBase = velocity_base_from_va(V, A),
+    VelBaseVariation = round((rand01() - 0.5) * 2 * 10 * Randomness),
+    VelBase = round(clamp(BaseVelBase + VelBaseVariation, 45, 100)),
+
+    % Apply randomness to velocity variance (up to +/- 5)
+    BaseVelVar = velocity_var_from_va(V, A),
+    VelVarVariation = round((rand01() - 0.5) * 2 * 5 * Randomness),
+    VelVar = round(clamp(BaseVelVar + VelVarVariation, 8, 28)),
+
     Legato = legato_from_va(V, A),
     Dissonance = dissonance_from_va(V, A),
 
     Params = $music_params(Tempo, Mode, Density, MaxInterval, Voice,
-                           VelBase, VelVar, Legato, Dissonance).
+                           VelBase, VelVar, Legato, Dissonance, Randomness).
 
 % ==============================================================================
 % TEMPO MAPPING
@@ -106,19 +138,34 @@ modes_for_valence(V) = Modes =>
         Modes = [minor, phrygian, harmonic_minor]
     end.
 
+% Randomly select a mode from suitable modes for the valence/arousal
+random_mode_from_va(V, _A) = Mode =>
+    Modes = modes_for_valence(V),
+    Len = length(Modes),
+    Index = (random2() mod Len) + 1,
+    Mode = Modes[Index].
+
+% ==============================================================================
+% RANDOM UTILITIES
+% ==============================================================================
+
+% Generate a random float in [0, 1) using auto-seeded random2()
+rand01() = R =>
+    R = (random2() mod 1000000) / 1000000.0.
+
 % ==============================================================================
 % NOTE DENSITY (Notes per bar)
 % ==============================================================================
 % Arousal drives density
-% Range: 2-8 notes per bar
+% Range: 4-12 notes per bar
 
 density_from_va(_V, A) = Density =>
-    % Base: 2 + (A+1)*3
-    % A=-1: 2 notes/bar (sparse)
-    % A=0: 5 notes/bar (moderate)
-    % A=1: 8 notes/bar (dense)
-    BaseDensity = 2 + (A + 1) * 3,
-    Density = round(clamp(BaseDensity, 2, 8)).
+    % Base: 4 + (A+1)*4
+    % A=-1: 4 notes/bar (sparse)
+    % A=0: 8 notes/bar (moderate)
+    % A=1: 12 notes/bar (dense)
+    BaseDensity = 4 + (A + 1) * 4,
+    Density = round(clamp(BaseDensity, 4, 12)).
 
 % ==============================================================================
 % MAXIMUM INTERVAL
@@ -257,8 +304,13 @@ interpolate_params(P1, P2, T) = Result =>
     Dis2 = get_dissonance(P2),
     NewDissonance = Dis1 + (Dis2 - Dis1) * ClampedT,
 
+    % Interpolate randomness
+    R1 = get_randomness(P1),
+    R2 = get_randomness(P2),
+    NewRandomness = R1 + (R2 - R1) * ClampedT,
+
     Result = $music_params(NewTempo, NewMode, NewDensity, NewInterval, NewVoice,
-                           NewVelBase, NewVelVar, NewLegato, NewDissonance).
+                           NewVelBase, NewVelVar, NewLegato, NewDissonance, NewRandomness).
 
 % ==============================================================================
 % CONSTRAINT LEVEL MAPPING
@@ -292,7 +344,8 @@ print_music_params(Params) =>
     printf("  Max interval: %d semitones%n", get_max_interval(Params)),
     printf("  Velocity:     %d +/- %d%n", get_velocity_base(Params), get_velocity_var(Params)),
     printf("  Legato:       %.2f%n", get_legato(Params)),
-    printf("  Dissonance:   %.2f%n", get_dissonance(Params)).
+    printf("  Dissonance:   %.2f%n", get_dissonance(Params)),
+    printf("  Randomness:   %.2f%n", get_randomness(Params)).
 
 % Show mapping for a preset
 demo_mood_mapping(PresetName) =>
