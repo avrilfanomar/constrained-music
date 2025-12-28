@@ -1,0 +1,292 @@
+% transition.pi - Transition path planning and segment generation
+%
+% Plans the emotional journey from start to end mood, dividing
+% the piece into segments with smoothly interpolated parameters.
+
+module transition.
+
+import mood.
+import mood_mapping.
+
+% ==============================================================================
+% SEGMENT STRUCTURE
+% ==============================================================================
+% segment(Index, StartTimeSecs, DurationSecs, MoodPoint, MusicParams, NumBars)
+
+% Accessors
+get_segment_index(segment(I, _, _, _, _, _)) = I.
+get_segment_start_time(segment(_, T, _, _, _, _)) = T.
+get_segment_duration(segment(_, _, D, _, _, _)) = D.
+get_segment_mood(segment(_, _, _, M, _, _)) = M.
+get_segment_params(segment(_, _, _, _, P, _)) = P.
+get_segment_num_bars(segment(_, _, _, _, _, N)) = N.
+
+% ==============================================================================
+% EASING FUNCTIONS
+% ==============================================================================
+% Transform linear t (0-1) to create different transition curves
+
+% Linear (uniform progression)
+ease_linear(T) = T.
+
+% Ease-in: slow start, accelerating
+ease_in(T) = T * T.
+
+% Ease-out: fast start, decelerating
+ease_out(T) = 1 - (1 - T) * (1 - T).
+
+% Ease-in-out: slow at both ends
+ease_in_out(T) = R =>
+    if T < 0.5 then
+        R = 2 * T * T
+    else
+        R = 1 - 2 * (1 - T) * (1 - T)
+    end.
+
+% Cubic ease-in
+ease_in_cubic(T) = T * T * T.
+
+% Cubic ease-out
+ease_out_cubic(T) = 1 - (1 - T) * (1 - T) * (1 - T).
+
+% Cubic ease-in-out
+ease_in_out_cubic(T) = R =>
+    if T < 0.5 then
+        R = 4 * T * T * T
+    else
+        R = 1 - pow(-2 * T + 2, 3) / 2
+    end.
+
+% Apply easing by name
+apply_easing(T, linear) = ease_linear(T).
+apply_easing(T, ease_in) = ease_in(T).
+apply_easing(T, ease_out) = ease_out(T).
+apply_easing(T, ease_in_out) = ease_in_out(T).
+apply_easing(T, ease_in_cubic) = ease_in_cubic(T).
+apply_easing(T, ease_out_cubic) = ease_out_cubic(T).
+apply_easing(T, ease_in_out_cubic) = ease_in_out_cubic(T).
+
+% Default easing
+apply_easing(T, _) = ease_linear(T).
+
+% ==============================================================================
+% SEGMENT PLANNING
+% ==============================================================================
+
+% Calculate optimal number of segments based on duration
+% Aim for ~20-30 second segments for smooth transitions
+calculate_num_segments(DurationSecs) = NumSegments =>
+    TargetSegmentDuration = 25,  % seconds
+    NumSegments = max(8, min(30, round(DurationSecs / TargetSegmentDuration))).
+
+% Plan transition from start to end mood
+% Returns list of segment structures
+plan_transition(StartMood, EndMood, DurationSecs, EasingType) = Segments =>
+    NumSegments = calculate_num_segments(DurationSecs),
+    SegmentDuration = DurationSecs / NumSegments,
+
+    Segments = [create_segment(I, NumSegments, SegmentDuration, StartMood, EndMood, EasingType)
+                : I in 1..NumSegments].
+
+% Create a single segment
+create_segment(Index, TotalSegments, SegmentDuration, StartMood, EndMood, EasingType) = Segment =>
+    % Calculate the midpoint of this segment as a fraction [0, 1]
+    T = (Index - 0.5) / TotalSegments,
+
+    % Apply easing
+    EasedT = apply_easing(T, EasingType),
+
+    % Interpolate mood
+    SegmentMood = mood_lerp(StartMood, EndMood, EasedT),
+
+    % Convert mood to music parameters
+    Params = mood_to_params(SegmentMood),
+
+    % Calculate timing
+    StartTime = (Index - 1) * SegmentDuration,
+
+    % Calculate bars in this segment based on tempo
+    Tempo = get_tempo(Params),
+    BeatsPerBar = 4,  % Assuming 4/4
+    SecondsPerBeat = 60.0 / Tempo,
+    SecondsPerBar = SecondsPerBeat * BeatsPerBar,
+    NumBars = max(1, round(SegmentDuration / SecondsPerBar)),
+
+    Segment = $segment(Index, StartTime, SegmentDuration, SegmentMood, Params, NumBars).
+
+% ==============================================================================
+% TRANSITION SMOOTHING
+% ==============================================================================
+% Ensure smooth transitions between adjacent segments
+
+% Smooth tempo changes (max jump between segments)
+smooth_tempo_transitions(Segments, MaxTempoJump) = SmoothedSegments =>
+    SmoothedSegments = smooth_tempo_helper(Segments, MaxTempoJump, []).
+
+smooth_tempo_helper([], _, Acc) = reverse(Acc).
+smooth_tempo_helper([S], _, Acc) = reverse([S | Acc]).
+smooth_tempo_helper([S1, S2 | Rest], MaxJump, Acc) = Result =>
+    P1 = get_segment_params(S1),
+    P2 = get_segment_params(S2),
+    T1 = get_tempo(P1),
+    T2 = get_tempo(P2),
+
+    TempoDiff = abs(T2 - T1),
+
+    if TempoDiff > MaxJump then
+        % Adjust S2's tempo to be within MaxJump of S1
+        NewTempo = cond(T2 > T1, T1 + MaxJump, T1 - MaxJump),
+        NewP2 = update_tempo(P2, NewTempo),
+        NewS2 = update_segment_params(S2, NewP2),
+        Result = smooth_tempo_helper([NewS2 | Rest], MaxJump, [S1 | Acc])
+    else
+        Result = smooth_tempo_helper([S2 | Rest], MaxJump, [S1 | Acc])
+    end.
+
+% Helper to update tempo in params
+update_tempo(music_params(_, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss), NewTempo) =
+    $music_params(NewTempo, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss).
+
+% Helper to update params in segment
+update_segment_params(segment(I, T, D, M, _, N), NewParams) =
+    $segment(I, T, D, M, NewParams, N).
+
+% ==============================================================================
+% MODE TRANSITION PLANNING
+% ==============================================================================
+% Plan smooth mode transitions using related modes
+
+% Get modes that share many notes with the given mode
+related_modes(major) = [mixolydian, lydian, ionian].
+related_modes(minor) = [dorian, natural_minor, aeolian].
+related_modes(dorian) = [minor, natural_minor, mixolydian].
+related_modes(phrygian) = [aeolian, locrian, natural_minor].
+related_modes(lydian) = [major, ionian].
+related_modes(mixolydian) = [major, dorian].
+related_modes(aeolian) = [phrygian, natural_minor, dorian].
+related_modes(locrian) = [phrygian].
+related_modes(natural_minor) = [dorian, aeolian, minor].
+related_modes(harmonic_minor) = [natural_minor, phrygian].
+related_modes(pentatonic_major) = [major, lydian].
+related_modes(pentatonic_minor) = [minor, dorian].
+related_modes(_) = [major, minor].  % Default fallback
+
+% Check if two modes are closely related
+modes_related(Mode1, Mode2) =>
+    Related = related_modes(Mode1),
+    member(Mode2, Related).
+
+% ==============================================================================
+% SESSION CONFIGURATION
+% ==============================================================================
+% session_config(StartMood, EndMood, DurationSecs, EasingType, Meter, KeyRoot, OutputPath)
+
+default_session_config(StartMood, EndMood) = Config =>
+    Config = session_config(
+        StartMood,
+        EndMood,
+        300,          % 5 minutes default
+        ease_in_out,  % Default easing
+        meter(4, 4),  % 4/4 time
+        60,           % C4 as key root
+        "session.mid"
+    ).
+
+% Accessors for session config
+get_session_start_mood(session_config(M, _, _, _, _, _, _)) = M.
+get_session_end_mood(session_config(_, M, _, _, _, _, _)) = M.
+get_session_duration(session_config(_, _, D, _, _, _, _)) = D.
+get_session_easing(session_config(_, _, _, E, _, _, _)) = E.
+get_session_meter(session_config(_, _, _, _, M, _, _)) = M.
+get_session_key_root(session_config(_, _, _, _, _, K, _)) = K.
+get_session_output_path(session_config(_, _, _, _, _, _, P)) = P.
+
+% ==============================================================================
+% TRANSITION VISUALIZATION
+% ==============================================================================
+
+% Print a visual representation of the transition
+print_transition_path(Segments) =>
+    println("=== Transition Path ==="),
+    printf("Segments: %d%n%n", length(Segments)),
+
+    foreach(Seg in Segments)
+        I = get_segment_index(Seg),
+        T = get_segment_start_time(Seg),
+        D = get_segment_duration(Seg),
+        M = get_segment_mood(Seg),
+        P = get_segment_params(Seg),
+
+        V = get_valence(M),
+        A = get_arousal(M),
+
+        % Visual bar for valence/arousal
+        VBar = va_bar(V),
+        ABar = va_bar(A),
+
+        printf("Segment %2d [%5.1fs - %5.1fs]%n", I, T, T + D),
+        printf("  Valence: %+.2f %s%n", V, VBar),
+        printf("  Arousal: %+.2f %s%n", A, ABar),
+        printf("  Tempo: %3d BPM | Mode: %-12w | Density: %d n/bar%n",
+               get_tempo(P), get_mode(P), get_note_density(P)),
+        println("")
+    end.
+
+% Create a visual bar for a value (-1 to 1)
+va_bar(Val) = Bar =>
+    Pos = round((Val + 1) * 10),  % 0-20
+    Bar = [va_bar_char(I, Pos) : I in 0..20].
+
+% Helper for va_bar character selection
+va_bar_char(I, _Pos) = '|', I == 10 => true.
+va_bar_char(I, Pos) = '*', I == Pos => true.
+va_bar_char(_, _) = '-'.
+
+% Print summary statistics
+print_transition_summary(StartMood, EndMood, Segments) =>
+    println("=== Transition Summary ==="),
+    printf("From: "), print_mood(StartMood),
+    printf("To:   "), print_mood(EndMood),
+    println(""),
+
+    FirstSeg = head(Segments),
+    LastSeg = last(Segments),
+
+    P1 = get_segment_params(FirstSeg),
+    P2 = get_segment_params(LastSeg),
+
+    printf("Tempo:    %3d -> %3d BPM%n", get_tempo(P1), get_tempo(P2)),
+    printf("Mode:     %-10w -> %-10w%n", get_mode(P1), get_mode(P2)),
+    printf("Density:  %d -> %d notes/bar%n", get_note_density(P1), get_note_density(P2)),
+    printf("Velocity: %d -> %d%n", get_velocity_base(P1), get_velocity_base(P2)).
+
+% ==============================================================================
+% DEMO FUNCTIONS
+% ==============================================================================
+
+% Demonstrate transition planning
+demo_transition() =>
+    StartMood = mood_preset(sad_depressed),
+    EndMood = mood_preset(energized),
+    DurationSecs = 300,  % 5 minutes
+
+    Segments = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out),
+
+    print_transition_summary(StartMood, EndMood, Segments),
+    println(""),
+    print_transition_path(Segments).
+
+% Demo different easing types
+demo_easing_types() =>
+    println("=== Easing Function Comparison ==="),
+    println("T     Linear  EaseIn  EaseOut EaseInOut"),
+    println("---   ------  ------  ------- ---------"),
+    foreach(I in 0..10)
+        T = I / 10.0,
+        printf("%.1f   %.3f   %.3f   %.3f   %.3f%n",
+               T,
+               apply_easing(T, linear),
+               apply_easing(T, ease_in),
+               apply_easing(T, ease_out),
+               apply_easing(T, ease_in_out))
+    end.

@@ -1,0 +1,171 @@
+% mood.pi - Mood model and presets for Music Companion
+%
+% Implements the Valence-Arousal (VA) psychological model of affect.
+% Valence: -1 (negative/sad) to +1 (positive/happy)
+% Arousal: -1 (calm/low energy) to +1 (energetic/high energy)
+
+module mood.
+
+% --- Mood Structure ---
+% mood(Valence, Arousal) where both are floats in [-1, 1]
+% Use $mood(V, A) to create a mood structure directly
+
+% Create a mood with validation
+new_mood(V, A) = $mood(ClampedV, ClampedA) =>
+    ClampedV = clamp(V, -1.0, 1.0),
+    ClampedA = clamp(A, -1.0, 1.0).
+
+% Clamp a value to a range
+clamp(X, Min, Max) = R =>
+    if X < Min then R = Min
+    elseif X > Max then R = Max
+    else R = X
+    end.
+
+% --- Mood Presets ---
+% Based on the Valence-Arousal circumplex model
+
+% Negative valence, low arousal (bottom-left quadrant)
+mood_preset(sad_depressed) = $mood(-0.7, -0.3).
+mood_preset(melancholic) = $mood(-0.5, -0.4).
+mood_preset(tired) = $mood(-0.3, -0.7).
+mood_preset(bored) = $mood(-0.2, -0.5).
+
+% Negative valence, high arousal (top-left quadrant)
+mood_preset(anxious) = $mood(-0.4, 0.7).
+mood_preset(stressed) = $mood(-0.5, 0.6).
+mood_preset(angry) = $mood(-0.7, 0.8).
+mood_preset(frustrated) = $mood(-0.6, 0.5).
+
+% Positive valence, low arousal (bottom-right quadrant)
+mood_preset(calm_peaceful) = $mood(0.3, -0.6).
+mood_preset(relaxed) = $mood(0.4, -0.5).
+mood_preset(serene) = $mood(0.5, -0.7).
+mood_preset(content) = $mood(0.3, -0.3).
+
+% Positive valence, high arousal (top-right quadrant)
+mood_preset(energized) = $mood(0.5, 0.8).
+mood_preset(happy) = $mood(0.8, 0.5).
+mood_preset(excited) = $mood(0.7, 0.9).
+mood_preset(joyful) = $mood(0.9, 0.6).
+
+% Neutral/moderate states
+mood_preset(focused) = $mood(0.2, 0.3).
+mood_preset(neutral) = $mood(0.0, 0.0).
+
+% Get all available preset names
+all_mood_presets() = [
+    sad_depressed, melancholic, tired, bored,
+    anxious, stressed, angry, frustrated,
+    calm_peaceful, relaxed, serene, content,
+    energized, happy, excited, joyful,
+    focused, neutral
+].
+
+% --- Mood Accessors ---
+
+get_valence(M) = V => M = $mood(V, _A).
+get_arousal(M) = A => M = $mood(_V, A).
+
+% --- Mood Operations ---
+
+% Linear interpolation between two moods
+% T should be in [0, 1] where 0 = M1 and 1 = M2
+mood_lerp(M1, M2, T) = $mood(V, A) =>
+    M1 = $mood(V1, A1),
+    M2 = $mood(V2, A2),
+    ClampedT = clamp(T, 0.0, 1.0),
+    V = V1 + (V2 - V1) * ClampedT,
+    A = A1 + (A2 - A1) * ClampedT.
+
+% Euclidean distance between two moods in VA space
+mood_distance(M1, M2) = D =>
+    M1 = $mood(V1, A1),
+    M2 = $mood(V2, A2),
+    DV = V2 - V1,
+    DA = A2 - A1,
+    D = sqrt(DV * DV + DA * DA).
+
+% Check if two moods are similar (within threshold)
+moods_similar(M1, M2, Threshold) =>
+    mood_distance(M1, M2) <= Threshold.
+
+moods_similar(M1, M2) =>
+    moods_similar(M1, M2, 0.2).  % Default threshold
+
+% Blend multiple moods with weights
+% Moods = list of mood structures
+% Weights = list of floats (will be normalized)
+blend_moods(Moods, Weights) = ResultMood =>
+    TotalWeight = sum(Weights),
+    if TotalWeight > 0 then
+        NormWeights = [W / TotalWeight : W in Weights],
+        Valences = [get_valence(M) : M in Moods],
+        Arousals = [get_arousal(M) : M in Moods],
+        BlendedV = sum([V * W : {V, W} in zip(Valences, NormWeights)]),
+        BlendedA = sum([A * W : {A, W} in zip(Arousals, NormWeights)]),
+        ResultMood = $mood(BlendedV, BlendedA)
+    else
+        ResultMood = $mood(0.0, 0.0)
+    end.
+
+% --- Mood Descriptions ---
+
+% Get a human-readable description of a mood
+mood_description(M) = Desc =>
+    M = $mood(V, A),
+    ValenceDesc = valence_desc(V),
+    ArousalDesc = arousal_desc(A),
+    Desc = ValenceDesc ++ ", " ++ ArousalDesc.
+
+valence_desc(V) = "very positive", V >= 0.5 => true.
+valence_desc(V) = "positive", V >= 0.2 => true.
+valence_desc(V) = "neutral", V >= -0.2 => true.
+valence_desc(V) = "negative", V >= -0.5 => true.
+valence_desc(_) = "very negative".
+
+arousal_desc(A) = "high energy", A >= 0.5 => true.
+arousal_desc(A) = "moderate energy", A >= 0.2 => true.
+arousal_desc(A) = "calm", A >= -0.2 => true.
+arousal_desc(A) = "low energy", A >= -0.5 => true.
+arousal_desc(_) = "very calm".
+
+% Get the quadrant name for a mood
+mood_quadrant(M) = Quadrant =>
+    M = $mood(V, A),
+    Quadrant = mood_quadrant_helper(V, A).
+
+mood_quadrant_helper(V, A) = "excited/happy", V >= 0, A >= 0 => true.
+mood_quadrant_helper(V, A) = "calm/relaxed", V >= 0, A < 0 => true.
+mood_quadrant_helper(V, A) = "stressed/anxious", V < 0, A >= 0 => true.
+mood_quadrant_helper(_, _) = "sad/depressed".
+
+% --- Mood Validation ---
+
+% Check if a mood is valid
+is_valid_mood(M) =>
+    M = $mood(V, A),
+    V >= -1.0, V <= 1.0,
+    A >= -1.0, A <= 1.0.
+
+% --- Preset Lookup ---
+
+% Try to find a mood by name (returns mood or fails)
+lookup_mood_preset(Name) = M, mood_preset(Name) = M => true.
+
+% Check if a name is a valid preset
+is_mood_preset(Name) => _ = mood_preset(Name).
+
+% --- Printing ---
+
+print_mood(M) =>
+    M = $mood(V, A),
+    printf("mood(valence=%.2f, arousal=%.2f) [%s]%n", V, A, mood_description(M)).
+
+print_all_presets() =>
+    println("Available mood presets:"),
+    foreach(Name in all_mood_presets())
+        M = mood_preset(Name),
+        printf("  %-15s: valence=%+.2f, arousal=%+.2f%n",
+               to_string(Name), get_valence(M), get_arousal(M))
+    end.

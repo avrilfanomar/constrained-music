@@ -1,0 +1,142 @@
+% midi_export.pi - Export session data to JSON for MIDI conversion
+%
+% Picat cannot directly write binary MIDI files, so we export to JSON
+% which is then converted to MIDI by a Python script.
+
+module midi_export.
+
+import music_types.
+import util.
+
+% ==============================================================================
+% TEMPO CHANGE STRUCTURE
+% ==============================================================================
+
+% tempo_change(Bar, BPM) - tempo change at a specific bar
+tempo_change_bar(tempo_change(Bar, _)) = Bar.
+tempo_change_bpm(tempo_change(_, BPM)) = BPM.
+
+% ==============================================================================
+% JSON EXPORT
+% ==============================================================================
+
+% Export session to JSON file
+export_session_json(Notes, TempoChanges, FilePath) =>
+    FD = open(FilePath, write),
+
+    % Write JSON header
+    println(FD, "{"),
+
+    % Write metadata
+    println(FD, "  \"metadata\": {"),
+    println(FD, "    \"generator\": \"Music Companion\","),
+    println(FD, "    \"version\": \"1.0\","),
+    printf(FD, "    \"num_notes\": %d,%n", length(Notes)),
+    printf(FD, "    \"num_tempo_changes\": %d%n", length(TempoChanges)),
+    println(FD, "  },"),
+
+    % Write tempo changes
+    println(FD, "  \"tempo_changes\": ["),
+    write_tempo_changes_json(FD, TempoChanges),
+    println(FD, "  ],"),
+
+    % Write notes
+    println(FD, "  \"notes\": ["),
+    write_notes_json(FD, Notes),
+    println(FD, "  ]"),
+
+    println(FD, "}"),
+
+    close(FD).
+
+% Write tempo changes as JSON array elements
+write_tempo_changes_json(_, []) => true.
+write_tempo_changes_json(FD, [TC]) =>
+    write_tempo_change_json(FD, TC, false).
+write_tempo_changes_json(FD, [TC | Rest]) =>
+    write_tempo_change_json(FD, TC, true),
+    write_tempo_changes_json(FD, Rest).
+
+write_tempo_change_json(FD, tempo_change(Bar, BPM), HasMore) =>
+    printf(FD, "    {\"bar\": %d, \"bpm\": %d}", Bar, BPM),
+    if HasMore then println(FD, ",") else nl(FD) end.
+
+% Write notes as JSON array elements
+write_notes_json(_, []) => true.
+write_notes_json(FD, [Note]) =>
+    write_note_json(FD, Note, false).
+write_notes_json(FD, [Note | Rest]) =>
+    write_note_json(FD, Note, true),
+    write_notes_json(FD, Rest).
+
+write_note_json(FD, Note, HasMore) =>
+    Note = $note($pitch(midi, MidiPitch, _), $duration(DurNum, DurDen),
+                 $time_pos(Bar, Beat, Sub), VoiceId, Velocity),
+
+    printf(FD, "    {\"pitch\": %d, \"dur_num\": %d, \"dur_den\": %d, ",
+           MidiPitch, DurNum, DurDen),
+    printf(FD, "\"bar\": %d, \"beat\": %d, \"sub\": %.3f, ",
+           Bar, Beat, Sub),
+    printf(FD, "\"voice\": %d, \"velocity\": %d}",
+           VoiceId, Velocity),
+
+    if HasMore then println(FD, ",") else nl(FD) end.
+
+% ==============================================================================
+% SIMPLIFIED JSON EXPORT (for debugging)
+% ==============================================================================
+
+% Export just pitch sequence as JSON array
+export_pitches_json(Notes, FilePath) =>
+    FD = open(FilePath, write),
+    Pitches = [P : $note($pitch(midi, P, _), _, _, _, _) in Notes],
+    print(FD, "["),
+    write_pitch_list(FD, Pitches),
+    println(FD, "]"),
+    close(FD).
+
+write_pitch_list(_, []) => true.
+write_pitch_list(FD, [P]) =>
+    printf(FD, "%d", P).
+write_pitch_list(FD, [P | Rest]) =>
+    printf(FD, "%d, ", P),
+    write_pitch_list(FD, Rest).
+
+% ==============================================================================
+% CONSOLE OUTPUT (for debugging)
+% ==============================================================================
+
+% Print session summary to console
+print_session_summary(Notes, TempoChanges) =>
+    println("Session Summary:"),
+    printf("  Notes: %d%n", length(Notes)),
+    printf("  Tempo changes: %d%n", length(TempoChanges)),
+
+    if Notes != [] then
+        FirstNote = head(Notes),
+        LastNote = last(Notes),
+        FirstNote = $note(_, _, $time_pos(FirstBar, _, _), _, _),
+        LastNote = $note(_, _, $time_pos(LastBar, LastBeat, _), _, _),
+        printf("  Bars: %d - %d (beat %d)%n", FirstBar, LastBar, LastBeat)
+    end,
+
+    println(""),
+    println("Tempo changes:"),
+    foreach(TC in TempoChanges)
+        printf("  Bar %3d: %d BPM%n", tempo_change_bar(TC), tempo_change_bpm(TC))
+    end.
+
+% Print first N notes
+print_first_notes(Notes, N) =>
+    printf("First %d notes:%n", N),
+    NoteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+    Count = min(N, length(Notes)),
+    foreach(I in 1..Count)
+        Note = Notes[I],
+        Note = $note($pitch(midi, Midi, _), $duration(DN, DD),
+                     $time_pos(Bar, Beat, _), Voice, Vel),
+        NoteName = NoteNames[(Midi mod 12) + 1],
+        Octave = Midi // 12 - 1,
+        printf("  %3d: %s%d (bar %d, beat %d, dur=%d/%d, vel=%d, voice=%d)%n",
+               I, NoteName, Octave, Bar, Beat, DN, DD, Vel, Voice)
+    end.

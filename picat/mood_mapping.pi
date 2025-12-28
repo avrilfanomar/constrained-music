@@ -1,0 +1,310 @@
+% mood_mapping.pi - Map Valence-Arousal coordinates to musical parameters
+%
+% This module translates the psychological VA model into concrete
+% musical parameters that can be used for constraint-based generation.
+
+module mood_mapping.
+
+import mood.
+import music_types.
+
+% ==============================================================================
+% MUSIC PARAMETERS STRUCTURE
+% ==============================================================================
+% Contains all parameters derived from a mood point
+
+% music_params(Tempo, Mode, NoteDensity, MaxInterval, Voice, VelocityBase, VelocityVar, Legato, Dissonance)
+
+% Create default music params
+default_music_params() = $music_params(120, major, 4, 5, soprano_voice(), 80, 15, 0.9, 0.0).
+
+% Accessors
+get_tempo(music_params(T, _, _, _, _, _, _, _, _)) = T.
+get_mode(music_params(_, M, _, _, _, _, _, _, _)) = M.
+get_note_density(music_params(_, _, D, _, _, _, _, _, _)) = D.
+get_max_interval(music_params(_, _, _, I, _, _, _, _, _)) = I.
+get_voice(music_params(_, _, _, _, V, _, _, _, _)) = V.
+get_velocity_base(music_params(_, _, _, _, _, VB, _, _, _)) = VB.
+get_velocity_var(music_params(_, _, _, _, _, _, VV, _, _)) = VV.
+get_legato(music_params(_, _, _, _, _, _, _, L, _)) = L.
+get_dissonance(music_params(_, _, _, _, _, _, _, _, D)) = D.
+
+% ==============================================================================
+% MAIN MAPPING FUNCTION
+% ==============================================================================
+
+% Convert a mood to music parameters
+mood_to_params(Mood) = Params =>
+    V = get_valence(Mood),
+    A = get_arousal(Mood),
+
+    Tempo = tempo_from_va(V, A),
+    Mode = mode_from_va(V, A),
+    Density = density_from_va(V, A),
+    MaxInterval = interval_from_va(V, A),
+    Voice = voice_from_va(V, A),
+    VelBase = velocity_base_from_va(V, A),
+    VelVar = velocity_var_from_va(V, A),
+    Legato = legato_from_va(V, A),
+    Dissonance = dissonance_from_va(V, A),
+
+    Params = $music_params(Tempo, Mode, Density, MaxInterval, Voice,
+                           VelBase, VelVar, Legato, Dissonance).
+
+% ==============================================================================
+% TEMPO MAPPING
+% ==============================================================================
+% Arousal is primary driver, valence is secondary modifier
+% Range: 70-180 BPM
+
+tempo_from_va(V, A) = Tempo =>
+    % Base formula: 70 + (A+1)*45 + (V+1)*10
+    % When A=-1, V=-1: 70 BPM (slow, sad)
+    % When A=1, V=1: 180 BPM (fast, happy)
+    BaseTempo = 70 + (A + 1) * 45 + (V + 1) * 10,
+    Tempo = round(clamp(BaseTempo, 60, 180)).
+
+% ==============================================================================
+% MODE SELECTION
+% ==============================================================================
+% Valence determines "brightness" of mode
+% Arousal influences preference for modes with leading tones
+
+mode_from_va(V, A) = Mode =>
+    if V >= 0.5 then
+        % Very positive: bright modes
+        if A >= 0.3 then Mode = lydian          % Raised 4th, very bright and energetic
+        else Mode = major                        % Standard bright
+        end
+    elseif V >= 0.0 then
+        % Neutral to positive: moderately bright
+        if A >= 0.5 then Mode = mixolydian      % Major but with lowered 7th, driving
+        else Mode = major                        % Standard major
+        end
+    elseif V >= -0.5 then
+        % Neutral to negative: melancholic
+        if A >= 0.3 then Mode = dorian          % Minor with raised 6th, bittersweet energy
+        else Mode = natural_minor               % Standard melancholic
+        end
+    else
+        % Very negative: dark modes
+        if A >= 0.5 then Mode = phrygian        % Very dark but tense (Spanish feel)
+        elseif A >= 0.0 then Mode = minor       % Standard dark
+        else Mode = aeolian                      % Natural minor, subdued
+        end
+    end.
+
+% Get list of modes suitable for a valence range (for variety/randomization)
+modes_for_valence(V) = Modes =>
+    if V >= 0.5 then
+        Modes = [lydian, major, pentatonic_major]
+    elseif V >= 0.0 then
+        Modes = [major, mixolydian, ionian]
+    elseif V >= -0.5 then
+        Modes = [dorian, natural_minor, aeolian]
+    else
+        Modes = [minor, phrygian, harmonic_minor]
+    end.
+
+% ==============================================================================
+% NOTE DENSITY (Notes per bar)
+% ==============================================================================
+% Arousal drives density
+% Range: 2-8 notes per bar
+
+density_from_va(_V, A) = Density =>
+    % Base: 2 + (A+1)*3
+    % A=-1: 2 notes/bar (sparse)
+    % A=0: 5 notes/bar (moderate)
+    % A=1: 8 notes/bar (dense)
+    BaseDensity = 2 + (A + 1) * 3,
+    Density = round(clamp(BaseDensity, 2, 8)).
+
+% ==============================================================================
+% MAXIMUM INTERVAL
+% ==============================================================================
+% Extreme valence (positive or negative) prefers stepwise motion
+% Higher arousal allows slightly larger jumps
+% Range: 2-7 semitones
+
+interval_from_va(V, A) = MaxInterval =>
+    % Base: 3 + (1-|V|)*2 + A*1.5
+    % Extreme V: smaller intervals (more conjunct)
+    % Neutral V: larger intervals allowed
+    % Higher A: slightly larger jumps
+    AbsV = abs(V),
+    BaseInterval = 3 + (1 - AbsV) * 2 + A * 1.5,
+    MaxInterval = round(clamp(BaseInterval, 2, 7)).
+
+% ==============================================================================
+% VOICE/REGISTER SELECTION
+% ==============================================================================
+% Combined VA determines register
+
+voice_from_va(V, A) = Voice =>
+    if V >= 0.3, A >= 0.3 then
+        Voice = soprano_voice()     % High energy, positive: soprano (high)
+    elseif V >= 0.0, A >= 0.0 then
+        Voice = alto_voice()        % Moderate positive/energy: alto (mid-high)
+    elseif V < 0.0, A >= 0.3 then
+        Voice = alto_voice()        % Negative but energetic: alto (mid)
+    elseif V < 0.0, A < 0.0 then
+        Voice = tenor_voice()       % Sad, low energy: tenor (low)
+    else
+        Voice = alto_voice()        % Default: alto (mid)
+    end.
+
+% Get voice range limits
+voice_range(Voice) = (Low, High) =>
+    Voice = voice(_, _, _, range(Low, High)).
+
+% ==============================================================================
+% VELOCITY (Dynamics)
+% ==============================================================================
+% Arousal controls base velocity (energy level)
+% Valence controls variance (emotional intensity = more dynamic contrast)
+
+velocity_base_from_va(_V, A) = VelBase =>
+    % Range: 50-100
+    % Low arousal: quieter (50-70)
+    % High arousal: louder (80-100)
+    BaseVel = 50 + (A + 1) * 25,
+    VelBase = round(clamp(BaseVel, 45, 100)).
+
+velocity_var_from_va(V, _A) = VelVar =>
+    % Range: 10-25
+    % Extreme valence (positive or negative): more dynamic contrast
+    % Neutral valence: more even dynamics
+    AbsV = abs(V),
+    BaseVar = 10 + AbsV * 15,
+    VelVar = round(clamp(BaseVar, 8, 28)).
+
+% ==============================================================================
+% LEGATO/ARTICULATION
+% ==============================================================================
+% Inverse arousal relationship
+% Low arousal = more legato (connected, flowing)
+% High arousal = more staccato (energetic, detached)
+
+legato_from_va(_V, A) = Legato =>
+    % Range: 0.80 (staccato) to 0.95 (legato)
+    BaseLegato = 0.95 - (A + 1) * 0.075,
+    Legato = clamp(BaseLegato, 0.75, 0.98).
+
+% ==============================================================================
+% DISSONANCE LEVEL
+% ==============================================================================
+% Negative valence allows more chromaticism/dissonance
+% Positive valence stays more consonant
+
+dissonance_from_va(V, _A) = Dissonance =>
+    % Range: 0.0-0.5
+    % V=1: 0.0 (fully consonant)
+    % V=-1: 0.5 (allow more dissonance)
+    BaseDiss = max(0, -V * 0.5),
+    Dissonance = clamp(BaseDiss, 0.0, 0.5).
+
+% ==============================================================================
+% HELPER FUNCTIONS
+% ==============================================================================
+
+clamp(X, Min, Max) = R =>
+    if X < Min then R = Min
+    elseif X > Max then R = Max
+    else R = X
+    end.
+
+% ==============================================================================
+% PARAMETER SMOOTHING
+% ==============================================================================
+% For smooth transitions, parameters can be interpolated
+
+% Interpolate between two parameter sets
+interpolate_params(P1, P2, T) = Result =>
+    ClampedT = clamp(T, 0.0, 1.0),
+
+    T1 = get_tempo(P1),
+    T2 = get_tempo(P2),
+    NewTempo = round(T1 + (T2 - T1) * ClampedT),
+
+    % Mode: use P1 for first half, P2 for second half
+    NewMode = cond(ClampedT < 0.5, get_mode(P1), get_mode(P2)),
+
+    D1 = get_note_density(P1),
+    D2 = get_note_density(P2),
+    NewDensity = round(D1 + (D2 - D1) * ClampedT),
+
+    I1 = get_max_interval(P1),
+    I2 = get_max_interval(P2),
+    NewInterval = round(I1 + (I2 - I1) * ClampedT),
+
+    % Voice: use P1 for first half, P2 for second half
+    NewVoice = cond(ClampedT < 0.5, get_voice(P1), get_voice(P2)),
+
+    VB1 = get_velocity_base(P1),
+    VB2 = get_velocity_base(P2),
+    NewVelBase = round(VB1 + (VB2 - VB1) * ClampedT),
+
+    VV1 = get_velocity_var(P1),
+    VV2 = get_velocity_var(P2),
+    NewVelVar = round(VV1 + (VV2 - VV1) * ClampedT),
+
+    L1 = get_legato(P1),
+    L2 = get_legato(P2),
+    NewLegato = L1 + (L2 - L1) * ClampedT,
+
+    Dis1 = get_dissonance(P1),
+    Dis2 = get_dissonance(P2),
+    NewDissonance = Dis1 + (Dis2 - Dis1) * ClampedT,
+
+    Result = $music_params(NewTempo, NewMode, NewDensity, NewInterval, NewVoice,
+                           NewVelBase, NewVelVar, NewLegato, NewDissonance).
+
+% ==============================================================================
+% CONSTRAINT LEVEL MAPPING
+% ==============================================================================
+% Map mood to constraint level for melody generator
+
+constraint_level_from_mood(Mood) = Level =>
+    V = get_valence(Mood),
+    A = get_arousal(Mood),
+
+    % More extreme moods can use stricter constraints for coherence
+    Intensity = (abs(V) + abs(A)) / 2,
+
+    if Intensity >= 0.6 then
+        Level = strict        % Very focused, coherent melodic lines
+    elseif Intensity >= 0.3 then
+        Level = standard      % Balanced constraints
+    else
+        Level = relaxed       % More freedom near neutral mood
+    end.
+
+% ==============================================================================
+% PRINTING / DEBUGGING
+% ==============================================================================
+
+print_music_params(Params) =>
+    printf("Music Parameters:%n"),
+    printf("  Tempo:        %d BPM%n", get_tempo(Params)),
+    printf("  Mode:         %w%n", get_mode(Params)),
+    printf("  Note density: %d notes/bar%n", get_note_density(Params)),
+    printf("  Max interval: %d semitones%n", get_max_interval(Params)),
+    printf("  Velocity:     %d +/- %d%n", get_velocity_base(Params), get_velocity_var(Params)),
+    printf("  Legato:       %.2f%n", get_legato(Params)),
+    printf("  Dissonance:   %.2f%n", get_dissonance(Params)).
+
+% Show mapping for a preset
+demo_mood_mapping(PresetName) =>
+    Mood = mood_preset(PresetName),
+    printf("%nMood preset: %w%n", PresetName),
+    print_mood(Mood),
+    Params = mood_to_params(Mood),
+    print_music_params(Params).
+
+% Demo all presets
+demo_all_mappings() =>
+    foreach(Name in [sad_depressed, anxious, calm_peaceful, energized, happy, neutral])
+        demo_mood_mapping(Name),
+        println("---")
+    end.

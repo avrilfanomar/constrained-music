@@ -1,5 +1,6 @@
 % melody.pi - Constraint-based melody generation
 % Phase 1: Core melody generator using Picat's CP module
+% Extended for Music Companion with mood-aware generation
 
 module melody.
 
@@ -8,6 +9,8 @@ import temporal.
 import scale_utils.
 import basic.
 import cp.
+import mood.
+import mood_mapping.
 
 % ==============================================================================
 % MAIN MELODY GENERATION
@@ -311,3 +314,197 @@ print_pitch_sequence(Melody) =>
 join([], _) = "".
 join([X], _) = X.
 join([X|Rest], Sep) = X ++ Sep ++ join(Rest, Sep).
+
+% ==============================================================================
+% MOOD-AWARE MELODY GENERATION
+% ==============================================================================
+% For Music Companion: Generate melodies based on mood parameters
+
+% Generate a segment melody with mood-derived parameters
+% MusicParams: music_params structure from mood_mapping
+% Returns melody with appropriate characteristics for the mood
+generate_segment_melody(MusicParams, KeyRoot, NumBars, Melody) =>
+    % Extract parameters from mood mapping
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    MaxInterval = get_max_interval(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+
+    % Calculate total notes
+    TotalNotes = NumBars * Density,
+
+    % Get voice range
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+
+    % Get valid scale notes within voice range
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    % Create constraint variables for pitches
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Apply mood-aware constraints
+    apply_mood_constraints(Pitches, KeyRoot, Mode, MaxInterval, ScaleNotes),
+
+    % Solve with first-fail heuristic
+    solve([ff], Pitches),
+
+    % Build melody structure from solved pitches with mood-appropriate velocities
+    Melody = build_mood_melody(Pitches, NumBars, Density, VoiceId, VelBase, VelVar).
+
+% Apply constraints based on mood parameters
+apply_mood_constraints(Pitches, Root, _Mode, MaxInterval, ScaleNotes) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Constraint 1: Maximum interval based on mood
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
+    end,
+
+    % Constraint 2: Start on stable tones (tonic, 3rd, or 5th)
+    StablePitchClasses = [RootClass, (RootClass + 4) mod 12, (RootClass + 7) mod 12],
+    ValidStartNotes = [N : N in ScaleNotes, member(N mod 12, StablePitchClasses)],
+    Pitches[1] :: ValidStartNotes,
+
+    % Constraint 3: End on tonic
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes,
+
+    % Constraint 4: After a leap, prefer contrary motion
+    foreach(I in 1..Len-2)
+        ($abs(Pitches[I+1] - Pitches[I]) #>= 4) #=>
+            ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
+    end,
+
+    % Constraint 5: No more than 2 consecutive repeated notes
+    foreach(I in 1..Len-2)
+        #~(Pitches[I] #= Pitches[I+1] #/\ Pitches[I+1] #= Pitches[I+2])
+    end,
+
+    % Constraint 6: Ensure variety
+    nvalue(N, Pitches),
+    N #>= min(3, Len // 2).
+
+% Build melody with mood-appropriate velocities
+build_mood_melody(Pitches, NumBars, NotesPerBar, VoiceId, VelBase, VelVar) = Melody =>
+    Melody = [build_mood_note(Pitches[I], I, NotesPerBar, VoiceId, VelBase, VelVar)
+              : I in 1..length(Pitches)].
+
+% Build a single note with velocity variation for expressiveness
+build_mood_note(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar) = Note =>
+    Octave = MidiPitch // 12 - 1,
+    Bar = ((Index - 1) // NotesPerBar) + 1,
+    Beat = ((Index - 1) mod NotesPerBar) + 1,
+
+    % Add slight velocity variation for expressiveness
+    % Downbeats slightly stronger, offbeats slightly softer
+    VelOffset = cond(Beat == 1, VelVar // 2, -VelVar // 4),
+    Velocity = max(40, min(127, VelBase + VelOffset)),
+
+    Note = $note(
+        $pitch(midi, MidiPitch, Octave),
+        $duration(1, NotesPerBar),
+        $time_pos(Bar, Beat, 0),
+        VoiceId,
+        Velocity
+    ).
+
+% ==============================================================================
+% SEGMENT MELODY WITH ABSOLUTE TIMING
+% ==============================================================================
+% Generate melody for a segment with absolute time offset
+
+generate_segment_melody_timed(MusicParams, KeyRoot, NumBars, StartBar, Melody) =>
+    % First generate the basic melody
+    generate_segment_melody(MusicParams, KeyRoot, NumBars, BaseMelody),
+
+    % Adjust time positions to absolute timing
+    Melody = [adjust_note_timing(Note, StartBar) : Note in BaseMelody].
+
+% Adjust note timing to absolute bar position
+adjust_note_timing(Note, BarOffset) = AdjustedNote =>
+    Note = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, Vel),
+    NewBar = Bar + BarOffset - 1,
+    AdjustedNote = $note(Pitch, Duration, $time_pos(NewBar, Beat, Sub), VoiceId, Vel).
+
+% ==============================================================================
+% MULTI-SEGMENT MELODY CONCATENATION
+% ==============================================================================
+
+% Concatenate multiple segment melodies into one continuous melody
+concatenate_segments(SegmentMelodies) = FullMelody =>
+    FullMelody = flatten(SegmentMelodies).
+
+% Get the last pitch of a melody (for connecting segments)
+last_pitch(Melody) = Pitch =>
+    LastNote = last(Melody),
+    LastNote = $note($pitch(midi, Pitch, _), _, _, _, _).
+
+% Get the first pitch of a melody
+first_pitch(Melody) = Pitch =>
+    FirstNote = head(Melody),
+    FirstNote = $note($pitch(midi, Pitch, _), _, _, _, _).
+
+% ==============================================================================
+% SMOOTH SEGMENT CONNECTIONS
+% ==============================================================================
+% Ensure melodic continuity between segments
+
+% Generate a segment that starts near the ending pitch of the previous segment
+generate_connected_segment_melody(MusicParams, KeyRoot, NumBars, PrevLastPitch, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    MaxInterval = get_max_interval(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Apply mood constraints
+    apply_mood_constraints(Pitches, KeyRoot, Mode, MaxInterval, ScaleNotes),
+
+    % Additional constraint: First note should be close to previous segment's last note
+    % Allow interval up to MaxInterval from previous ending
+    ValidConnectionNotes = [N : N in ScaleNotes,
+                            abs(N - PrevLastPitch) =< MaxInterval + 2],
+    if ValidConnectionNotes != [] then
+        Pitches[1] :: ValidConnectionNotes
+    end,
+
+    solve([ff], Pitches),
+
+    Melody = build_mood_melody(Pitches, NumBars, Density, VoiceId, VelBase, VelVar).
+
+% ==============================================================================
+% MOOD TRANSITION UTILITIES
+% ==============================================================================
+
+% Print melody statistics for debugging
+print_melody_stats(Melody) =>
+    Pitches = melody_to_pitches(Melody),
+    Len = length(Pitches),
+    Range = max(Pitches) - min(Pitches),
+
+    % Count intervals
+    Intervals = [abs(Pitches[I+1] - Pitches[I]) : I in 1..Len-1],
+    AvgInterval = sum(Intervals) / length(Intervals),
+    MaxInt = max(Intervals),
+
+    % Count unique pitches
+    UniquePitches = length(remove_dups(Pitches)),
+
+    printf("Melody Stats: %d notes, range=%d, avg_interval=%.1f, max_interval=%d, unique=%d%n",
+           Len, Range, AvgInterval, MaxInt, UniquePitches).
+
+% Helper to remove duplicates
+remove_dups([]) = [].
+remove_dups([X|Xs]) = [X|remove_dups([Y : Y in Xs, Y != X])].

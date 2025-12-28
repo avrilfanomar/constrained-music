@@ -1,0 +1,298 @@
+% companion.pi - Music Companion main orchestrator
+%
+% Main entry point for generating emotional transition music.
+% Coordinates mood planning, segment generation, and output.
+
+module companion.
+
+import mood.
+import mood_mapping.
+import transition.
+import melody.
+import music_types.
+import temporal.
+import midi_export.
+import util.
+
+% ==============================================================================
+% MAIN ENTRY POINTS
+% ==============================================================================
+
+% Main entry point with preset names
+main =>
+    % Default demonstration: sad to energized
+    run_companion_presets(sad_depressed, energized, 300, "session.json").
+
+% Run companion with preset mood names
+run_companion_presets(StartPreset, EndPreset, DurationSecs, OutputPath) =>
+    StartMood = mood_preset(StartPreset),
+    EndMood = mood_preset(EndPreset),
+    run_companion(StartMood, EndMood, DurationSecs, OutputPath).
+
+% Main companion function with mood structures
+run_companion(StartMood, EndMood, DurationSecs, OutputPath) =>
+    println("=== Music Companion ==="),
+    nl,
+
+    % Validate moods
+    if not is_valid_mood(StartMood) then
+        throw($error(invalid_start_mood, StartMood))
+    end,
+    if not is_valid_mood(EndMood) then
+        throw($error(invalid_end_mood, EndMood))
+    end,
+
+    % Print session info
+    printf("Generating emotional transition:%n"),
+    printf("  From: "), print_mood(StartMood),
+    printf("  To:   "), print_mood(EndMood),
+    printf("  Duration: %d seconds (%.1f minutes)%n%n", DurationSecs, DurationSecs / 60.0),
+
+    % Plan the transition
+    println("Planning transition path..."),
+    Segments = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out),
+    printf("  Created %d segments%n%n", length(Segments)),
+
+    % Generate melodies for each segment
+    println("Generating music for each segment..."),
+    KeyRoot = 60,  % C4
+    AllNotes = generate_all_segments(Segments, KeyRoot),
+    printf("  Generated %d total notes%n%n", length(AllNotes)),
+
+    % Collect tempo changes for MIDI export
+    TempoChanges = collect_tempo_changes(Segments),
+
+    % Export to JSON (for Python MIDI writer)
+    println("Exporting to JSON..."),
+    export_session_json(AllNotes, TempoChanges, OutputPath),
+    printf("  Saved to: %s%n%n", OutputPath),
+
+    println("Done! Run midi_writer.py to convert to MIDI."),
+    nl.
+
+% ==============================================================================
+% SEGMENT GENERATION
+% ==============================================================================
+
+% Generate melodies for all segments and concatenate
+generate_all_segments(Segments, KeyRoot) = AllNotes =>
+    AllNotes = generate_segments_helper(Segments, KeyRoot, 1, 0, []).
+
+generate_segments_helper([], _, _, _, Acc) = flatten(reverse(Acc)).
+generate_segments_helper([Seg | Rest], KeyRoot, SegIndex, CurrentBar, Acc) = Result =>
+    NumBars = get_segment_num_bars(Seg),
+    Params = get_segment_params(Seg),
+
+    % Generate melody for this segment
+    printf("  Segment %2d: bars %3d-%3d, tempo=%3d, mode=%-12w%n",
+           SegIndex, CurrentBar + 1, CurrentBar + NumBars,
+           get_tempo(Params), get_mode(Params)),
+
+    if Acc == [] then
+        % First segment - no connection needed
+        generate_segment_melody(Params, KeyRoot, NumBars, SegmentMelody)
+    else
+        % Connect to previous segment
+        PrevMelody = head(Acc),
+        PrevLastPitch = last_pitch(PrevMelody),
+        generate_connected_segment_melody(Params, KeyRoot, NumBars, PrevLastPitch, SegmentMelody)
+    end,
+
+    % Adjust timing to absolute bar positions
+    TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
+
+    Result = generate_segments_helper(Rest, KeyRoot, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
+
+% Adjust note's bar number to absolute position
+adjust_note_bar(Note, BarOffset) = AdjustedNote =>
+    Note = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, Vel),
+    NewBar = Bar + BarOffset,
+    AdjustedNote = $note(Pitch, Duration, $time_pos(NewBar, Beat, Sub), VoiceId, Vel).
+
+% Collect tempo changes for each segment
+collect_tempo_changes(Segments) = Changes =>
+    Changes = collect_tempo_helper(Segments, 1, []).
+
+collect_tempo_helper([], _, Acc) = reverse(Acc).
+collect_tempo_helper([Seg | Rest], CurrentBar, Acc) = Result =>
+    Params = get_segment_params(Seg),
+    Tempo = get_tempo(Params),
+    NumBars = get_segment_num_bars(Seg),
+    Change = $tempo_change(CurrentBar, Tempo),
+    Result = collect_tempo_helper(Rest, CurrentBar + NumBars, [Change | Acc]).
+
+% ==============================================================================
+% COMMAND LINE INTERFACE
+% ==============================================================================
+% Note: Picat 3.9 has a bug where arguments starting with '--' cause SIGSEGV
+% We use simple argument style: 'from' instead of '--from'
+
+% Parse command line arguments
+main(Args) =>
+    % Handle special commands first
+    if Args == [] then
+        print_usage(),
+        halt
+    elseif Args == ["help"] ; Args == ["-h"] then
+        print_usage(),
+        halt
+    elseif Args == ["moods"] then
+        print_all_presets(),
+        halt
+    elseif Args == ["demo"] then
+        demo(),
+        halt
+    elseif Args == ["path"] then
+        demo_path(),
+        halt
+    end,
+
+    % Parse key=value arguments
+    ParsedArgs = parse_args(Args),
+
+    % Extract options with defaults
+    StartPreset = get_arg(ParsedArgs, from, sad_depressed),
+    EndPreset = get_arg(ParsedArgs, to, energized),
+    Duration = get_arg(ParsedArgs, duration, 300),
+    Output = get_arg(ParsedArgs, output, "session.json"),
+
+    % Handle VA coordinates if provided
+    FromVA = get_arg(ParsedArgs, from_va, none),
+    StartMood = cond(FromVA != none, parse_va(FromVA), mood_preset(StartPreset)),
+
+    ToVA = get_arg(ParsedArgs, to_va, none),
+    EndMood = cond(ToVA != none, parse_va(ToVA), mood_preset(EndPreset)),
+
+    run_companion(StartMood, EndMood, Duration, Output).
+
+% Parse VA coordinate string like "-0.7,-0.3"
+parse_va(VAString) = Mood =>
+    Parts = split(VAString, ","),
+    if length(Parts) == 2 then
+        V = to_float(Parts[1]),
+        A = to_float(Parts[2]),
+        Mood = $mood(V, A)
+    else
+        throw($error(invalid_va_format, VAString))
+    end.
+
+% Parse command line arguments (key=value format)
+parse_args(Args) = ParsedMap =>
+    ParsedMap = parse_args_helper(Args, new_map()).
+
+parse_args_helper([], Map) = Map.
+parse_args_helper([Arg | Rest], Map) = Result =>
+    % Parse key=value format
+    Parts = split(Arg, "="),
+    if length(Parts) >= 2 then
+        Key = Parts[1],
+        Value = join_rest(Parts, 2),
+        Map2 = set_arg(Map, Key, Value),
+        Result = parse_args_helper(Rest, Map2)
+    else
+        printf("Warning: Unknown argument '%s' (use key=value format)%n", Arg),
+        Result = parse_args_helper(Rest, Map)
+    end.
+
+% Join parts from index onwards (in case value contains '=')
+join_rest(Parts, StartIdx) = Result =>
+    if StartIdx > length(Parts) then
+        Result = ""
+    else
+        Result = join([Parts[I] : I in StartIdx..length(Parts)], "=")
+    end.
+
+% Set argument in map based on key (put modifies in-place)
+set_arg(Map, "from", Value) = Map =>
+    Map.put(from, to_atom(Value)).
+set_arg(Map, "to", Value) = Map =>
+    Map.put(to, to_atom(Value)).
+set_arg(Map, "from_va", Value) = Map =>
+    Map.put(from_va, Value).
+set_arg(Map, "to_va", Value) = Map =>
+    Map.put(to_va, Value).
+set_arg(Map, "duration", Value) = Map =>
+    Map.put(duration, to_integer(Value)).
+set_arg(Map, "output", Value) = Map =>
+    Map.put(output, Value).
+set_arg(Map, Key, _Value) = Map =>
+    printf("Warning: Unknown option '%s'%n", Key).
+
+% Get argument with default
+get_arg(Map, Key, Default) = Value =>
+    if Map.has_key(Key) then
+        Value = Map.get(Key)
+    else
+        Value = Default
+    end.
+
+% Convert string to atom
+to_atom(S) = A =>
+    A = to_lowercase(S).parse_term().
+
+% Helper: join list with separator
+join([], _) = "".
+join([X], _) = X.
+join([X|Rest], Sep) = X ++ Sep ++ join(Rest, Sep).
+
+% Print usage information
+print_usage() =>
+    println("Music Companion - Emotional Transition Music Generator"),
+    nl,
+    println("Usage: picat companion.pi [command | options]"),
+    nl,
+    println("Commands:"),
+    println("  demo         Run quick demo (60 sec, sad to energized)"),
+    println("  path         Show transition path without generating music"),
+    println("  moods        List available mood presets"),
+    println("  help, -h     Show this help message"),
+    nl,
+    println("Options (key=value format):"),
+    println("  from=PRESET      Start mood preset (default: sad_depressed)"),
+    println("  to=PRESET        End mood preset (default: energized)"),
+    println("  from_va=V,A      Start mood as valence,arousal (e.g., -0.7,-0.3)"),
+    println("  to_va=V,A        End mood as valence,arousal (e.g., 0.5,0.8)"),
+    println("  duration=SECS    Duration in seconds (default: 300)"),
+    println("  output=PATH      Output JSON file (default: session.json)"),
+    nl,
+    println("Examples:"),
+    println("  picat companion.pi demo"),
+    println("  picat companion.pi from=sad_depressed to=energized duration=300"),
+    println("  picat companion.pi from_va=-0.7,-0.3 to_va=0.5,0.8 duration=600"),
+    nl,
+    println("After generating the JSON file, run:"),
+    println("  python scripts/midi_writer.py session.json session.mid").
+
+% ==============================================================================
+% DEMO AND TESTING
+% ==============================================================================
+
+% Quick demo with short duration
+demo() =>
+    run_companion_presets(sad_depressed, energized, 60, "demo.json").
+
+% Demo with custom moods
+demo_custom() =>
+    Start = $mood(-0.5, -0.2),  % Slightly sad, low energy
+    End = $mood(0.4, 0.5),      % Moderately happy, moderate energy
+    run_companion(Start, End, 120, "custom_demo.json").
+
+% Demo showing transition path only (no generation)
+demo_path() =>
+    StartMood = mood_preset(anxious),
+    EndMood = mood_preset(calm_peaceful),
+    Segments = plan_transition(StartMood, EndMood, 300, ease_in_out),
+    print_transition_summary(StartMood, EndMood, Segments),
+    nl,
+    print_transition_path(Segments).
+
+% Test mood mapping
+test_mood_mapping() =>
+    println("Testing mood-to-music mapping:"),
+    nl,
+    foreach(Preset in [sad_depressed, anxious, calm_peaceful, energized, happy])
+        M = mood_preset(Preset),
+        P = mood_to_params(M),
+        printf("%-15w: tempo=%3d, mode=%-12w, density=%d, velocity=%d%n",
+               Preset, get_tempo(P), get_mode(P), get_note_density(P), get_velocity_base(P))
+    end.
