@@ -4,7 +4,7 @@
 module harmonic.
 
 import cp.
-import basic.
+import music_constraints.
 
 % ==============================================================================
 % CHORD REPRESENTATION

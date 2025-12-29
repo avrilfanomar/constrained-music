@@ -7,7 +7,7 @@ module melody.
 import music_types.
 import temporal.
 import scale_utils.
-import basic.
+import music_constraints.
 import advanced.
 import harmonic.
 import rhythmic.

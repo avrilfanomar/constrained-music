@@ -1,7 +1,8 @@
-% basic.pi - Basic constraint templates for music generation
+% music_constraints.pi - Basic constraint templates for music generation
 % Phase 1: Constraint building blocks for future phases
+% Note: Named 'music_constraints' to avoid conflict with Picat's built-in 'basic' module
 
-module basic.
+module music_constraints.
 
 import cp.
 
@@ -159,7 +160,7 @@ ends_on_one_of(Notes, TargetNotes) =>
 % Start and end on same pitch class
 same_pitch_class_endpoints(Notes) =>
     Len = length(Notes),
-    (Notes[1] mod 12) #= (Notes[Len] mod 12).
+    same_pitch_class(Notes[1], Notes[Len]).
 
 % Climax constraint: highest note appears once in middle third
 single_climax(Notes) =>
@@ -245,3 +246,43 @@ max_of_list([X|Rest]) = max(X, max_of_list(Rest)).
 % Min of a list
 min_of_list([X]) = X.
 min_of_list([X|Rest]) = min(X, min_of_list(Rest)).
+
+% ==============================================================================
+% PITCH CLASS CONSTRAINTS FOR CP VARIABLES
+% ==============================================================================
+% Regular `mod` doesn't work with CP constraint variables.
+% These helpers create proper constraint relationships for pitch class operations.
+
+% Create a pitch class constraint variable for a MIDI note
+% PitchClass will be a CP variable in 0..11 representing Note mod 12
+% Works for MIDI range 0-127 (standard MIDI)
+pitch_class_var(Note, PitchClass) =>
+    PitchClass :: 0..11,
+    Quotient :: 0..10,  % MIDI 0-127 means quotient 0-10
+    Note #= 12 * Quotient + PitchClass.
+
+% Constrain a note to have a specific pitch class
+% More efficient than creating aux variable when target is known
+note_has_pitch_class(Note, TargetPC) =>
+    PC :: 0..11,
+    Q :: 0..10,
+    Note #= 12 * Q + PC,
+    PC #= TargetPC.
+
+% Check if note's pitch class equals target pitch class (reified)
+% Returns a 0/1 constraint expression
+pitch_class_eq_reified(Note, TargetPC) = Result =>
+    PC :: 0..11,
+    Q :: 0..10,
+    Note #= 12 * Q + PC,
+    Result = (PC #= TargetPC).
+
+% Constrain two notes to have the same pitch class
+same_pitch_class(Note1, Note2) =>
+    PC1 :: 0..11,
+    PC2 :: 0..11,
+    Q1 :: 0..10,
+    Q2 :: 0..10,
+    Note1 #= 12 * Q1 + PC1,
+    Note2 #= 12 * Q2 + PC2,
+    PC1 #= PC2.

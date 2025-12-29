@@ -111,8 +111,8 @@ generate_segments_helper([Seg | Rest], KeyRoot, SegIndex, CurrentBar, Acc) = Res
 
     % Print after successful generation to avoid repeated output on backtracking
     printf("  Segment %2d: bars %3d-%3d, tempo=%3d, mode=%-12w%n",
-           SegIndex, CurrentBar + 1, CurrentBar + NumBars,
-           get_tempo(Params), get_mode(Params)),
+    SegIndex, CurrentBar + 1, CurrentBar + NumBars,
+    get_tempo(Params), get_mode(Params)),
 
     % Adjust timing to absolute bar positions
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
@@ -157,6 +157,9 @@ main(Args) =>
         halt
     elseif Args == ["demo"] then
         demo(),
+        halt
+    elseif Args == ["demo_custom"] then
+        demo_custom(),
         halt
     elseif Args == ["path"] then
         demo_path(),
@@ -298,7 +301,7 @@ demo() =>
 
 % Demo with custom moods
 demo_custom() =>
-    Start = $mood(-0.5, -0.2),  % Slightly sad, low energy
+    Start = $mood(- 0.5, - 0.2),  % Slightly sad, low energy
     End = $mood(0.4, 0.5),      % Moderately happy, moderate energy
     run_companion(Start, End, 120, "custom_demo.json").
 
@@ -319,5 +322,5 @@ test_mood_mapping() =>
         M = mood_preset(Preset),
         P = mood_to_params(M),
         printf("%-15w: tempo=%3d, mode=%-12w, density=%d, velocity=%d%n",
-               Preset, get_tempo(P), get_mode(P), get_note_density(P), get_velocity_base(P))
+        Preset, get_tempo(P), get_mode(P), get_note_density(P), get_velocity_base(P))
     end.

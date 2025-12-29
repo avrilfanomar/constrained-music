@@ -4,7 +4,7 @@
 module rhythmic.
 
 import cp.
-import basic.
+import music_constraints.
 
 % ==============================================================================
 % DURATION REPRESENTATION

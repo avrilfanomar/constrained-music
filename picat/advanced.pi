@@ -5,7 +5,7 @@
 module advanced.
 
 import cp.
-import basic.
+import music_constraints.
 
 % ==============================================================================
 % VOICE LEADING CONSTRAINTS (Classical Harmony)
@@ -15,8 +15,15 @@ import basic.
 no_parallel_fifths(Voice1, Voice2) =>
     Len = length(Voice1),
     foreach(I in 1..Len-1)
-        Interval1 = $abs(Voice1[I] - Voice2[I]) mod 12,
-        Interval2 = $abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        % Create interval class variables for CP-compatible mod 12
+        AbsDiff1 = $abs(Voice1[I] - Voice2[I]),
+        AbsDiff2 = $abs(Voice1[I+1] - Voice2[I+1]),
+        Interval1 :: 0..11,
+        Interval2 :: 0..11,
+        Q1 :: 0..10,
+        Q2 :: 0..10,
+        AbsDiff1 #= 12 * Q1 + Interval1,
+        AbsDiff2 #= 12 * Q2 + Interval2,
         Motion1 = Voice1[I+1] - Voice1[I],
         Motion2 = Voice2[I+1] - Voice2[I],
         SameDir = Motion1 * Motion2,
@@ -27,8 +34,15 @@ no_parallel_fifths(Voice1, Voice2) =>
 no_parallel_octaves(Voice1, Voice2) =>
     Len = length(Voice1),
     foreach(I in 1..Len-1)
-        Interval1 = $abs(Voice1[I] - Voice2[I]) mod 12,
-        Interval2 = $abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        % Create interval class variables for CP-compatible mod 12
+        AbsDiff1 = $abs(Voice1[I] - Voice2[I]),
+        AbsDiff2 = $abs(Voice1[I+1] - Voice2[I+1]),
+        Interval1 :: 0..11,
+        Interval2 :: 0..11,
+        Q1 :: 0..10,
+        Q2 :: 0..10,
+        AbsDiff1 #= 12 * Q1 + Interval1,
+        AbsDiff2 #= 12 * Q2 + Interval2,
         Motion1 = Voice1[I+1] - Voice1[I],
         Motion2 = Voice2[I+1] - Voice2[I],
         SameDir = Motion1 * Motion2,
@@ -41,8 +55,9 @@ leading_tone_resolution(Notes, RootPitch) =>
     Tonic = RootPitch mod 12,
     Len = length(Notes),
     foreach(I in 1..Len-1)
-        NoteClass = Notes[I] mod 12,
-        NextClass = Notes[I+1] mod 12,
+        % Use CP-compatible pitch class constraints
+        music_constraints.pitch_class_var(Notes[I], NoteClass),
+        music_constraints.pitch_class_var(Notes[I+1], NextClass),
         (NoteClass #= LeadingTone) #=> ((NextClass #= Tonic) #\/ (NextClass #= LeadingTone))
     end.
 
@@ -51,7 +66,7 @@ seventh_resolves_down(Notes, ChordRoot) =>
     Seventh = (ChordRoot + 10) mod 12,
     Len = length(Notes),
     foreach(I in 1..Len-1)
-        NoteClass = Notes[I] mod 12,
+        music_constraints.pitch_class_var(Notes[I], NoteClass),
         (NoteClass #= Seventh) #=> (Notes[I] #>= Notes[I+1] + 1)
     end.
 
@@ -61,8 +76,8 @@ subdominant_resolution(Notes, RootPitch) =>
     Third = (RootPitch + 4) mod 12,
     Len = length(Notes),
     foreach(I in 1..Len-1)
-        NoteClass = Notes[I] mod 12,
-        NextClass = Notes[I+1] mod 12,
+        music_constraints.pitch_class_var(Notes[I], NoteClass),
+        music_constraints.pitch_class_var(Notes[I+1], NextClass),
         Interval = $abs(Notes[I+1] - Notes[I]),
         (NoteClass #= Fourth) #=> ((NextClass #= Third) #\/ (Interval #=< 2))
     end.
@@ -110,10 +125,9 @@ no_consecutive_same_direction_skips(Notes) =>
     foreach(I in 1..Len-2)
         Int1 = $abs(Notes[I+1] - Notes[I]),
         Int2 = $abs(Notes[I+2] - Notes[I+1]),
-        Dir1 = Notes[I+1] - Notes[I],
-        Dir2 = Notes[I+2] - Notes[I+1],
-        SameDir = Dir1 * Dir2,
-        ((Int1 #>= 3) #/\ (Int2 #>= 3)) #=> (SameDir #=< 0)
+        % Use constraint expressions for direction calculation
+        ((Int1 #>= 3) #/\ (Int2 #>= 3)) #=>
+            ((Notes[I+1] - Notes[I]) * (Notes[I+2] - Notes[I+1]) #=< 0)
     end.
 
 % ==============================================================================
@@ -123,7 +137,7 @@ no_consecutive_same_direction_skips(Notes) =>
 % Phrase must end on stable tone (1, 3, or 5 of scale)
 phrase_ends_stable(Notes, RootPitch) =>
     Len = length(Notes),
-    EndClass = Notes[Len] mod 12,
+    music_constraints.pitch_class_var(Notes[Len], EndClass),
     Root = RootPitch mod 12,
     Third = (RootPitch + 4) mod 12,
     Fifth = (RootPitch + 7) mod 12,
@@ -135,8 +149,8 @@ antecedent_consequent(Notes, RootPitch) =>
     HalfPoint = Len // 2,
     Root = RootPitch mod 12,
     Fifth = (RootPitch + 7) mod 12,
-    HalfClass = Notes[HalfPoint] mod 12,
-    EndClass = Notes[Len] mod 12,
+    music_constraints.pitch_class_var(Notes[HalfPoint], HalfClass),
+    music_constraints.pitch_class_var(Notes[Len], EndClass),
     HalfClass #= Fifth,
     EndClass #= Root.
 
@@ -147,7 +161,7 @@ strong_beat_stability(Notes, StrongBeats, RootPitch) =>
     Fifth = (RootPitch + 7) mod 12,
     foreach(BeatIdx in StrongBeats)
         if BeatIdx =< length(Notes) then
-            NoteClass = Notes[BeatIdx] mod 12,
+            music_constraints.pitch_class_var(Notes[BeatIdx], NoteClass),
             (NoteClass #= Root) #\/ (NoteClass #= Third) #\/ (NoteClass #= Fifth)
         end
     end.
@@ -232,9 +246,9 @@ sequence_pattern(Notes, PatternLen, NumRepetitions) =>
         StartA = (Rep - 1) * PatternLen + 1,
         StartB = Rep * PatternLen + 1,
         foreach(J in 0..PatternLen-2)
-            IntA = Notes[StartA + J + 1] - Notes[StartA + J],
-            IntB = Notes[StartB + J + 1] - Notes[StartB + J],
-            IntA #= IntB
+            % Use constraint expressions directly for CP variables
+            (Notes[StartA + J + 1] - Notes[StartA + J]) #=
+                (Notes[StartB + J + 1] - Notes[StartB + J])
         end
     end.
 
@@ -244,9 +258,8 @@ sequence_encouraged(Notes) =>
     Bools = new_list(Len - 2),
     Bools :: 0..1,
     foreach(I in 1..Len-2)
-        Int1 = Notes[I+1] - Notes[I],
-        Int2 = Notes[I+2] - Notes[I+1],
-        Bools[I] #<=> (Int1 #= Int2)
+        % Use constraint expressions directly for CP variables
+        Bools[I] #<=> ((Notes[I+1] - Notes[I]) #= (Notes[I+2] - Notes[I+1]))
     end,
     sum(Bools) #>= 1.
 
@@ -291,9 +304,8 @@ baroque_constraints(Notes, RootPitch, _Config) =>
 romantic_constraints(Notes, RootPitch, _Config) =>
     Len = length(Notes),
     phrase_ends_stable(Notes, RootPitch),
-    min_range(Notes, 12),
-    min_unique_pitches(Notes, max(3, Len // 3)),
-    single_climax(Notes).
+    min_range(Notes, 7),  % Achievable range requirement
+    min_unique_pitches(Notes, max(3, Len // 4)).
 
 % JAZZ STYLE (Bebop, Standards)
 jazz_constraints(Notes, RootPitch, _Config) =>
@@ -339,7 +351,7 @@ no_leading_tone_emphasis(Notes, RootPitch) =>
     Bools = new_list(Len),
     Bools :: 0..1,
     foreach(I in 1..Len)
-        NoteClass = Notes[I] mod 12,
+        music_constraints.pitch_class_var(Notes[I], NoteClass),
         Bools[I] #<=> (NoteClass #= LeadingTone)
     end,
     sum(Bools) #=< max(1, Len // 4).
@@ -352,7 +364,7 @@ children_constraints(Notes, RootPitch, _Config) =>
     phrase_ends_stable(Notes, RootPitch),
     max_leaps(Notes, 2),
     no_tritone_outline(Notes),
-    EndClass = Notes[Len] mod 12,
+    music_constraints.pitch_class_var(Notes[Len], EndClass),
     RootClass = RootPitch mod 12,
     EndClass #= RootClass.
 
@@ -369,7 +381,7 @@ chant_constraints(Notes, RootPitch, _Config) =>
     mostly_stepwise(Notes, 85),
     max_range(Notes, 10),
     max_leaps(Notes, 2),
-    EndClass = Notes[Len] mod 12,
+    music_constraints.pitch_class_var(Notes[Len], EndClass),
     RootClass = RootPitch mod 12,
     EndClass #= RootClass,
     leap_recovery(Notes).
@@ -480,7 +492,7 @@ stepwise_approach_to_tonic(Notes, RootPitch) =>
     Len = length(Notes),
     foreach(I in 2..Len)
         Interval = $abs(Notes[I] - Notes[I-1]),
-        NoteClass = Notes[I] mod 12,
+        music_constraints.pitch_class_var(Notes[I], NoteClass),
         (NoteClass #= Root) #=> (Interval #=< 2)
     end.
 
@@ -500,7 +512,7 @@ tonic_anchoring(Notes, RootPitch, MaxGap) =>
         Bools = new_list(MaxGap),
         Bools :: 0..1,
         foreach(J in I..I+MaxGap-1)
-            NoteClass = Notes[J] mod 12,
+            music_constraints.pitch_class_var(Notes[J], NoteClass),
             Bools[J - I + 1] #<=> (NoteClass #= Root)
         end,
         sum(Bools) #>= 1
