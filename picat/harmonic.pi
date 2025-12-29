@@ -1,0 +1,218 @@
+% harmonic.pi - Harmonic and chord progression constraints
+% Constraints for chord progressions, harmonic rhythm, and chord-melody relationships
+
+module harmonic.
+
+import cp.
+import basic.
+
+% ==============================================================================
+% CHORD REPRESENTATION
+% ==============================================================================
+% Chords represented as lists of pitch classes or MIDI notes
+
+% Basic triads - intervals from root
+chord_intervals(major) = [0, 4, 7].
+chord_intervals(minor) = [0, 3, 7].
+chord_intervals(diminished) = [0, 3, 6].
+chord_intervals(augmented) = [0, 4, 8].
+
+% Seventh chords
+chord_intervals(major7) = [0, 4, 7, 11].
+chord_intervals(dominant7) = [0, 4, 7, 10].
+chord_intervals(minor7) = [0, 3, 7, 10].
+chord_intervals(half_diminished7) = [0, 3, 6, 10].
+chord_intervals(diminished7) = [0, 3, 6, 9].
+
+% Suspended chords
+chord_intervals(sus2) = [0, 2, 7].
+chord_intervals(sus4) = [0, 5, 7].
+chord_intervals(power) = [0, 7].
+
+% ==============================================================================
+% CHORD FUNCTION DEFINITIONS
+% ==============================================================================
+
+% Major key chord functions
+chord_function(major, 1) = tonic.
+chord_function(major, 2) = supertonic.
+chord_function(major, 3) = mediant.
+chord_function(major, 4) = subdominant.
+chord_function(major, 5) = dominant.
+chord_function(major, 6) = submediant.
+chord_function(major, 7) = leading_tone.
+
+% ==============================================================================
+% HARMONIC PROGRESSION CONSTRAINTS
+% ==============================================================================
+
+% Valid chord progression in common practice
+valid_progression(ChordRoots, _Mode) =>
+    Len = length(ChordRoots),
+    foreach(I in 1..Len-1)
+        valid_resolution(ChordRoots[I], ChordRoots[I+1])
+    end.
+
+% Common chord resolutions
+valid_resolution(Degree1, Degree2) =>
+    ValidPairs = [
+        (5, 1), (4, 1), (7, 1), (2, 5), (4, 5), (6, 5),
+        (1, 4), (1, 5), (1, 6), (5, 6), (6, 4), (6, 2),
+        (3, 6), (3, 4), (1, 2), (1, 3), (4, 2),
+        (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7)
+    ],
+    member((Degree1, Degree2), ValidPairs).
+
+% Enforce cadence at phrase ending
+cadence_constraint(ChordRoots, CadenceType) =>
+    Len = length(ChordRoots),
+    if CadenceType == authentic then
+        ChordRoots[Len-1] #= 5,
+        ChordRoots[Len] #= 1
+    elseif CadenceType == plagal then
+        ChordRoots[Len-1] #= 4,
+        ChordRoots[Len] #= 1
+    elseif CadenceType == half then
+        ChordRoots[Len] #= 5
+    elseif CadenceType == deceptive then
+        ChordRoots[Len-1] #= 5,
+        ChordRoots[Len] #= 6
+    end.
+
+% Start on tonic
+starts_on_tonic(ChordRoots) =>
+    ChordRoots[1] #= 1.
+
+% ==============================================================================
+% HARMONIC RHYTHM CONSTRAINTS
+% ==============================================================================
+
+% Harmonic rhythm: how often chords change
+harmonic_rhythm_regular(ChordChanges, Interval) =>
+    Len = length(ChordChanges),
+    foreach(I in 1..Len)
+        Pos = I - 1,
+        if Pos mod Interval == 0 then
+            ChordChanges[I] #= 1
+        else
+            ChordChanges[I] #= 0
+        end
+    end.
+
+% Minimum chord duration (in beats)
+min_chord_duration(ChordChanges, MinDuration) =>
+    Len = length(ChordChanges),
+    foreach(I in 1..Len-MinDuration+1)
+        Bools = new_list(MinDuration - 1),
+        Bools :: 0..1,
+        foreach(J in 1..MinDuration-1)
+            Bools[J] #<=> (ChordChanges[I+J] #= 0)
+        end,
+        (ChordChanges[I] #= 1) #=> (sum(Bools) #= MinDuration - 1)
+    end.
+
+% ==============================================================================
+% CHORD-MELODY RELATIONSHIP CONSTRAINTS
+% ==============================================================================
+
+% Melody emphasizes chord tones on strong beats
+melody_emphasizes_harmony(MelodyNotes, ChordTones, StrongBeats) =>
+    foreach(Beat in StrongBeats)
+        if Beat =< length(MelodyNotes) then
+            NoteClass = MelodyNotes[Beat] mod 12,
+            member(NoteClass, ChordTones)
+        end
+    end.
+
+% ==============================================================================
+% VOICE LEADING IN CHORD PROGRESSIONS
+% ==============================================================================
+
+% Smooth voice leading: minimize total motion between chords
+smooth_voice_leading(Chord1Notes, Chord2Notes, MaxTotalMotion) =>
+    Len = length(Chord1Notes),
+    Bools = new_list(Len),
+    Bools :: 0..127,
+    foreach(I in 1..Len)
+        Motion = $abs(Chord2Notes[I] - Chord1Notes[I]),
+        Bools[I] #= Motion
+    end,
+    sum(Bools) #=< MaxTotalMotion.
+
+% No voice should move more than MaxMotion semitones
+max_single_voice_motion(Chord1Notes, Chord2Notes, MaxMotion) =>
+    foreach(I in 1..length(Chord1Notes))
+        Motion = $abs(Chord2Notes[I] - Chord1Notes[I]),
+        Motion #=< MaxMotion
+    end.
+
+% ==============================================================================
+% STYLE-SPECIFIC HARMONIC CONSTRAINTS
+% ==============================================================================
+
+% Pop/Rock: I-V-vi-IV or similar simple progressions
+pop_progression(ChordRoots) =>
+    Len = length(ChordRoots),
+    ValidPairs = [
+        (1, 5), (5, 6), (6, 4), (4, 1),
+        (1, 4), (4, 5), (5, 1),
+        (1, 6), (6, 4), (4, 5),
+        (1, 1), (4, 4), (5, 5), (6, 6)
+    ],
+    foreach(I in 1..Len-1)
+        member((ChordRoots[I], ChordRoots[I+1]), ValidPairs)
+    end.
+
+% Classical: functional harmony with proper resolutions
+classical_progression(ChordRoots, Mode) =>
+    valid_progression(ChordRoots, Mode),
+    starts_on_tonic(ChordRoots),
+    cadence_constraint(ChordRoots, authentic).
+
+% Modal: avoid V-I resolution
+modal_progression(ChordRoots) =>
+    Len = length(ChordRoots),
+    foreach(I in 1..Len-1)
+        #~((ChordRoots[I] #= 5) #/\ (ChordRoots[I+1] #= 1))
+    end,
+    starts_on_tonic(ChordRoots).
+
+% ==============================================================================
+% BASS LINE CONSTRAINTS
+% ==============================================================================
+
+% Bass should generally move by step or by fourth/fifth
+bass_motion_constraint(BassNotes) =>
+    Len = length(BassNotes),
+    AllowedIntervals = [0, 1, 2, 5, 7],
+    foreach(I in 1..Len-1)
+        Interval = $abs(BassNotes[I+1] - BassNotes[I]) mod 12,
+        member(Interval, AllowedIntervals)
+    end.
+
+% Avoid bass doubling leading tone
+bass_avoids_leading_tone(BassNotes, RootPitch) =>
+    LeadingTone = (RootPitch + 11) mod 12,
+    foreach(Note in BassNotes)
+        NoteClass = Note mod 12,
+        NoteClass #!= LeadingTone
+    end.
+
+% ==============================================================================
+% UTILITIES
+% ==============================================================================
+
+% Check if a note is a chord tone
+is_chord_tone(Note, ChordRoot, ChordType) =>
+    Intervals = chord_intervals(ChordType),
+    NoteClass = Note mod 12,
+    RootClass = ChordRoot mod 12,
+    Offset = (NoteClass - RootClass + 12) mod 12,
+    member(Offset, Intervals).
+
+% Constraint for sorted list
+increasing([]) => true.
+increasing([_]) => true.
+increasing([A, B | Rest]) =>
+    A #=< B,
+    increasing([B | Rest]).

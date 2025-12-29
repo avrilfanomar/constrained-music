@@ -8,6 +8,9 @@ import music_types.
 import temporal.
 import scale_utils.
 import basic.
+import advanced.
+import harmonic.
+import rhythmic.
 import cp.
 import mood.
 import mood_mapping.
@@ -565,3 +568,222 @@ print_melody_stats(Melody) =>
 % Helper to remove duplicates
 remove_dups([]) = [].
 remove_dups([X|Xs]) = [X|remove_dups([Y : Y in Xs, Y != X])].
+
+% ==============================================================================
+% STYLE-BASED MELODY GENERATION
+% ==============================================================================
+% Generate melodies using style-specific constraints from the advanced module
+
+% Generate melody with a specific musical style
+% Style: classical, baroque, romantic, jazz, folk, minimalist, contemporary, modal, children, blues, chant
+generate_melody_with_style(Config, Style, Melody) =>
+    generate_melody_with_style_intensity(Config, Style, standard, Melody).
+
+% Generate melody with style and intensity level
+% Intensity: light, standard, strict
+generate_melody_with_style_intensity(Config, Style, Intensity, Melody) =>
+    Config = $config(
+        meter = Meter,
+        key_root = Root,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = _Tempo,
+        voice = Voice
+    ),
+    TotalNotes = NumBars * NotesPerBar,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(Root, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Apply style-specific constraints based on intensity
+    apply_style_constraints(Pitches, Root, Config, Style, Intensity, ScaleNotes),
+
+    % Solve
+    solve([ff], Pitches),
+
+    BeatsPerBar = beats_per_bar(Meter),
+    Melody = build_melody(Pitches, NumBars, NotesPerBar, BeatsPerBar, VoiceId).
+
+% Apply style constraints with proper intensity
+apply_style_constraints(Pitches, Root, Config, Style, Intensity, ScaleNotes) =>
+    RootClass = Root mod 12,
+    Len = length(Pitches),
+
+    % First, apply base constraints (ensure valid melody structure)
+    % End on tonic
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes,
+
+    % Then apply style-specific constraints
+    if Intensity == light then
+        advanced.apply_style_light(Pitches, Root, Config, Style)
+    elseif Intensity == strict then
+        advanced.apply_style_strict(Pitches, Root, Config, Style)
+    else
+        advanced.apply_style(Pitches, Root, Config, Style)
+    end.
+
+% ==============================================================================
+% STYLE-AWARE SEGMENT GENERATION
+% ==============================================================================
+% For multi-segment compositions with consistent style
+
+% Generate a segment melody with both mood and style constraints
+generate_styled_segment_melody(MusicParams, KeyRoot, NumBars, Style, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    MaxInterval = get_max_interval(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Apply combined mood and style constraints
+    apply_combined_constraints(Pitches, KeyRoot, Mode, MaxInterval, Style, ScaleNotes),
+
+    SolveOpts = solve_options_for_randomness(Randomness),
+    solve(SolveOpts, Pitches),
+
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% Apply both mood-based and style-based constraints
+apply_combined_constraints(Pitches, Root, _Mode, MaxInterval, Style, ScaleNotes) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Mood constraints (from MaxInterval)
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
+    end,
+
+    % Start on stable tones
+    StablePitchClasses = [RootClass, (RootClass + 4) mod 12, (RootClass + 7) mod 12],
+    ValidStartNotes = [N : N in ScaleNotes, member(N mod 12, StablePitchClasses)],
+    Pitches[1] :: ValidStartNotes,
+
+    % End on tonic
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes,
+
+    % No consecutive repeated notes
+    foreach(I in 1..Len-1)
+        Pitches[I] #!= Pitches[I+1]
+    end,
+
+    % Apply style-specific constraints (light version to combine with mood)
+    if Style == classical then
+        advanced.leading_tone_resolution(Pitches, Root),
+        advanced.mostly_stepwise(Pitches, 60),
+        advanced.approach_climax_by_step(Pitches)
+    elseif Style == baroque then
+        advanced.leading_tone_resolution(Pitches, Root),
+        if Len >= 8 then advanced.sequence_encouraged(Pitches) end
+    elseif Style == romantic then
+        min_range(Pitches, 8),
+        single_climax(Pitches)
+    elseif Style == jazz then
+        min_unique_pitches(Pitches, Len // 3)
+    elseif Style == folk then
+        advanced.mostly_stepwise(Pitches, 65),
+        max_range(Pitches, 12)
+    elseif Style == minimalist then
+        max_range(Pitches, 7),
+        max_leaps(Pitches, 2)
+    elseif Style == modal then
+        advanced.no_leading_tone_emphasis(Pitches, Root)
+    elseif Style == children then
+        max_range(Pitches, 8),
+        advanced.mostly_stepwise(Pitches, 70)
+    elseif Style == blues then
+        max_range(Pitches, 14),
+        max_consecutive_repeats(Pitches, 3)
+    elseif Style == chant then
+        advanced.mostly_stepwise(Pitches, 80),
+        max_range(Pitches, 10)
+    else
+        % Default: just basic variety
+        nvalue(N, Pitches),
+        N #>= 3
+    end.
+
+% ==============================================================================
+% CONNECTED SEGMENT WITH STYLE
+% ==============================================================================
+
+% Generate a connected segment with both mood and style
+generate_connected_styled_segment(MusicParams, KeyRoot, NumBars, PrevLastPitch, Style, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    MaxInterval = get_max_interval(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Apply combined constraints
+    apply_combined_constraints(Pitches, KeyRoot, Mode, MaxInterval, Style, ScaleNotes),
+
+    % Connection constraint
+    ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 2],
+    if ValidConnectionNotes != [] then
+        Pitches[1] :: ValidConnectionNotes
+    end,
+
+    SolveOpts = solve_options_for_randomness(Randomness),
+    solve(SolveOpts, Pitches),
+
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% ==============================================================================
+% STYLE PRESETS WITH MOOD COMPATIBILITY
+% ==============================================================================
+
+% Get recommended style based on mood
+% Maps valence-arousal to appropriate musical style
+recommended_style_for_mood(Mood) = Style =>
+    Mood = $mood(Valence, Arousal),
+    if Valence >= 0.5, Arousal >= 0.5 then
+        Style = jazz      % High energy, positive
+    elseif Valence >= 0.5, Arousal < 0 then
+        Style = folk      % Calm, positive
+    elseif Valence < -0.3, Arousal >= 0.5 then
+        Style = romantic  % Tense, dramatic
+    elseif Valence < -0.3, Arousal < -0.3 then
+        Style = chant     % Somber, meditative
+    elseif Valence >= 0, Arousal >= 0 then
+        Style = classical % Balanced, moderate
+    else
+        Style = modal     % Ambiguous, atmospheric
+    end.
+
+% Get all available styles
+get_available_styles() = Styles =>
+    Styles = available_styles().
+
+% Get style description
+get_style_description(Style) = Desc =>
+    Desc = style_description(Style).
+
+% Print available styles
+print_available_styles() =>
+    println("Available musical styles:"),
+    foreach(Style in available_styles())
+        printf("  %w: %s%n", Style, style_description(Style))
+    end.

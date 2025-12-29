@@ -1,0 +1,225 @@
+% rhythmic.pi - Rhythmic and temporal constraints
+% Constraints for rhythm patterns, metric structure, and temporal relationships
+
+module rhythmic.
+
+import cp.
+import basic.
+
+% ==============================================================================
+% DURATION REPRESENTATION
+% ==============================================================================
+% Durations represented as integers (in ticks/subdivisions)
+% Common mapping: 16 = whole note, 8 = half, 4 = quarter, 2 = eighth, 1 = sixteenth
+
+% Duration values (in sixteenth-note units)
+duration_value(whole, 16).
+duration_value(half, 8).
+duration_value(dotted_half, 12).
+duration_value(quarter, 4).
+duration_value(dotted_quarter, 6).
+duration_value(eighth, 2).
+duration_value(dotted_eighth, 3).
+duration_value(sixteenth, 1).
+
+% ==============================================================================
+% METRIC CONSTRAINTS
+% ==============================================================================
+
+% Ensure durations sum to correct bar length
+bar_fills_correctly(Durations, BarLength) =>
+    sum(Durations) #= BarLength.
+
+% Multiple bars must each fill correctly
+all_bars_fill_correctly(DurationsByBar, BarLength) =>
+    foreach(BarDurations in DurationsByBar)
+        bar_fills_correctly(BarDurations, BarLength)
+    end.
+
+% Durations must be from allowed set
+valid_durations(Durations, AllowedDurations) =>
+    foreach(D in Durations)
+        member(D, AllowedDurations)
+    end.
+
+% ==============================================================================
+% BEAT ALIGNMENT CONSTRAINTS
+% ==============================================================================
+
+% Accent pattern: longer notes on strong beats
+accent_on_strong_beats(Durations, Positions, StrongBeatPositions) =>
+    Len = length(Durations),
+    foreach(I in 1..Len)
+        if member(Positions[I], StrongBeatPositions) then
+            if I >= 2 then
+                Durations[I] #>= Durations[I-1]
+            end,
+            if I =< Len - 1 then
+                Durations[I] #>= Durations[I+1]
+            end
+        end
+    end.
+
+% ==============================================================================
+% RHYTHMIC PATTERN CONSTRAINTS
+% ==============================================================================
+
+% Enforce rhythmic pattern repetition
+rhythmic_pattern(Durations, Pattern) =>
+    PatternLen = length(Pattern),
+    Len = length(Durations),
+    foreach(I in 1..Len)
+        PatternIdx = ((I - 1) mod PatternLen) + 1,
+        Durations[I] #= Pattern[PatternIdx]
+    end.
+
+% Avoid exact rhythmic repetition for too long
+no_rhythmic_monotony(Durations, MaxRepeat) =>
+    Len = length(Durations),
+    foreach(I in 1..Len-MaxRepeat)
+        Bools = new_list(MaxRepeat),
+        Bools :: 0..1,
+        foreach(J in 1..MaxRepeat)
+            Bools[J] #<=> (Durations[I] #= Durations[I+J])
+        end,
+        sum(Bools) #=< MaxRepeat - 1
+    end.
+
+% ==============================================================================
+% DURATION VARIETY CONSTRAINTS
+% ==============================================================================
+
+% Minimum number of different duration values
+min_duration_variety(Durations, MinVariety) =>
+    nvalue(N, Durations),
+    N #>= MinVariety.
+
+% Maximum duration in pattern
+max_single_duration(Durations, MaxDur) =>
+    foreach(D in Durations)
+        D #=< MaxDur
+    end.
+
+% Minimum duration in pattern
+min_single_duration(Durations, MinDur) =>
+    foreach(D in Durations)
+        D #>= MinDur
+    end.
+
+% ==============================================================================
+% RHYTHMIC MOTION CONSTRAINTS
+% ==============================================================================
+
+% Rhythmic acceleration (durations get shorter)
+rhythmic_acceleration(Durations) =>
+    Len = length(Durations),
+    foreach(I in 1..Len-1)
+        Durations[I] #>= Durations[I+1]
+    end.
+
+% Rhythmic deceleration (durations get longer)
+rhythmic_deceleration(Durations) =>
+    Len = length(Durations),
+    foreach(I in 1..Len-1)
+        Durations[I] #=< Durations[I+1]
+    end.
+
+% Long-short pattern (common in many styles)
+long_short_pattern(Durations) =>
+    Len = length(Durations),
+    foreach(I in 1..Len-1)
+        if I mod 2 == 1, I + 1 =< Len then
+            Durations[I] #>= Durations[I+1]
+        end
+    end.
+
+% ==============================================================================
+% PHRASE RHYTHM CONSTRAINTS
+% ==============================================================================
+
+% Phrase should end with longer note (rhythmic cadence)
+rhythmic_cadence(Durations) =>
+    Len = length(Durations),
+    % Last note should be at least as long as average
+    AvgDur = sum(Durations) // Len,
+    Durations[Len] #>= AvgDur.
+
+% Phrase should start with clear downbeat
+strong_phrase_start(Durations) =>
+    Len = length(Durations),
+    MinDur = min(Durations),
+    Durations[1] #>= MinDur.
+
+% ==============================================================================
+% STYLE-SPECIFIC RHYTHMIC CONSTRAINTS
+% ==============================================================================
+
+% Classical: regular, predictable rhythms
+classical_rhythm(Durations) =>
+    valid_durations(Durations, [2, 4, 8]),
+    rhythmic_cadence(Durations),
+    min_duration_variety(Durations, 2).
+
+% Baroque: continuous motion
+baroque_rhythm(Durations) =>
+    max_single_duration(Durations, 4),
+    min_single_duration(Durations, 1),
+    no_rhythmic_monotony(Durations, 4).
+
+% Folk: simple, repetitive rhythms
+folk_rhythm(Durations) =>
+    valid_durations(Durations, [2, 4]),
+    rhythmic_cadence(Durations).
+
+% Minimalist: repetitive
+minimalist_rhythm(Durations) =>
+    max_single_duration(Durations, 4),
+    min_single_duration(Durations, 2),
+    rhythmic_cadence(Durations).
+
+% Children's music: very simple
+children_rhythm(Durations) =>
+    valid_durations(Durations, [4]),
+    rhythmic_cadence(Durations).
+
+% ==============================================================================
+% COMMON RHYTHMIC PATTERNS
+% ==============================================================================
+
+swing_pattern() = [3, 1, 3, 1].
+straight_eighths() = [2, 2, 2, 2, 2, 2, 2, 2].
+dotted_rhythm_pattern() = [6, 2, 6, 2].
+march_pattern() = [4, 4, 4, 4].
+waltz_pattern() = [4, 2, 2].
+tresillo_pattern() = [3, 3, 2].
+
+% ==============================================================================
+% UTILITY FUNCTIONS
+% ==============================================================================
+
+% Calculate total duration
+total_duration(Durations) = Sum =>
+    Sum = sum(Durations).
+
+% Get bar length for time signature
+bar_length_for_meter(meter(Beats, Unit)) = Length =>
+    WholeNoteLength = 16,
+    BeatLength = WholeNoteLength // Unit,
+    Length = Beats * BeatLength.
+
+% Generate positions from durations
+positions_from_durations(Durations) = Positions =>
+    Len = length(Durations),
+    Positions = new_list(Len),
+    Positions[1] = 0,
+    foreach(I in 2..Len)
+        Positions[I] = Positions[I-1] + Durations[I-1]
+    end.
+
+% Get strong beats for common time signatures
+strong_beats(meter(4, 4)) = [0, 8].
+strong_beats(meter(3, 4)) = [0].
+strong_beats(meter(2, 4)) = [0].
+strong_beats(meter(6, 8)) = [0, 6].
+strong_beats(meter(2, 2)) = [0].
+strong_beats(_) = [0].

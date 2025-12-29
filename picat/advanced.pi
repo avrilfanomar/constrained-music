@@ -1,0 +1,570 @@
+% advanced.pi - Advanced music theory constraints
+% Constraints based on classical composition pedagogy and modern music theory
+% Organized by category and musical style/genre
+
+module advanced.
+
+import cp.
+import basic.
+
+% ==============================================================================
+% VOICE LEADING CONSTRAINTS (Classical Harmony)
+% ==============================================================================
+
+% Avoid parallel perfect fifths (7 semitones) between consecutive note pairs
+no_parallel_fifths(Voice1, Voice2) =>
+    Len = length(Voice1),
+    foreach(I in 1..Len-1)
+        Interval1 = $abs(Voice1[I] - Voice2[I]) mod 12,
+        Interval2 = $abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        SameDir = Motion1 * Motion2,
+        #~((Interval1 #= 7) #/\ (Interval2 #= 7) #/\ (SameDir #>= 1))
+    end.
+
+% Avoid parallel octaves/unisons
+no_parallel_octaves(Voice1, Voice2) =>
+    Len = length(Voice1),
+    foreach(I in 1..Len-1)
+        Interval1 = $abs(Voice1[I] - Voice2[I]) mod 12,
+        Interval2 = $abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        SameDir = Motion1 * Motion2,
+        #~((Interval1 #= 0) #/\ (Interval2 #= 0) #/\ (SameDir #>= 1))
+    end.
+
+% Leading tone resolution: scale degree 7 should resolve up to tonic
+leading_tone_resolution(Notes, RootPitch) =>
+    LeadingTone = (RootPitch + 11) mod 12,
+    Tonic = RootPitch mod 12,
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        NoteClass = Notes[I] mod 12,
+        NextClass = Notes[I+1] mod 12,
+        (NoteClass #= LeadingTone) #=> ((NextClass #= Tonic) #\/ (NextClass #= LeadingTone))
+    end.
+
+% Chordal 7th resolution: 7th of chord should resolve down
+seventh_resolves_down(Notes, ChordRoot) =>
+    Seventh = (ChordRoot + 10) mod 12,
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        NoteClass = Notes[I] mod 12,
+        (NoteClass #= Seventh) #=> (Notes[I] #>= Notes[I+1] + 1)
+    end.
+
+% Tendency tones: scale degree 4 tends to resolve down to 3
+subdominant_resolution(Notes, RootPitch) =>
+    Fourth = (RootPitch + 5) mod 12,
+    Third = (RootPitch + 4) mod 12,
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        NoteClass = Notes[I] mod 12,
+        NextClass = Notes[I+1] mod 12,
+        Interval = $abs(Notes[I+1] - Notes[I]),
+        (NoteClass #= Fourth) #=> ((NextClass #= Third) #\/ (Interval #=< 2))
+    end.
+
+% ==============================================================================
+% MELODIC CONSTRAINTS (Advanced)
+% ==============================================================================
+
+% Avoid augmented intervals (augmented second = 3 semitones)
+no_augmented_seconds(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        Interval = $abs(Notes[I+1] - Notes[I]),
+        Interval #!= 3
+    end.
+
+% Avoid outlining tritone in three consecutive notes
+no_tritone_outline(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-2)
+        TotalInterval = $abs(Notes[I+2] - Notes[I]),
+        TotalInterval #!= 6
+    end.
+
+% Approach climax by step (highest note should be approached stepwise)
+approach_climax_by_step(Notes) =>
+    Len = length(Notes),
+    MaxPitch = max([Notes[I] : I in 1..Len]),
+    foreach(I in 2..Len)
+        Interval = $abs(Notes[I] - Notes[I-1]),
+        (Notes[I] #= MaxPitch) #=> (Interval #=< 2)
+    end.
+
+% Leave climax by contrary motion (after highest note, descend)
+leave_climax_contrary(Notes) =>
+    Len = length(Notes),
+    MaxPitch = max([Notes[I] : I in 1..Len]),
+    foreach(I in 1..Len-1)
+        (Notes[I] #= MaxPitch) #=> (Notes[I] #>= Notes[I+1] + 1)
+    end.
+
+% Avoid consecutive leaps in same direction
+no_consecutive_same_direction_skips(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-2)
+        Int1 = $abs(Notes[I+1] - Notes[I]),
+        Int2 = $abs(Notes[I+2] - Notes[I+1]),
+        Dir1 = Notes[I+1] - Notes[I],
+        Dir2 = Notes[I+2] - Notes[I+1],
+        SameDir = Dir1 * Dir2,
+        ((Int1 #>= 3) #/\ (Int2 #>= 3)) #=> (SameDir #=< 0)
+    end.
+
+% ==============================================================================
+% PHRASE STRUCTURE CONSTRAINTS
+% ==============================================================================
+
+% Phrase must end on stable tone (1, 3, or 5 of scale)
+phrase_ends_stable(Notes, RootPitch) =>
+    Len = length(Notes),
+    EndClass = Notes[Len] mod 12,
+    Root = RootPitch mod 12,
+    Third = (RootPitch + 4) mod 12,
+    Fifth = (RootPitch + 7) mod 12,
+    (EndClass #= Root) #\/ (EndClass #= Third) #\/ (EndClass #= Fifth).
+
+% Antecedent-consequent structure
+antecedent_consequent(Notes, RootPitch) =>
+    Len = length(Notes),
+    HalfPoint = Len // 2,
+    Root = RootPitch mod 12,
+    Fifth = (RootPitch + 7) mod 12,
+    HalfClass = Notes[HalfPoint] mod 12,
+    EndClass = Notes[Len] mod 12,
+    HalfClass #= Fifth,
+    EndClass #= Root.
+
+% Strong beat emphasis: notes on strong beats should be stable tones
+strong_beat_stability(Notes, StrongBeats, RootPitch) =>
+    Root = RootPitch mod 12,
+    Third = (RootPitch + 4) mod 12,
+    Fifth = (RootPitch + 7) mod 12,
+    foreach(BeatIdx in StrongBeats)
+        if BeatIdx =< length(Notes) then
+            NoteClass = Notes[BeatIdx] mod 12,
+            (NoteClass #= Root) #\/ (NoteClass #= Third) #\/ (NoteClass #= Fifth)
+        end
+    end.
+
+% Anacrusis pattern: melody starts before downbeat
+anacrusis_pattern(Notes) =>
+    Notes[2] #>= Notes[1].
+
+% ==============================================================================
+% INTERVAL DISTRIBUTION CONSTRAINTS
+% ==============================================================================
+
+% Mostly stepwise motion (at least X% of intervals should be steps)
+mostly_stepwise(Notes, MinPercentSteps) =>
+    Len = length(Notes),
+    NumIntervals = Len - 1,
+    MinSteps = (NumIntervals * MinPercentSteps) // 100,
+    count_steps(Notes, StepCount),
+    StepCount #>= MinSteps.
+
+% Helper: count stepwise intervals
+count_steps(Notes, Count) =>
+    Len = length(Notes),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Interval = $abs(Notes[I+1] - Notes[I]),
+        Bools[I] #<=> (Interval #=< 2)
+    end,
+    Count #= sum(Bools).
+
+% Balanced motion: roughly equal ascending and descending intervals
+balanced_motion(Notes, TolerancePercent) =>
+    Len = length(Notes),
+    NumIntervals = Len - 1,
+    Tolerance = max(1, (NumIntervals * TolerancePercent) // 100),
+    count_ascending(Notes, AscCount),
+    count_descending(Notes, DescCount),
+    AscCount - DescCount #>= -Tolerance,
+    AscCount - DescCount #=< Tolerance.
+
+% Helper: count ascending intervals
+count_ascending(Notes, Count) =>
+    Len = length(Notes),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Bools[I] #<=> (Notes[I+1] #>= Notes[I] + 1)
+    end,
+    Count #= sum(Bools).
+
+% Helper: count descending intervals
+count_descending(Notes, Count) =>
+    Len = length(Notes),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Bools[I] #<=> (Notes[I] #>= Notes[I+1] + 1)
+    end,
+    Count #= sum(Bools).
+
+% Limit large intervals (octave or larger)
+max_octave_leaps(Notes, MaxCount) =>
+    Len = length(Notes),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Interval = $abs(Notes[I+1] - Notes[I]),
+        Bools[I] #<=> (Interval #>= 12)
+    end,
+    sum(Bools) #=< MaxCount.
+
+% ==============================================================================
+% MOTIVIC CONSTRAINTS
+% ==============================================================================
+
+% Sequence pattern: repeated melodic pattern transposed
+sequence_pattern(Notes, PatternLen, NumRepetitions) =>
+    Len = length(Notes),
+    NumRepetitions * PatternLen #=< Len,
+    foreach(Rep in 1..NumRepetitions-1)
+        StartA = (Rep - 1) * PatternLen + 1,
+        StartB = Rep * PatternLen + 1,
+        foreach(J in 0..PatternLen-2)
+            IntA = Notes[StartA + J + 1] - Notes[StartA + J],
+            IntB = Notes[StartB + J + 1] - Notes[StartB + J],
+            IntA #= IntB
+        end
+    end.
+
+% Helper: encourage sequences
+sequence_encouraged(Notes) =>
+    Len = length(Notes),
+    Bools = new_list(Len - 2),
+    Bools :: 0..1,
+    foreach(I in 1..Len-2)
+        Int1 = Notes[I+1] - Notes[I],
+        Int2 = Notes[I+2] - Notes[I+1],
+        Bools[I] #<=> (Int1 #= Int2)
+    end,
+    sum(Bools) #>= 1.
+
+% ==============================================================================
+% STYLE-SPECIFIC CONSTRAINT SETS
+% ==============================================================================
+
+% CLASSICAL PERIOD STYLE (Mozart, Haydn era)
+classical_constraints(Notes, RootPitch, _Config) =>
+    no_parallel_fifths_single(Notes),
+    leading_tone_resolution(Notes, RootPitch),
+    no_augmented_seconds(Notes),
+    no_tritone_outline(Notes),
+    approach_climax_by_step(Notes),
+    leave_climax_contrary(Notes),
+    no_consecutive_same_direction_skips(Notes),
+    phrase_ends_stable(Notes, RootPitch),
+    mostly_stepwise(Notes, 60),
+    max_octave_leaps(Notes, 1),
+    balanced_motion(Notes, 30).
+
+% Single voice version of parallel fifth avoidance
+no_parallel_fifths_single(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        Interval = $abs(Notes[I+1] - Notes[I]),
+        Interval #!= 6
+    end.
+
+% BAROQUE STYLE (Bach, Handel era)
+baroque_constraints(Notes, RootPitch, _Config) =>
+    Len = length(Notes),
+    leading_tone_resolution(Notes, RootPitch),
+    no_augmented_seconds(Notes),
+    phrase_ends_stable(Notes, RootPitch),
+    max_leaps(Notes, Len // 3),
+    if Len >= 8 then
+        sequence_encouraged(Notes)
+    end.
+
+% ROMANTIC STYLE (Chopin, Brahms era)
+romantic_constraints(Notes, RootPitch, _Config) =>
+    Len = length(Notes),
+    phrase_ends_stable(Notes, RootPitch),
+    min_range(Notes, 12),
+    min_unique_pitches(Notes, max(3, Len // 3)),
+    single_climax(Notes).
+
+% JAZZ STYLE (Bebop, Standards)
+jazz_constraints(Notes, RootPitch, _Config) =>
+    Len = length(Notes),
+    phrase_ends_stable(Notes, RootPitch),
+    leading_tone_resolution(Notes, RootPitch),
+    min_unique_pitches(Notes, max(3, Len // 2)),
+    min_range(Notes, 10).
+
+% FOLK/TRADITIONAL STYLE
+folk_constraints(Notes, RootPitch, _Config) =>
+    mostly_stepwise(Notes, 70),
+    max_range(Notes, 12),
+    phrase_ends_stable(Notes, RootPitch),
+    no_augmented_seconds(Notes),
+    no_tritone_outline(Notes),
+    max_consecutive_repeats(Notes, 2).
+
+% MINIMALIST STYLE (Reich, Glass)
+minimalist_constraints(Notes, _RootPitch, _Config) =>
+    max_range(Notes, 7),
+    mostly_stepwise(Notes, 80),
+    max_leaps(Notes, 2),
+    max_consecutive_repeats(Notes, 4).
+
+% CONTEMPORARY/ATONAL STYLE
+contemporary_constraints(Notes, _RootPitch, _Config) =>
+    Len = length(Notes),
+    min_unique_pitches(Notes, max(3, Len // 2)),
+    min_range(Notes, 8).
+
+% MODAL/IMPRESSIONIST STYLE (Debussy, Ravel)
+modal_constraints(Notes, RootPitch, _Config) =>
+    Len = length(Notes),
+    phrase_ends_stable(Notes, RootPitch),
+    no_leading_tone_emphasis(Notes, RootPitch),
+    min_unique_pitches(Notes, max(3, Len // 3)).
+
+% Helper: avoid overemphasis of leading tone
+no_leading_tone_emphasis(Notes, RootPitch) =>
+    LeadingTone = (RootPitch + 11) mod 12,
+    Len = length(Notes),
+    Bools = new_list(Len),
+    Bools :: 0..1,
+    foreach(I in 1..Len)
+        NoteClass = Notes[I] mod 12,
+        Bools[I] #<=> (NoteClass #= LeadingTone)
+    end,
+    sum(Bools) #=< max(1, Len // 4).
+
+% CHILDREN'S MUSIC STYLE
+children_constraints(Notes, RootPitch, _Config) =>
+    Len = length(Notes),
+    max_range(Notes, 8),
+    mostly_stepwise(Notes, 75),
+    phrase_ends_stable(Notes, RootPitch),
+    max_leaps(Notes, 2),
+    no_tritone_outline(Notes),
+    EndClass = Notes[Len] mod 12,
+    RootClass = RootPitch mod 12,
+    EndClass #= RootClass.
+
+% BLUES STYLE
+blues_constraints(Notes, RootPitch, _Config) =>
+    phrase_ends_stable(Notes, RootPitch),
+    max_consecutive_repeats(Notes, 3),
+    max_range(Notes, 14),
+    min_range(Notes, 5).
+
+% GREGORIAN/CHANT STYLE
+chant_constraints(Notes, RootPitch, _Config) =>
+    Len = length(Notes),
+    mostly_stepwise(Notes, 85),
+    max_range(Notes, 10),
+    max_leaps(Notes, 2),
+    EndClass = Notes[Len] mod 12,
+    RootClass = RootPitch mod 12,
+    EndClass #= RootClass,
+    leap_recovery(Notes).
+
+% ==============================================================================
+% CONSTRAINT SET APPLICATION UTILITIES
+% ==============================================================================
+
+% Apply a named style's constraints
+apply_style(Notes, RootPitch, Config, Style) =>
+    if Style == classical then
+        classical_constraints(Notes, RootPitch, Config)
+    elseif Style == baroque then
+        baroque_constraints(Notes, RootPitch, Config)
+    elseif Style == romantic then
+        romantic_constraints(Notes, RootPitch, Config)
+    elseif Style == jazz then
+        jazz_constraints(Notes, RootPitch, Config)
+    elseif Style == folk then
+        folk_constraints(Notes, RootPitch, Config)
+    elseif Style == minimalist then
+        minimalist_constraints(Notes, RootPitch, Config)
+    elseif Style == contemporary then
+        contemporary_constraints(Notes, RootPitch, Config)
+    elseif Style == modal then
+        modal_constraints(Notes, RootPitch, Config)
+    elseif Style == children then
+        children_constraints(Notes, RootPitch, Config)
+    elseif Style == blues then
+        blues_constraints(Notes, RootPitch, Config)
+    elseif Style == chant then
+        chant_constraints(Notes, RootPitch, Config)
+    else
+        basic_style_constraints(Notes, RootPitch)
+    end.
+
+% Basic/default style (minimal constraints)
+basic_style_constraints(Notes, RootPitch) =>
+    phrase_ends_stable(Notes, RootPitch).
+
+% Get available styles
+available_styles() = [
+    classical, baroque, romantic, jazz, folk,
+    minimalist, contemporary, modal, children, blues, chant
+].
+
+% Style descriptions
+style_description(classical) = "Classical period: balanced phrases, strict voice leading, clear cadences".
+style_description(baroque) = "Baroque: continuous motion, sequences, ornamental figures".
+style_description(romantic) = "Romantic: wide range, expressive leaps, emotional intensity".
+style_description(jazz) = "Jazz: extended intervals, chromatic approaches, bebop idioms".
+style_description(folk) = "Folk/Traditional: stepwise motion, simple ranges, repetitive patterns".
+style_description(minimalist) = "Minimalist: pattern repetition, gradual change, limited material".
+style_description(contemporary) = "Contemporary: few restrictions, wide intervals, atonal tendencies".
+style_description(modal) = "Modal/Impressionist: parallel motion, color over function".
+style_description(children) = "Children's music: simple, stepwise, limited range".
+style_description(blues) = "Blues: blue notes, call-response, expressive bends".
+style_description(chant) = "Gregorian chant: stepwise, narrow range, modal".
+style_description(_) = "Unknown style".
+
+% ==============================================================================
+% OPTIONAL CONSTRAINT REGISTRY
+% ==============================================================================
+
+% Optional: Golden section climax (climax at ~62% through the piece)
+golden_section_climax(Notes) =>
+    Len = length(Notes),
+    GoldenPoint = (Len * 62) // 100,
+    WindowStart = max(1, GoldenPoint - 2),
+    WindowEnd = min(Len, GoldenPoint + 2),
+    MaxPitch = max([Notes[I] : I in 1..Len]),
+    Bools = new_list(WindowEnd - WindowStart + 1),
+    Bools :: 0..1,
+    foreach(I in WindowStart..WindowEnd)
+        Bools[I - WindowStart + 1] #<=> (Notes[I] #= MaxPitch)
+    end,
+    sum(Bools) #>= 1.
+
+% Optional: Arch contour (rise then fall)
+arch_contour(Notes) =>
+    Len = length(Notes),
+    MidPoint = Len // 2,
+    count_rises(Notes, 1, MidPoint-1, RiseCount),
+    count_falls(Notes, MidPoint, Len-1, FallCount),
+    RiseCount #>= MidPoint // 2,
+    FallCount #>= (Len - MidPoint) // 2.
+
+% Helper for arch contour
+count_rises(Notes, Start, End, Count) =>
+    Bools = new_list(End - Start + 1),
+    Bools :: 0..1,
+    foreach(I in Start..End)
+        Bools[I - Start + 1] #<=> (Notes[I+1] #>= Notes[I] + 1)
+    end,
+    Count #= sum(Bools).
+
+count_falls(Notes, Start, End, Count) =>
+    Bools = new_list(End - Start + 1),
+    Bools :: 0..1,
+    foreach(I in Start..End)
+        Bools[I - Start + 1] #<=> (Notes[I] #>= Notes[I+1] + 1)
+    end,
+    Count #= sum(Bools).
+
+% Optional: Stepwise approach to important notes
+stepwise_approach_to_tonic(Notes, RootPitch) =>
+    Root = RootPitch mod 12,
+    Len = length(Notes),
+    foreach(I in 2..Len)
+        Interval = $abs(Notes[I] - Notes[I-1]),
+        NoteClass = Notes[I] mod 12,
+        (NoteClass #= Root) #=> (Interval #=< 2)
+    end.
+
+% Optional: Register consistency
+register_consistency(Notes, MaxRegisterJump) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        Interval = $abs(Notes[I+1] - Notes[I]),
+        Interval #=< MaxRegisterJump
+    end.
+
+% Optional: Tonic anchoring (tonic appears regularly)
+tonic_anchoring(Notes, RootPitch, MaxGap) =>
+    Root = RootPitch mod 12,
+    Len = length(Notes),
+    foreach(I in 1..Len-MaxGap)
+        Bools = new_list(MaxGap),
+        Bools :: 0..1,
+        foreach(J in I..I+MaxGap-1)
+            NoteClass = Notes[J] mod 12,
+            Bools[J - I + 1] #<=> (NoteClass #= Root)
+        end,
+        sum(Bools) #>= 1
+    end.
+
+% Optional: Avoid monotony
+avoid_monotony(Notes, MaxSameDirection) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-MaxSameDirection)
+        AscBools = new_list(MaxSameDirection),
+        DescBools = new_list(MaxSameDirection),
+        AscBools :: 0..1,
+        DescBools :: 0..1,
+        foreach(J in I..I+MaxSameDirection-1)
+            AscBools[J - I + 1] #<=> (Notes[J+1] #>= Notes[J] + 1),
+            DescBools[J - I + 1] #<=> (Notes[J] #>= Notes[J+1] + 1)
+        end,
+        sum(AscBools) #=< MaxSameDirection - 1,
+        sum(DescBools) #=< MaxSameDirection - 1
+    end.
+
+% ==============================================================================
+% STYLE INTENSITY LEVELS
+% ==============================================================================
+
+% Light constraints (more freedom, fewer rules)
+apply_style_light(Notes, RootPitch, _Config, Style) =>
+    phrase_ends_stable(Notes, RootPitch),
+    if Style == classical then
+        leading_tone_resolution(Notes, RootPitch)
+    elseif Style == folk then
+        mostly_stepwise(Notes, 50)
+    elseif Style == minimalist then
+        max_range(Notes, 10)
+    end.
+
+% Standard constraints (balanced)
+apply_style_standard(Notes, RootPitch, Config, Style) =>
+    apply_style(Notes, RootPitch, Config, Style).
+
+% Strict constraints (traditional rules strictly applied)
+apply_style_strict(Notes, RootPitch, Config, Style) =>
+    apply_style(Notes, RootPitch, Config, Style),
+    if Style == classical then
+        balanced_motion(Notes, 20),
+        golden_section_climax(Notes),
+        stepwise_approach_to_tonic(Notes, RootPitch)
+    elseif Style == baroque then
+        sequence_pattern(Notes, 4, 2),
+        leading_tone_resolution(Notes, RootPitch)
+    elseif Style == folk then
+        arch_contour(Notes),
+        tonic_anchoring(Notes, RootPitch, 4)
+    elseif Style == chant then
+        register_consistency(Notes, 5),
+        avoid_monotony(Notes, 5)
+    end.
+
+% ==============================================================================
+% CONSTRAINT COMBINATION UTILITIES
+% ==============================================================================
+
+% Combine constraints from multiple styles
+combine_styles(Notes, RootPitch, Config, Styles) =>
+    foreach(Style in Styles)
+        apply_style_light(Notes, RootPitch, Config, Style)
+    end.

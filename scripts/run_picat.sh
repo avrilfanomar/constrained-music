@@ -12,7 +12,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Set Picat module search path
 # Picat looks for modules in directories listed in PICATPATH
-export PICATPATH="$PROJECT_ROOT/picat:$PROJECT_ROOT/picat/utils:$PROJECT_ROOT/picat/generators:$PROJECT_ROOT/picat/constraints"
+export PICATPATH="$PROJECT_ROOT/picat"
 
 # Check if Picat is installed
 if ! command -v picat &> /dev/null; then
@@ -37,13 +37,13 @@ if [ $# -eq 0 ]; then
     echo "  $0 picat/main.pi"
     echo "  $0 picat/main.pi --demo"
     echo "  $0 picat/main.pi --multiple"
-    echo "  $0 examples/simple_melody.pi"
-    echo "  $0 tests/test_music_types.pi"
+    echo "  $0 picat/simple_melody.pi"
+    echo "  $0 picat/test_music_types.pi"
     echo ""
     echo "Available files:"
     echo "  picat/main.pi            - Main entry point"
-    echo "  examples/simple_melody.pi - Example usage"
-    echo "  tests/test_music_types.pi - Unit tests"
+    echo "  picat/simple_melody.pi - Example usage"
+    echo "  picat/test_music_types.pi - Unit tests"
     exit 0
 fi
 
