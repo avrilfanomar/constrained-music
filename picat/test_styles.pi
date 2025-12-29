@@ -1,0 +1,47 @@
+% test_styles.pi - Test style-based melody generation
+
+import melody.
+import music_types.
+import scale_utils.
+import temporal.
+
+main =>
+    % Simple test config
+    Meter = $meter(4, 4),
+    KeyRoot = 60,
+    Mode = major,
+    NumBars = 4,
+    NotesPerBar = 4,
+    Tempo = 100,
+    Voice = soprano_voice(),
+
+    Config = $config(
+        meter = Meter,
+        key_root = KeyRoot,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = Tempo,
+        voice = Voice
+    ),
+
+    % Test regular melody generation first
+    println("Testing regular melody generation..."),
+    generate_melody(Config, Melody0),
+    println("Regular melody generated!"),
+    print_melody_compact(Melody0),
+
+    % Test style-based generation
+    println("\n--- Testing style-based generation ---"),
+    Styles = [classical, baroque, romantic, folk, minimalist, children],
+    foreach(Style in Styles)
+        printf("\nTesting %w style...%n", Style),
+        if generate_melody_with_style(Config, Style, StyledMelody) then
+            printf("  %w melody: ", Style),
+            print_melody_compact(StyledMelody)
+        else
+            printf("  FAILED: %w style could not generate%n", Style)
+        end
+    end,
+
+    println("\nAll tests passed!").
