@@ -145,23 +145,36 @@ collect_tempo_helper([Seg | Rest], CurrentBar, Acc) = Result =>
 
 % Parse command line arguments
 main(Args) =>
-    % Handle special commands first
+    % Handle empty arguments
     if Args == [] then
         print_usage(),
         halt
-    elseif Args == ["help"] ; Args == ["-h"] then
+    end,
+
+    % Extract command and remaining options
+    FirstArg = head(Args),
+    RestArgs = tail(Args),
+
+    % Handle special commands (with optional additional options)
+    if FirstArg == "help" ; FirstArg == "-h" then
         print_usage(),
         halt
-    elseif Args == ["moods"] then
+    elseif FirstArg == "moods" then
         print_all_presets(),
         halt
-    elseif Args == ["demo"] then
-        demo(),
+    elseif FirstArg == "demo" then
+        % Parse additional options for demo
+        ParsedOpts = parse_args(RestArgs),
+        Randomness = get_arg(ParsedOpts, randomness, 0.0),
+        demo_with_randomness(Randomness),
         halt
-    elseif Args == ["demo_custom"] then
-        demo_custom(),
+    elseif FirstArg == "demo_custom" then
+        % Parse additional options for demo_custom
+        ParsedOpts = parse_args(RestArgs),
+        Randomness = get_arg(ParsedOpts, randomness, 0.0),
+        demo_custom_with_randomness(Randomness),
         halt
-    elseif Args == ["path"] then
+    elseif FirstArg == "path" then
         demo_path(),
         halt
     end,
@@ -299,11 +312,21 @@ print_usage() =>
 demo() =>
     run_companion_presets(sad_depressed, energized, 60, "demo.json").
 
+% Quick demo with randomness
+demo_with_randomness(Randomness) =>
+    run_companion_presets(sad_depressed, energized, 60, "demo.json", Randomness).
+
 % Demo with custom moods
 demo_custom() =>
-    Start = $mood(- 0.5, - 0.2),  % Slightly sad, low energy
+    Start = $mood(-0.5, -0.2),  % Slightly sad, low energy
     End = $mood(0.4, 0.5),      % Moderately happy, moderate energy
     run_companion(Start, End, 120, "custom_demo.json").
+
+% Demo with custom moods and randomness
+demo_custom_with_randomness(Randomness) =>
+    Start = $mood(-0.5, -0.2),  % Slightly sad, low energy
+    End = $mood(0.4, 0.5),      % Moderately happy, moderate energy
+    run_companion(Start, End, 120, "custom_demo.json", Randomness).
 
 % Demo showing transition path only (no generation)
 demo_path() =>

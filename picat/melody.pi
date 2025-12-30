@@ -352,9 +352,9 @@ generate_segment_melody(MusicParams, KeyRoot, NumBars, Melody) =>
     % Apply mood-aware constraints
     apply_mood_constraints(Pitches, KeyRoot, Mode, MaxInterval, ScaleNotes),
 
-    % Solve with options based on randomness level
+    % Solve with options based on randomness level, with timeout for safety
     SolveOpts = solve_options_for_randomness(Randomness),
-    solve(SolveOpts, Pitches),
+    solve_with_timeout(SolveOpts, Pitches, 2000),  % 2 second timeout
 
     % Build melody structure from solved pitches with mood-appropriate velocities
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
@@ -410,20 +410,32 @@ build_mood_melody_with_randomness(Pitches, _NumBars, NotesPerBar, VoiceId, VelBa
 % Determine solve options based on randomness level
 % Randomness 0.0: deterministic first-fail
 % Randomness 0.5: mix of strategies
-% Randomness 1.0: fully random labeling
+% Randomness 1.0: random value selection (ff still needed for efficiency)
 solve_options_for_randomness(Randomness) = Opts =>
     if Randomness >= 0.7 then
-        % High randomness: random variable and value selection
-        Opts = [rand, rand_var, rand_val]
+        % High randomness: first-fail for variable selection (required for efficiency),
+        % random value selection for variety
+        Opts = [ff, rand_val]
     elseif Randomness >= 0.4 then
         % Medium randomness: first-fail with random value selection
         Opts = [ff, rand_val]
     elseif Randomness >= 0.1 then
-        % Low randomness: sometimes use random variable order
-        Opts = cond(rand01() < Randomness, [rand_var, ff], [ff])
+        % Low randomness: sometimes use random value selection
+        Opts = cond(rand01() < Randomness, [ff, rand_val], [ff])
     else
         % No randomness: deterministic first-fail
         Opts = [ff]
+    end.
+
+% Solve with timeout and fallback to deterministic
+% TimeoutMs: maximum time in milliseconds for random solve
+% Falls back to [ff] if timeout occurs
+solve_with_timeout(Opts, Vars, TimeoutMs) =>
+    if time_out(solve(Opts, Vars), TimeoutMs, Status), Status == success then
+        true
+    else
+        % Fallback to deterministic first-fail
+        solve([ff], Vars)
     end.
 
 % Build a single note with velocity variation for expressiveness
@@ -531,16 +543,16 @@ generate_connected_segment_melody(MusicParams, KeyRoot, NumBars, PrevLastPitch, 
     apply_mood_constraints(Pitches, KeyRoot, Mode, MaxInterval, ScaleNotes),
 
     % Additional constraint: First note should be close to previous segment's last note
-    % Allow interval up to MaxInterval from previous ending
+    % Allow interval up to MaxInterval from previous ending (relaxed to +4 for flexibility)
     ValidConnectionNotes = [N : N in ScaleNotes,
-                            abs(N - PrevLastPitch) =< MaxInterval + 2],
+                            abs(N - PrevLastPitch) =< MaxInterval + 4],
     if ValidConnectionNotes != [] then
         Pitches[1] :: ValidConnectionNotes
     end,
 
-    % Solve with options based on randomness level
+    % Solve with options based on randomness level, with timeout for safety
     SolveOpts = solve_options_for_randomness(Randomness),
-    solve(SolveOpts, Pitches),
+    solve_with_timeout(SolveOpts, Pitches, 2000),  % 2 second timeout
 
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
@@ -652,7 +664,7 @@ generate_styled_segment_melody(MusicParams, KeyRoot, NumBars, Style, Melody) =>
     apply_combined_constraints(Pitches, KeyRoot, Mode, MaxInterval, Style, ScaleNotes),
 
     SolveOpts = solve_options_for_randomness(Randomness),
-    solve(SolveOpts, Pitches),
+    solve_with_timeout(SolveOpts, Pitches, 2000),  % 2 second timeout
 
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
@@ -740,14 +752,14 @@ generate_connected_styled_segment(MusicParams, KeyRoot, NumBars, PrevLastPitch, 
     % Apply combined constraints
     apply_combined_constraints(Pitches, KeyRoot, Mode, MaxInterval, Style, ScaleNotes),
 
-    % Connection constraint
-    ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 2],
+    % Connection constraint (relaxed to +4 for flexibility)
+    ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
     if ValidConnectionNotes != [] then
         Pitches[1] :: ValidConnectionNotes
     end,
 
     SolveOpts = solve_options_for_randomness(Randomness),
-    solve(SolveOpts, Pitches),
+    solve_with_timeout(SolveOpts, Pitches, 2000),  % 2 second timeout
 
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
