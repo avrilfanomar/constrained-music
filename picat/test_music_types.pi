@@ -7,6 +7,9 @@ import scale_utils.
 import temporal.
 import melody.
 
+main(Args) =>
+    main.
+
 main =>
     println("=== Music Types Test Suite ==="),
     println(""),
@@ -86,11 +89,11 @@ test_scale_functions =>
     assert_eq(CScale, [60, 62, 64, 65, 67, 69, 71], "C major scale notes"),
 
     % Test in_scale
-    assert_true(in_scale(60, 60, major), "C in C major"),
-    assert_true(in_scale(62, 60, major), "D in C major"),
-    assert_true(in_scale(64, 60, major), "E in C major"),
-    assert_false(in_scale(61, 60, major), "C# not in C major"),
-    assert_false(in_scale(63, 60, major), "D# not in C major"),
+    (in_scale(60, 60, major) -> true ; println("FAIL: C in C major"), fail),
+    (in_scale(62, 60, major) -> true ; println("FAIL: D in C major"), fail),
+    (in_scale(64, 60, major) -> true ; println("FAIL: E in C major"), fail),
+    (not in_scale(61, 60, major) -> true ; println("FAIL: C# not in C major"), fail),
+    (not in_scale(63, 60, major) -> true ; println("FAIL: D# not in C major"), fail),
 
     % Test scale_degree
     assert_eq(scale_degree(60, 60, major), 1, "C is degree 1 in C major"),
@@ -177,9 +180,9 @@ test_meter_functions =>
     assert_eq(waltz_time(), $meter(3, 4), "waltz time is 3/4"),
 
     % Test is_compound
-    assert_true(is_compound($meter(6, 8)), "6/8 is compound"),
-    assert_true(is_compound($meter(9, 8)), "9/8 is compound"),
-    assert_false(is_compound($meter(4, 4)), "4/4 is not compound"),
+    (is_compound($meter(6, 8)) -> true ; println("FAIL: 6/8 is compound"), fail),
+    (is_compound($meter(9, 8)) -> true ; println("FAIL: 9/8 is compound"), fail),
+    (not is_compound($meter(4, 4)) -> true ; println("FAIL: 4/4 is not compound"), fail),
 
     % Test strong_beats
     assert_eq(strong_beats($meter(4, 4)), [1, 3], "4/4 strong beats"),
@@ -201,10 +204,10 @@ test_voice_ranges =>
     assert_eq(High, 81, "soprano high"),
 
     % Test in_voice_range
-    assert_true(in_voice_range(65, Soprano), "65 in soprano range"),
-    assert_true(in_voice_range(60, Soprano), "60 in soprano range"),
-    assert_false(in_voice_range(55, Soprano), "55 not in soprano range"),
-    assert_false(in_voice_range(85, Soprano), "85 not in soprano range"),
+    (in_voice_range(65, Soprano) -> true ; println("FAIL: 65 in soprano range"), fail),
+    (in_voice_range(60, Soprano) -> true ; println("FAIL: 60 in soprano range"), fail),
+    (not in_voice_range(55, Soprano) -> true ; println("FAIL: 55 not in soprano range"), fail),
+    (not in_voice_range(85, Soprano) -> true ; println("FAIL: 85 not in soprano range"), fail),
 
     println("  Voice ranges: OK").
 
@@ -253,14 +256,14 @@ test_melody_generation =>
 
     % Test all notes are in scale
     Pitches = melody_to_pitches(Melody),
-    AllInScale = all([in_scale(P, 60, major) : P in Pitches]),
-    assert_true(AllInScale, "all notes in C major scale"),
+    NotInScale = [P : P in Pitches, not in_scale(P, 60, major)],
+    assert_eq(NotInScale, [], "all notes in C major scale"),
 
     % Test notes are in voice range
     Soprano = soprano_voice(),
     Soprano = $voice(_, _, _, $range(Low, High)),
-    AllInRange = all([(P >= Low && P =< High) : P in Pitches]),
-    assert_true(AllInRange, "all notes in soprano range"),
+    OutOfRange = [P : P in Pitches, (P < Low ; P > High)],
+    assert_eq(OutOfRange, [], "all notes in soprano range"),
 
     % Test ending on tonic
     LastPitch = Pitches[length(Pitches)],
@@ -283,20 +286,3 @@ assert_near(Actual, Expected, Tolerance, Msg) =>
         printf("FAIL: %s - expected ~%w, got %w%n", Msg, Expected, Actual),
         fail
     end.
-
-assert_true(Cond, Msg) =>
-    if not Cond then
-        printf("FAIL: %s - expected true%n", Msg),
-        fail
-    end.
-
-assert_false(Cond, Msg) =>
-    if Cond then
-        printf("FAIL: %s - expected false%n", Msg),
-        fail
-    end.
-
-% Helper: check all elements of list satisfy condition
-all([]) => true.
-all([true|Rest]) => all(Rest).
-all([false|_]) => fail.
