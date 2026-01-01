@@ -2,3 +2,5 @@
 .venv/
 *.qi
 *.dbqi
+*.mid
+*.json
