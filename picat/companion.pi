@@ -177,6 +177,12 @@ main(Args) =>
     elseif FirstArg == "path" then
         demo_path(),
         halt
+    elseif FirstArg == "melody_demo" then
+        run_melody_demo(),
+        halt
+    elseif FirstArg == "test" then
+        run_quick_test(),
+        halt
     end,
 
     % Parse key=value arguments
@@ -280,6 +286,8 @@ print_usage() =>
     nl,
     println("Commands:"),
     println("  demo         Run quick demo (60 sec, sad to energized)"),
+    println("  melody_demo  Demo melody generation with different modes"),
+    println("  test         Quick functionality test"),
     println("  path         Show transition path without generating music"),
     println("  moods        List available mood presets"),
     println("  help, -h     Show this help message"),
@@ -347,3 +355,147 @@ test_mood_mapping() =>
         printf("%-15w: tempo=%3d, mode=%-12w, density=%d, velocity=%d%n",
         Preset, get_tempo(P), get_mode(P), get_note_density(P), get_velocity_base(P))
     end.
+
+% ==============================================================================
+% PRESET MELODY CONFIGURATIONS
+% ==============================================================================
+
+% Classical-style configuration
+classical_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 60,
+    mode = major,
+    num_bars = 8,
+    notes_per_bar = 4,
+    tempo_bpm = 100,
+    voice = soprano_voice()
+).
+
+% Modal ambient configuration
+modal_ambient_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 62,
+    mode = dorian,
+    num_bars = 8,
+    notes_per_bar = 2,
+    tempo_bpm = 60,
+    voice = alto_voice()
+).
+
+% Minimalist configuration
+minimalist_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 60,
+    mode = pentatonic_major,
+    num_bars = 16,
+    notes_per_bar = 2,
+    tempo_bpm = 72,
+    voice = piano_voice()
+).
+
+% Children-friendly configuration
+children_config() = $config(
+    meter = $meter(4, 4),
+    key_root = 60,
+    mode = major,
+    num_bars = 4,
+    notes_per_bar = 4,
+    tempo_bpm = 120,
+    voice = $voice(1, melody, 0, $range(60, 72))  % One octave range
+).
+
+% ==============================================================================
+% MELODY GENERATION DEMOS
+% ==============================================================================
+
+% Demo with multiple musical configurations
+run_melody_demo() =>
+    println("=== Melody Generation Demo ==="),
+    println(""),
+
+    % Demo 1: C Major melody
+    println("Demo 1: C Major, 4 bars, 4 notes per bar (soprano range)"),
+    println("--------------------------------------------------------"),
+    Config1 = $config(
+        meter = $meter(4, 4),
+        key_root = 60,          % C4
+        mode = major,
+        num_bars = 4,
+        notes_per_bar = 4,
+        tempo_bpm = 120,
+        voice = soprano_voice()
+    ),
+    generate_melody(Config1, Melody1),
+    print_melody_compact(Melody1),
+    println(""),
+
+    % Demo 2: G Minor melody
+    println("Demo 2: G Natural Minor, 4 bars, 2 notes per bar (alto range)"),
+    println("--------------------------------------------------------------"),
+    Config2 = $config(
+        meter = $meter(4, 4),
+        key_root = 67,          % G4
+        mode = natural_minor,
+        num_bars = 4,
+        notes_per_bar = 2,
+        tempo_bpm = 80,
+        voice = alto_voice()
+    ),
+    generate_melody(Config2, Melody2),
+    print_melody_compact(Melody2),
+    println(""),
+
+    % Demo 3: D Dorian melody
+    println("Demo 3: D Dorian, 8 bars, 2 notes per bar (tenor range)"),
+    println("--------------------------------------------------------"),
+    Config3 = $config(
+        meter = $meter(4, 4),
+        key_root = 62,          % D4
+        mode = dorian,
+        num_bars = 8,
+        notes_per_bar = 2,
+        tempo_bpm = 100,
+        voice = tenor_voice()
+    ),
+    generate_melody(Config3, Melody3),
+    print_melody_compact(Melody3),
+    println(""),
+
+    println("Demo complete!").
+
+% Quick functionality test
+run_quick_test() =>
+    println("=== Quick Test ==="),
+    println(""),
+    println("Testing basic melody generation..."),
+    Config = default_config(),
+    if generate_melody(Config, Melody) then
+        println("SUCCESS: Melody generated"),
+        printf("  Notes: %d%n", length(Melody)),
+        printf("  Range: %d semitones%n", melody_range(Melody)),
+        print_melody_compact(Melody)
+    else
+        println("FAILED: Could not generate melody")
+    end.
+
+% ==============================================================================
+% CONFIGURATION DISPLAY
+% ==============================================================================
+
+print_config(Config) =>
+    Config = $config(
+        meter = Meter,
+        key_root = KeyRoot,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = TempoBpm,
+        voice = Voice
+    ),
+    printf("  Meter: %w%n", Meter),
+    printf("  Key Root: %d (MIDI)%n", KeyRoot),
+    printf("  Mode: %w%n", Mode),
+    printf("  Bars: %d%n", NumBars),
+    printf("  Notes per bar: %d%n", NotesPerBar),
+    printf("  Tempo: %d BPM%n", TempoBpm),
+    printf("  Voice: %w%n", Voice).

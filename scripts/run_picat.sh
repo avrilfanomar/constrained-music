@@ -2,9 +2,9 @@
 # run_picat.sh - Helper script to run Picat with correct module paths
 #
 # Usage:
-#   ./scripts/run_picat.sh picat/main.pi
-#   ./scripts/run_picat.sh examples/simple_melody.pi
-#   ./scripts/run_picat.sh tests/test_music_types.pi
+#   ./scripts/run_picat.sh picat/companion.pi
+#   ./scripts/run_picat.sh picat/companion.pi demo
+#   ./scripts/run_picat.sh picat/test_music_types.pi
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,14 +34,16 @@ if [ $# -eq 0 ]; then
     echo "Usage: $0 <picat_file.pi> [args...]"
     echo ""
     echo "Examples:"
-    echo "  $0 picat/main.pi"
-    echo "  $0 picat/main.pi --demo"
-    echo "  $0 picat/main.pi --multiple"
+    echo "  $0 picat/companion.pi"
+    echo "  $0 picat/companion.pi demo"
+    echo "  $0 picat/companion.pi moods"
+    echo "  $0 picat/companion.pi test"
+    echo "  $0 picat/companion.pi melody_demo"
     echo "  $0 picat/simple_melody.pi"
     echo "  $0 picat/test_music_types.pi"
     echo ""
     echo "Available files:"
-    echo "  picat/main.pi            - Main entry point"
+    echo "  picat/companion.pi - Main entry point"
     echo "  picat/simple_melody.pi - Example usage"
     echo "  picat/test_music_types.pi - Unit tests"
     exit 0

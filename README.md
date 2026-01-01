@@ -18,7 +18,7 @@ that respects musical theory rules while maintaining emotional expressiveness.
 ```
 constrained-music/
 ├── picat/                    # Core Picat modules
-│   ├── main.pi              # Main entry point & demos
+│   ├── companion.pi         # Music Companion orchestrator, main entry point
 │   ├── music_types.pi       # Musical primitives (pitch, duration, voice)
 │   ├── scale_utils.pi       # Scale/mode definitions
 │   ├── melody.pi            # Melody generation with constraints
@@ -29,7 +29,6 @@ constrained-music/
 │   ├── mood.pi              # Valence-Arousal mood model
 │   ├── mood_mapping.pi      # Maps moods to musical parameters
 │   ├── transition.pi        # Emotional transition planning
-│   ├── companion.pi         # Music Companion orchestrator
 │   ├── midi_export.pi       # JSON export for MIDI conversion
 │   └── test_music_types.pi  # Unit tests
 │
@@ -72,20 +71,14 @@ rm -f picat/*.qi
 ### Generate a Simple Melody
 
 ```bash
-PICATPATH="/picat" picat picat/main.pi
+PICATPATH="/picat" picat picat/companion.pi melody_demo
 ```
 
 ### Run Demos
 
 ```bash
-# Multiple demo configurations
-PICATPATH="/picat" picat picat/main.pi demo
-
-# Generate 5 different solutions
-PICATPATH="/picat" picat picat/main.pi multiple
-
-# Quick functionality test
-PICATPATH="/picat" picat picat/main.pi test
+# Generate demo
+PICATPATH="/picat" picat picat/companion.pi demo
 ```
 
 ### Generate MIDI File
