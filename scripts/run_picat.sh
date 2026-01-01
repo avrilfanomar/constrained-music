@@ -104,6 +104,10 @@ fi
 
 # Run Picat with the file and any additional arguments
 cd "$PROJECT_ROOT"
+
+# Clean compiled files to ensure fresh compilation
+rm -f "$PROJECT_ROOT/picat/"*.qi
+
 echo "Running: picat $FILE $*"
 echo "PICATPATH: $PICATPATH"
 echo ""
