@@ -97,7 +97,7 @@ scale_degree(Midi, Root, Mode) = Degree =>
 find_index(Elem, List, Index) =>
     find_index_helper(Elem, List, 1, Index).
 
-find_index_helper(Elem, [Elem|_], Idx, Idx) => true.
+find_index_helper(Elem, [Elem|_], CurrentIdx, Index) => Index = CurrentIdx.
 find_index_helper(Elem, [_|Rest], CurrentIdx, Index) =>
     find_index_helper(Elem, Rest, CurrentIdx + 1, Index).
 find_index_helper(_, [], _, _) => fail.
