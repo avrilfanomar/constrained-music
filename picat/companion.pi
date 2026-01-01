@@ -168,12 +168,6 @@ main(Args) =>
         Randomness = get_arg(ParsedOpts, randomness, 0.0),
         demo_with_randomness(Randomness),
         halt
-    elseif FirstArg == "demo_custom" then
-        % Parse additional options for demo_custom
-        ParsedOpts = parse_args(RestArgs),
-        Randomness = get_arg(ParsedOpts, randomness, 0.0),
-        demo_custom_with_randomness(Randomness),
-        halt
     elseif FirstArg == "path" then
         demo_path(),
         halt
@@ -323,18 +317,6 @@ demo() =>
 % Quick demo with randomness
 demo_with_randomness(Randomness) =>
     run_companion_presets(sad_depressed, energized, 60, "demo.json", Randomness).
-
-% Demo with custom moods
-demo_custom() =>
-    Start = $mood(-0.5, -0.2),  % Slightly sad, low energy
-    End = $mood(0.4, 0.5),      % Moderately happy, moderate energy
-    run_companion(Start, End, 120, "custom_demo.json").
-
-% Demo with custom moods and randomness
-demo_custom_with_randomness(Randomness) =>
-    Start = $mood(-0.5, -0.2),  % Slightly sad, low energy
-    End = $mood(0.4, 0.5),      % Moderately happy, moderate energy
-    run_companion(Start, End, 120, "custom_demo.json", Randomness).
 
 % Demo showing transition path only (no generation)
 demo_path() =>
