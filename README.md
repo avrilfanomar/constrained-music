@@ -62,42 +62,51 @@ export PICATPATH=/path/to/constrained-music/picat
 
 ## Usage
 
-### Clean the compiled files
-
-```bash
-rm -f picat/*.qi
-```
+Use the helper script `scripts/run_picat.sh` which sets up the correct module paths automatically.
 
 ### Generate a Simple Melody
 
 ```bash
-PICATPATH="/picat" picat picat/companion.pi melody_demo
+./scripts/run_picat.sh picat/companion.pi melody_demo
 ```
 
 ### Run Demos
 
 ```bash
-# Generate demo
-PICATPATH="/picat" picat picat/companion.pi demo
+./scripts/run_picat.sh picat/companion.pi demo
 ```
 
 ### Generate MIDI File
 
 ```bash
-# Generate melody and export to JSON
-PICATPATH="/picat" picat picat/companion.pi demo randomness=0.9
+# Generate melody and convert to MIDI
+./scripts/run_picat.sh --midi picat/companion.pi demo randomness=0.9
 
-# Convert JSON to MIDI
-.venv/bin/python3 scripts/midi_writer.py demo.json
+# Generate, convert to MIDI, and play with timidity
+./scripts/run_picat.sh --play picat/companion.pi demo randomness=0.9
 
-# Play with timidity (optional)
-timidity demo.mid
+# Custom output name
+./scripts/run_picat.sh --midi --output mytrack picat/companion.pi demo
 ```
 
 ### Run Tests
 
 ```bash
-PICATPATH="/picat" picat picat/test_music_types.pi
+./scripts/run_picat.sh picat/test_music_types.pi
+```
+
+### Script Options
+
+| Option           | Description                                    |
+|------------------|------------------------------------------------|
+| `--midi`         | Convert output JSON to MIDI after running      |
+| `--play`         | Convert to MIDI and play with timidity         |
+| `--output <name>`| Specify output file base name                  |
+
+### Clean Compiled Files
+
+```bash
+rm -f picat/*.qi
 ```
 
 ## How It Works

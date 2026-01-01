@@ -5,14 +5,45 @@
 #   ./scripts/run_picat.sh picat/companion.pi
 #   ./scripts/run_picat.sh picat/companion.pi demo
 #   ./scripts/run_picat.sh picat/test_music_types.pi
+#
+# Options:
+#   --midi          Convert output JSON to MIDI after running
+#   --play          Convert to MIDI and play with timidity
+
+set -euo pipefail
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Set Picat module search path
-# Picat looks for modules in directories listed in PICATPATH
 export PICATPATH="$PROJECT_ROOT/picat"
+
+# Parse options
+CONVERT_MIDI=false
+PLAY_MIDI=false
+OUTPUT_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --midi)
+            CONVERT_MIDI=true
+            shift
+            ;;
+        --play)
+            CONVERT_MIDI=true
+            PLAY_MIDI=true
+            shift
+            ;;
+        --output)
+            OUTPUT_NAME="$2"
+            shift 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
 
 # Check if Picat is installed
 if ! command -v picat &> /dev/null; then
@@ -31,20 +62,22 @@ fi
 if [ $# -eq 0 ]; then
     echo "Constrained Music Generation - Picat Runner"
     echo ""
-    echo "Usage: $0 <picat_file.pi> [args...]"
+    echo "Usage: $0 [options] <picat_file.pi> [args...]"
+    echo ""
+    echo "Options:"
+    echo "  --midi           Convert output JSON to MIDI after running"
+    echo "  --play           Convert to MIDI and play with timidity"
+    echo "  --output <name>  Output file base name (default: derived from args)"
     echo ""
     echo "Examples:"
-    echo "  $0 picat/companion.pi"
     echo "  $0 picat/companion.pi demo"
-    echo "  $0 picat/companion.pi moods"
-    echo "  $0 picat/companion.pi test"
-    echo "  $0 picat/companion.pi melody_demo"
-    echo "  $0 picat/simple_melody.pi"
+    echo "  $0 --midi picat/companion.pi demo randomness=0.5"
+    echo "  $0 --play picat/companion.pi moods"
     echo "  $0 picat/test_music_types.pi"
     echo ""
     echo "Available files:"
-    echo "  picat/companion.pi - Main entry point"
-    echo "  picat/simple_melody.pi - Example usage"
+    echo "  picat/companion.pi      - Main entry point"
+    echo "  picat/simple_melody.pi  - Example usage"
     echo "  picat/test_music_types.pi - Unit tests"
     exit 0
 fi
@@ -64,9 +97,39 @@ if [ ! -f "$FILE" ]; then
     exit 1
 fi
 
+# Determine output name from first arg if not specified
+if [ -z "$OUTPUT_NAME" ] && [ $# -gt 0 ]; then
+    OUTPUT_NAME="$1"
+fi
+
 # Run Picat with the file and any additional arguments
 cd "$PROJECT_ROOT"
-echo "Running: picat $FILE $@"
+echo "Running: picat $FILE $*"
 echo "PICATPATH: $PICATPATH"
 echo ""
 picat "$FILE" "$@"
+
+# Convert to MIDI if requested
+if [ "$CONVERT_MIDI" = true ] && [ -n "$OUTPUT_NAME" ]; then
+    JSON_FILE="${OUTPUT_NAME}.json"
+    if [ -f "$JSON_FILE" ]; then
+        echo ""
+        echo "Converting $JSON_FILE to MIDI..."
+        "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_writer.py" "$JSON_FILE"
+
+        # Play if requested
+        if [ "$PLAY_MIDI" = true ]; then
+            MIDI_FILE="${OUTPUT_NAME}.mid"
+            if [ -f "$MIDI_FILE" ] && command -v timidity &> /dev/null; then
+                echo "Playing $MIDI_FILE..."
+                timidity "$MIDI_FILE" --output-16bit
+            elif [ ! -f "$MIDI_FILE" ]; then
+                echo "Warning: MIDI file not found: $MIDI_FILE"
+            else
+                echo "Warning: timidity not installed, cannot play MIDI"
+            fi
+        fi
+    else
+        echo "Warning: JSON output not found: $JSON_FILE"
+    fi
+fi
