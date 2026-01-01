@@ -51,23 +51,23 @@ mode_intervals(blues) = [0, 3, 5, 6, 7, 10].
 % Structure: duration(Numerator, Denominator)
 
 % Common duration constants
-whole_note() = duration(1, 1).
-half_note() = duration(1, 2).
-quarter_note() = duration(1, 4).
-eighth_note() = duration(1, 8).
-sixteenth_note() = duration(1, 16).
-dotted_half() = duration(3, 4).
-dotted_quarter() = duration(3, 8).
-dotted_eighth() = duration(3, 16).
+whole_note() = $duration(1, 1).
+half_note() = $duration(1, 2).
+quarter_note() = $duration(1, 4).
+eighth_note() = $duration(1, 8).
+sixteenth_note() = $duration(1, 16).
+dotted_half() = $duration(3, 4).
+dotted_quarter() = $duration(3, 8).
+dotted_eighth() = $duration(3, 16).
 
 % Duration arithmetic
 duration_to_beats(duration(N, D), BeatsPerWhole) = (N * BeatsPerWhole) / D.
 
-duration_add(duration(N1, D1), duration(N2, D2)) = duration(N, D) =>
+duration_add(duration(N1, D1), duration(N2, D2)) = $duration(N, D) =>
     N = N1 * D2 + N2 * D1,
     D = D1 * D2.
 
-duration_multiply(duration(N, D), Factor) = duration(N * Factor, D).
+duration_multiply(duration(N, D), Factor) = $duration(N * Factor, D).
 
 % Compare durations (returns -1, 0, or 1)
 duration_compare(duration(N1, D1), duration(N2, D2)) = Cmp =>
@@ -92,7 +92,7 @@ time_to_absolute(time_pos(Bar, Beat, Sub), BeatsPerBar) = AbsBeat =>
     AbsBeat = (Bar - 1) * BeatsPerBar + (Beat - 1) + Sub.
 
 % Convert absolute beat to time position
-absolute_to_time(AbsBeat, BeatsPerBar) = time_pos(Bar, Beat, Sub) =>
+absolute_to_time(AbsBeat, BeatsPerBar) = $time_pos(Bar, Beat, Sub) =>
     Bar = (AbsBeat // BeatsPerBar) + 1,
     Remainder = AbsBeat mod BeatsPerBar,
     Beat = floor(Remainder) + 1,

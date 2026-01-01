@@ -112,7 +112,7 @@ build_note(MidiPitch, Index, NotesPerBar, VoiceId) = Note =>
     Beat = ((Index - 1) mod NotesPerBar) + 1,
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
-        duration(1, NotesPerBar),
+        $duration(1, NotesPerBar),
         $time_pos(Bar, Beat, 0),
         VoiceId,
         80
@@ -451,7 +451,7 @@ build_mood_note(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar) = Note 
 
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
-        duration(1, NotesPerBar),
+        $duration(1, NotesPerBar),
         $time_pos(Bar, Beat, 0),
         VoiceId,
         Velocity
@@ -475,7 +475,7 @@ build_mood_note_with_randomness(MidiPitch, Index, NotesPerBar, VoiceId, VelBase,
 
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
-        duration(1, NotesPerBar),
+        $duration(1, NotesPerBar),
         $time_pos(Bar, Beat, 0),
         VoiceId,
         Velocity
