@@ -51,14 +51,14 @@ mode_intervals(blues) = [0, 3, 5, 6, 7, 10].
 % Structure: duration(Numerator, Denominator)
 
 % Common duration constants
-whole_note() = $duration(1, 1).
-half_note() = $duration(1, 2).
-quarter_note() = $duration(1, 4).
-eighth_note() = $duration(1, 8).
-sixteenth_note() = $duration(1, 16).
-dotted_half() = $duration(3, 4).
-dotted_quarter() = $duration(3, 8).
-dotted_eighth() = $duration(3, 16).
+whole_note() = duration(1, 1).
+half_note() = duration(1, 2).
+quarter_note() = duration(1, 4).
+eighth_note() = duration(1, 8).
+sixteenth_note() = duration(1, 16).
+dotted_half() = duration(3, 4).
+dotted_quarter() = duration(3, 8).
+dotted_eighth() = duration(3, 16).
 
 % Duration arithmetic
 duration_to_beats(duration(N, D), BeatsPerWhole) = (N * BeatsPerWhole) / D.
@@ -172,7 +172,7 @@ rotate_list(List, N) = Rotated =>
 make_note(MidiPitch, DurNum, DurDen, Bar, Beat, VoiceId, Velocity) = Note =>
     Note = $note(
         $pitch(midi, MidiPitch, MidiPitch // 12 - 1),
-        $duration(DurNum, DurDen),
+        duration(DurNum, DurDen),
         $time_pos(Bar, Beat, 0),
         VoiceId,
         Velocity

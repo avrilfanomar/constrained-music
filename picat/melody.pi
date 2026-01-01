@@ -112,7 +112,7 @@ build_note(MidiPitch, Index, NotesPerBar, VoiceId) = Note =>
     Beat = ((Index - 1) mod NotesPerBar) + 1,
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
-        $duration(1, NotesPerBar),
+        duration(1, NotesPerBar),
         $time_pos(Bar, Beat, 0),
         VoiceId,
         80
@@ -261,7 +261,7 @@ melody_to_pitches(Melody) = Pitches =>
 melody_to_list(Melody) = List =>
     List = [
         [MidiPitch, DurNum, DurDen, Bar, Beat, VoiceId, Vel] :
-        $note($pitch(midi, MidiPitch, _), $duration(DurNum, DurDen),
+        $note($pitch(midi, MidiPitch, _), duration(DurNum, DurDen),
               $time_pos(Bar, Beat, _), VoiceId, Vel) in Melody
     ].
 
@@ -293,7 +293,7 @@ melody_interval_histogram(Melody) = Hist =>
 print_melody(Melody) =>
     NoteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
     foreach(Note in Melody)
-        Note = $note($pitch(midi, Midi, _), $duration(DurN, DurD),
+        Note = $note($pitch(midi, Midi, _), duration(DurN, DurD),
                      $time_pos(Bar, Beat, _), Voice, Vel),
         NoteName = NoteNames[(Midi mod 12) + 1],
         Octave = Midi // 12 - 1,
@@ -451,7 +451,7 @@ build_mood_note(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar) = Note 
 
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
-        $duration(1, NotesPerBar),
+        duration(1, NotesPerBar),
         $time_pos(Bar, Beat, 0),
         VoiceId,
         Velocity
@@ -475,7 +475,7 @@ build_mood_note_with_randomness(MidiPitch, Index, NotesPerBar, VoiceId, VelBase,
 
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
-        $duration(1, NotesPerBar),
+        duration(1, NotesPerBar),
         $time_pos(Bar, Beat, 0),
         VoiceId,
         Velocity

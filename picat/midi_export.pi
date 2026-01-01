@@ -70,7 +70,7 @@ write_notes_json(FD, [Note | Rest]) =>
     write_notes_json(FD, Rest).
 
 write_note_json(FD, Note, HasMore) =>
-    Note = $note($pitch(midi, MidiPitch, _), $duration(DurNum, DurDen),
+    Note = $note($pitch(midi, MidiPitch, _), duration(DurNum, DurDen),
                  $time_pos(Bar, Beat, Sub), VoiceId, Velocity),
 
     printf(FD, "    {\"pitch\": %d, \"dur_num\": %d, \"dur_den\": %d, ",
@@ -133,7 +133,7 @@ print_first_notes(Notes, N) =>
     Count = min(N, length(Notes)),
     foreach(I in 1..Count)
         Note = Notes[I],
-        Note = $note($pitch(midi, Midi, _), $duration(DN, DD),
+        Note = $note($pitch(midi, Midi, _), duration(DN, DD),
                      $time_pos(Bar, Beat, _), Voice, Vel),
         NoteName = NoteNames[(Midi mod 12) + 1],
         Octave = Midi // 12 - 1,

@@ -191,20 +191,20 @@ in_bounds(Value, Min, Max) => Value >= Min, Value =< Max.
 % Common rhythmic patterns as lists of durations
 
 % Simple patterns (quarter notes in 4/4)
-pattern_all_quarters() = [$duration(1, 4), $duration(1, 4), $duration(1, 4), $duration(1, 4)].
-pattern_half_notes() = [$duration(1, 2), $duration(1, 2)].
-pattern_whole_note() = [$duration(1, 1)].
+pattern_all_quarters() = [duration(1, 4), duration(1, 4), duration(1, 4), duration(1, 4)].
+pattern_half_notes() = [duration(1, 2), duration(1, 2)].
+pattern_whole_note() = [duration(1, 1)].
 
 % Syncopated patterns
-pattern_syncopated_1() = [$duration(1, 8), $duration(1, 4), $duration(1, 8), $duration(1, 4), $duration(1, 4)].
-pattern_dotted_quarter() = [$duration(3, 8), $duration(1, 8), $duration(3, 8), $duration(1, 8)].
+pattern_syncopated_1() = [duration(1, 8), duration(1, 4), duration(1, 8), duration(1, 4), duration(1, 4)].
+pattern_dotted_quarter() = [duration(3, 8), duration(1, 8), duration(3, 8), duration(1, 8)].
 
 % Triplet feel (in 4/4, represented as tuplets conceptually)
-pattern_eighth_notes() = [$duration(1, 8) : _ in 1..8].
+pattern_eighth_notes() = [duration(1, 8) : _ in 1..8].
 
 % Calculate total duration of a pattern
 pattern_duration(Pattern) = Total =>
-    Total = fold(duration_add_fold, $duration(0, 1), Pattern).
+    Total = fold(duration_add_fold, duration(0, 1), Pattern).
 
 duration_add_fold(D1, D2) = R =>
     R = duration_add(D1, D2).
@@ -214,7 +214,7 @@ pattern_fills_bar(Pattern, Meter) =>
     Total = pattern_duration(Pattern),
     BeatsPerBar = beats_per_bar(Meter),
     BeatUnit = beat_unit(Meter),
-    BarDuration = $duration(BeatsPerBar, BeatUnit),
+    BarDuration = duration(BeatsPerBar, BeatUnit),
     duration_compare(Total, BarDuration) == 0.
 
 % ==============================================================================
