@@ -63,36 +63,42 @@ export PICATPATH=/path/to/constrained-music/picat
 
 ## Usage
 
+### Clean the compiled files
+
+```bash
+rm -f picat/*.qi
+```
+
 ### Generate a Simple Melody
 
 ```bash
-./scripts/run_picat.sh picat/main.pi
+PICATPATH="/picat" picat picat/main.pi
 ```
 
 ### Run Demos
 
 ```bash
 # Multiple demo configurations
-./scripts/run_picat.sh picat/main.pi demo
+PICATPATH="/picat" picat picat/main.pi demo
 
 # Generate 5 different solutions
-./scripts/run_picat.sh picat/main.pi multiple
+PICATPATH="/picat" picat picat/main.pi multiple
 
 # Quick functionality test
-./scripts/run_picat.sh picat/main.pi test
+PICATPATH="/picat" picat picat/main.pi test
 ```
 
 ### Generate MIDI File
 
 ```bash
 # Generate melody and export to JSON
-./scripts/run_picat.sh picat/main.pi demo
+PICATPATH="/picat" picat picat/companion.pi demo randomness=0.9
 
 # Convert JSON to MIDI
-python scripts/midi_writer.py session.json
+.venv/bin/python3 scripts/midi_writer.py demo.json
 
 # Play with timidity (optional)
-timidity session.mid
+timidity demo.mid
 ```
 
 ### Run Tests
