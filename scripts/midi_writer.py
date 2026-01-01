@@ -41,7 +41,8 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
 
     # Create MIDI file (1 track)
     # Use deinterleave=False to avoid issues with overlapping notes
-    midi = MIDIFile(1, deinterleave=False)
+    # Use high resolution (480 ticks per quarter note) for precise timing
+    midi = MIDIFile(1, deinterleave=False, ticks_per_quarternote=480)
     track = 0
     channel = 0
     time = 0  # Start at beginning
