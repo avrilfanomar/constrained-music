@@ -22,6 +22,9 @@ export PICATPATH="$PROJECT_ROOT/picat"
 # Parse options
 CONVERT_MIDI=false
 PLAY_MIDI=false
+CONVERT_LILYPOND=false
+CONVERT_SAMPLER=false
+SAMPLER_LIBRARY="spitfire"
 OUTPUT_NAME=""
 
 while [[ $# -gt 0 ]]; do
@@ -35,9 +38,27 @@ while [[ $# -gt 0 ]]; do
             PLAY_MIDI=true
             shift
             ;;
+        --lilypond)
+            CONVERT_LILYPOND=true
+            shift
+            ;;
+        --sampler)
+            CONVERT_SAMPLER=true
+            shift
+            ;;
+        --library)
+            SAMPLER_LIBRARY="$2"
+            shift 2
+            ;;
         --output)
             OUTPUT_NAME="$2"
             shift 2
+            ;;
+        --all)
+            CONVERT_MIDI=true
+            CONVERT_LILYPOND=true
+            CONVERT_SAMPLER=true
+            shift
             ;;
         *)
             break
@@ -67,18 +88,23 @@ if [ $# -eq 0 ]; then
     echo "Options:"
     echo "  --midi           Convert output JSON to MIDI after running"
     echo "  --play           Convert to MIDI and play with timidity"
+    echo "  --lilypond       Generate LilyPond score (.ly) for sheet music"
+    echo "  --sampler        Generate sampler-ready MIDI with CC automation"
+    echo "  --library <lib>  Sampler library style: spitfire, eastwest, generic"
+    echo "  --all            Generate all outputs (MIDI, LilyPond, sampler)"
     echo "  --output <name>  Output file base name (default: derived from args)"
     echo ""
     echo "Examples:"
     echo "  $0 picat/companion.pi demo"
     echo "  $0 --midi picat/companion.pi demo randomness=0.5"
     echo "  $0 --play picat/companion.pi moods"
-    echo "  $0 picat/test_music_types.pi"
+    echo "  $0 picat/companion.pi violin from=calm_peaceful to=energized"
+    echo "  $0 --all picat/companion.pi violin"
+    echo "  $0 --lilypond picat/companion.pi violin"
     echo ""
-    echo "Available files:"
-    echo "  picat/companion.pi      - Main entry point"
-    echo "  picat/simple_melody.pi  - Example usage"
-    echo "  picat/test_music_types.pi - Unit tests"
+    echo "Available modes:"
+    echo "  picat/companion.pi           - Standard MIDI generation"
+    echo "  picat/companion.pi violin    - Violin mode with articulations"
     exit 0
 fi
 
@@ -113,27 +139,62 @@ echo "PICATPATH: $PICATPATH"
 echo ""
 picat "$FILE" "$@"
 
-# Convert to MIDI if requested
-if [ "$CONVERT_MIDI" = true ] && [ -n "$OUTPUT_NAME" ]; then
+# Find JSON file for post-processing
+JSON_FILE=""
+if [ -n "$OUTPUT_NAME" ]; then
     JSON_FILE="${OUTPUT_NAME}.json"
-    if [ -f "$JSON_FILE" ]; then
-        echo ""
-        echo "Converting $JSON_FILE to MIDI..."
-        "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_writer.py" "$JSON_FILE"
+elif [ -f "session.json" ]; then
+    JSON_FILE="session.json"
+elif [ -f "violin_session.json" ]; then
+    JSON_FILE="violin_session.json"
+fi
 
-        # Play if requested
-        if [ "$PLAY_MIDI" = true ]; then
-            MIDI_FILE="${OUTPUT_NAME}.mid"
-            if [ -f "$MIDI_FILE" ] && command -v timidity &> /dev/null; then
-                echo "Playing $MIDI_FILE..."
-                timidity "$MIDI_FILE" --output-16bit
-            elif [ ! -f "$MIDI_FILE" ]; then
-                echo "Warning: MIDI file not found: $MIDI_FILE"
-            else
-                echo "Warning: timidity not installed, cannot play MIDI"
-            fi
+# Convert to MIDI if requested
+if [ "$CONVERT_MIDI" = true ] && [ -n "$JSON_FILE" ] && [ -f "$JSON_FILE" ]; then
+    echo ""
+    echo "Converting $JSON_FILE to MIDI..."
+    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_writer.py" "$JSON_FILE"
+
+    # Play if requested
+    if [ "$PLAY_MIDI" = true ]; then
+        MIDI_FILE="${JSON_FILE%.json}.mid"
+        if [ -f "$MIDI_FILE" ] && command -v timidity &> /dev/null; then
+            echo "Playing $MIDI_FILE..."
+            timidity "$MIDI_FILE" --output-16bit
+        elif [ ! -f "$MIDI_FILE" ]; then
+            echo "Warning: MIDI file not found: $MIDI_FILE"
+        else
+            echo "Warning: timidity not installed, cannot play MIDI"
         fi
-    else
-        echo "Warning: JSON output not found: $JSON_FILE"
+    fi
+fi
+
+# Convert to LilyPond if requested
+if [ "$CONVERT_LILYPOND" = true ] && [ -n "$JSON_FILE" ] && [ -f "$JSON_FILE" ]; then
+    echo ""
+    echo "Converting $JSON_FILE to LilyPond..."
+    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/lilypond_writer.py" "$JSON_FILE"
+
+    LY_FILE="${JSON_FILE%.json}.ly"
+    if [ -f "$LY_FILE" ]; then
+        echo "LilyPond file created: $LY_FILE"
+        echo "To generate PDF: lilypond $LY_FILE"
+    fi
+fi
+
+# Convert to sampler format if requested
+if [ "$CONVERT_SAMPLER" = true ] && [ -n "$JSON_FILE" ] && [ -f "$JSON_FILE" ]; then
+    echo ""
+    echo "Converting $JSON_FILE to sampler format..."
+    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/sampler_writer.py" \
+        "$JSON_FILE" --format midi_cc --library "$SAMPLER_LIBRARY"
+fi
+
+# Report if no JSON file found for post-processing
+if [ "$CONVERT_MIDI" = true ] || [ "$CONVERT_LILYPOND" = true ] || [ "$CONVERT_SAMPLER" = true ]; then
+    if [ -z "$JSON_FILE" ] || [ ! -f "$JSON_FILE" ]; then
+        echo ""
+        echo "Warning: No JSON output file found for conversion"
+        echo "Expected: session.json or violin_session.json"
     fi
 fi

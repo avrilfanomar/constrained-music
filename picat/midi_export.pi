@@ -6,6 +6,7 @@
 module midi_export.
 
 import music_types.
+import violin_types.
 import util.
 
 % ==============================================================================
@@ -139,4 +140,162 @@ print_first_notes(Notes, N) =>
         Octave = Midi // 12 - 1,
         printf("  %3d: %s%d (bar %d, beat %d, dur=%d/%d, vel=%d, voice=%d)%n",
                I, NoteName, Octave, Bar, Beat, DN, DD, Vel, Voice)
+    end.
+
+% ==============================================================================
+% VIOLIN-EXTENDED JSON EXPORT
+% ==============================================================================
+% Exports violin notes with full expression data while maintaining
+% backward compatibility with the basic notes format.
+
+% Export violin session to JSON file
+% ViolinNotes: list of violin_note structures
+% TempoChanges: list of tempo_change structures
+% Metadata: optional metadata map
+export_violin_session_json(ViolinNotes, TempoChanges, FilePath) =>
+    export_violin_session_json(ViolinNotes, TempoChanges, [], FilePath).
+
+export_violin_session_json(ViolinNotes, TempoChanges, Metadata, FilePath) =>
+    FD = open(FilePath, write),
+
+    % Write JSON header
+    println(FD, "{"),
+
+    % Write extended metadata
+    println(FD, "  \"metadata\": {"),
+    println(FD, "    \"generator\": \"Music Companion\","),
+    println(FD, "    \"version\": \"2.0\","),
+    println(FD, "    \"format\": \"violin_extended\","),
+    printf(FD, "    \"num_notes\": %d,%n", length(ViolinNotes)),
+    printf(FD, "    \"num_tempo_changes\": %d", length(TempoChanges)),
+    write_metadata_fields(FD, Metadata),
+    nl(FD),
+    println(FD, "  },"),
+
+    % Write tempo changes (unchanged for MIDI compatibility)
+    println(FD, "  \"tempo_changes\": ["),
+    write_tempo_changes_json(FD, TempoChanges),
+    println(FD, "  ],"),
+
+    % Write MIDI-compatible basic notes (for fallback)
+    println(FD, "  \"notes\": ["),
+    BasicNotes = violin_notes_to_notes(ViolinNotes),
+    write_notes_json(FD, BasicNotes),
+    println(FD, "  ],"),
+
+    % Write extended violin notes
+    println(FD, "  \"violin_notes\": ["),
+    write_violin_notes_json(FD, ViolinNotes),
+    println(FD, "  ]"),
+
+    println(FD, "}"),
+
+    close(FD).
+
+% Write optional metadata fields
+write_metadata_fields(_, []) => true.
+write_metadata_fields(FD, [(Key, Value) | Rest]) =>
+    print(FD, ","),
+    nl(FD),
+    printf(FD, "    \"%w\": ", Key),
+    write_json_value(FD, Value),
+    write_metadata_fields(FD, Rest).
+
+% Write JSON value (handles strings, numbers, etc.)
+write_json_value(FD, Value), string(Value) =>
+    printf(FD, "\"%s\"", Value).
+write_json_value(FD, Value), number(Value) =>
+    printf(FD, "%w", Value).
+write_json_value(FD, Value), atom(Value) =>
+    printf(FD, "\"%w\"", Value).
+
+% Write violin notes as JSON array
+write_violin_notes_json(_, []) => true.
+write_violin_notes_json(FD, [VNote]) =>
+    write_violin_note_json(FD, VNote, false).
+write_violin_notes_json(FD, [VNote | Rest]) =>
+    write_violin_note_json(FD, VNote, true),
+    write_violin_notes_json(FD, Rest).
+
+% Write a single violin note with all extended fields
+write_violin_note_json(FD, VNote, HasMore) =>
+    % Resolve auto values
+    ResolvedNote = resolve_violin_note(VNote),
+
+    % Extract components
+    ResolvedNote = $violin_note(BaseNote, Articulation, Bowing, String, Position,
+                                Expression, Dynamics),
+    BaseNote = $note($pitch(midi, MidiPitch, _), duration(DurNum, DurDen),
+                     $time_pos(Bar, Beat, Sub), VoiceId, Velocity),
+    Expression = $expression(Vibrato, BowPressure, BowSpeed, BowPosition),
+    Dynamics = $dynamics(DynLevel, Attack, Decay, CrescTarget, CrescDur),
+
+    % Start note object
+    print(FD, "    {"),
+
+    % Core MIDI-compatible fields
+    printf(FD, "\"pitch\": %d, \"dur_num\": %d, \"dur_den\": %d, ",
+           MidiPitch, DurNum, DurDen),
+    printf(FD, "\"bar\": %d, \"beat\": %d, \"sub\": %.3f, ",
+           Bar, Beat, Sub),
+    printf(FD, "\"voice\": %d, \"velocity\": %d, ",
+           VoiceId, Velocity),
+
+    % Violin-specific fields
+    printf(FD, "\"articulation\": \"%w\", ", Articulation),
+    printf(FD, "\"bowing\": \"%w\", ", Bowing),
+    printf(FD, "\"string\": \"%w\", ", String),
+    printf(FD, "\"position\": \"%w\", ", Position),
+
+    % Expression object
+    printf(FD, "\"expression\": {"),
+    printf(FD, "\"vibrato\": %.2f, \"bow_pressure\": %.2f, \"bow_speed\": %.2f, \"bow_position\": %.2f",
+           Vibrato, BowPressure, BowSpeed, BowPosition),
+    printf(FD, "}, "),
+
+    % Dynamics object
+    printf(FD, "\"dynamics\": {"),
+    printf(FD, "\"level\": \"%w\", \"attack\": %.2f, \"decay\": %.2f",
+           DynLevel, Attack, Decay),
+    if CrescTarget != none then
+        printf(FD, ", \"cresc_target\": \"%w\", \"cresc_duration\": %.2f",
+               CrescTarget, CrescDur)
+    end,
+    printf(FD, "}"),
+
+    print(FD, "}"),
+    if HasMore then println(FD, ",") else nl(FD) end.
+
+% ==============================================================================
+% VIOLIN SESSION SUMMARY
+% ==============================================================================
+
+% Print violin session summary
+print_violin_session_summary(ViolinNotes, TempoChanges) =>
+    println("Violin Session Summary:"),
+    printf("  Notes: %d%n", length(ViolinNotes)),
+    printf("  Tempo changes: %d%n", length(TempoChanges)),
+
+    if ViolinNotes != [] then
+        FirstVNote = head(ViolinNotes),
+        LastVNote = last(ViolinNotes),
+        FirstBase = violin_note_base(FirstVNote),
+        LastBase = violin_note_base(LastVNote),
+        FirstBase = $note(_, _, $time_pos(FirstBar, _, _), _, _),
+        LastBase = $note(_, _, $time_pos(LastBar, LastBeat, _), _, _),
+        printf("  Bars: %d - %d (beat %d)%n", FirstBar, LastBar, LastBeat),
+
+        % Count articulations
+        print_articulation_counts(ViolinNotes)
+    end.
+
+% Count and print articulation usage
+print_articulation_counts(ViolinNotes) =>
+    ArticulationList = [violin_note_articulation(VN) : VN in ViolinNotes],
+    println("  Articulations:"),
+    foreach(Art in [arco, legato, staccato, spiccato, detache, martele, pizzicato, tremolo, col_legno])
+        Count = length([A : A in ArticulationList, A == Art]),
+        if Count > 0 then
+            printf("    %w: %d%n", Art, Count)
+        end
     end.

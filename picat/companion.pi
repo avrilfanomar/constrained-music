@@ -10,6 +10,7 @@ import mood_mapping.
 import transition.
 import melody.
 import music_types.
+import violin_types.
 import temporal.
 import midi_export.
 import util.
@@ -177,6 +178,11 @@ main(Args) =>
     elseif FirstArg == "test" then
         run_quick_test(),
         halt
+    elseif FirstArg == "violin" then
+        % Violin mode: generate with violin-specific output
+        ParsedOpts = parse_args(RestArgs),
+        run_violin_companion(ParsedOpts),
+        halt
     end,
 
     % Parse key=value arguments
@@ -280,6 +286,7 @@ print_usage() =>
     nl,
     println("Commands:"),
     println("  demo         Run quick demo (60 sec, sad to energized)"),
+    println("  violin       Generate in violin mode (articulations, expression)"),
     println("  melody_demo  Demo melody generation with different modes"),
     println("  test         Quick functionality test"),
     println("  path         Show transition path without generating music"),
@@ -481,3 +488,106 @@ print_config(Config) =>
     printf("  Notes per bar: %d%n", NotesPerBar),
     printf("  Tempo: %d BPM%n", TempoBpm),
     printf("  Voice: %w%n", Voice).
+
+% ==============================================================================
+% VIOLIN MODE
+% ==============================================================================
+% Generate music with violin-specific articulations, expression, and output
+
+% Run companion in violin mode
+run_violin_companion(Opts) =>
+    StartPreset = get_arg(Opts, from, calm_peaceful),
+    EndPreset = get_arg(Opts, to, energized),
+    Duration = get_arg(Opts, duration, 300),
+    Output = get_arg(Opts, output, "violin_session.json"),
+    Randomness = get_arg(Opts, randomness, 0.0),
+
+    StartMood = mood_preset(StartPreset),
+    EndMood = mood_preset(EndPreset),
+
+    println("=== Music Companion - Violin Mode ==="),
+    nl,
+
+    % Print session info
+    printf("Generating violin emotional transition:%n"),
+    printf("  From: "), print_mood(StartMood),
+    printf("  To:   "), print_mood(EndMood),
+    printf("  Duration: %d seconds (%.1f minutes)%n", Duration, Duration / 60.0),
+    printf("  Randomness: %.2f%n%n", Randomness),
+
+    % Plan the transition
+    println("Planning transition path..."),
+    Segments = plan_transition(StartMood, EndMood, Duration, ease_in_out, Randomness),
+    printf("  Created %d segments%n%n", length(Segments)),
+
+    % Generate melodies for each segment
+    println("Generating music for each segment..."),
+    KeyRoot = 55,  % G3 - violin's lowest note
+    AllNotes = generate_all_segments(Segments, KeyRoot),
+    printf("  Generated %d total notes%n%n", length(AllNotes)),
+
+    % Convert to violin notes with mood-based expression
+    println("Adding violin articulations and expression..."),
+    ViolinNotes = convert_to_violin_notes(AllNotes, Segments),
+
+    % Collect tempo changes
+    TempoChanges = collect_tempo_changes(Segments),
+
+    % Export to violin-extended JSON
+    println("Exporting to violin-extended JSON..."),
+    Metadata = [(instrument, violin),
+                (start_mood, StartPreset),
+                (end_mood, EndPreset)],
+    export_violin_session_json(ViolinNotes, TempoChanges, Metadata, Output),
+    printf("  Saved to: %s%n%n", Output),
+
+    % Print summary
+    print_violin_session_summary(ViolinNotes, TempoChanges),
+    nl,
+
+    println("Done! Next steps:"),
+    println("  1. For MIDI:     python scripts/midi_writer.py " ++ Output),
+    println("  2. For score:    python scripts/lilypond_writer.py " ++ Output),
+    println("  3. For sampler:  python scripts/sampler_writer.py " ++ Output),
+    nl.
+
+% Convert basic notes to violin notes with expression from segment moods
+convert_to_violin_notes(Notes, Segments) = ViolinNotes =>
+    % Build a map of bar -> segment for mood lookup
+    BarToSegment = build_bar_segment_map(Segments),
+
+    % Convert each note
+    ViolinNotes = [convert_note_for_bar(Note, BarToSegment) : Note in Notes].
+
+% Build mapping from bar number to segment
+build_bar_segment_map(Segments) = Map =>
+    Map = build_bar_segment_map_helper(Segments, 1, new_map()).
+
+build_bar_segment_map_helper([], _, Map) = Map.
+build_bar_segment_map_helper([Seg | Rest], CurrentBar, Map) = Result =>
+    NumBars = get_segment_num_bars(Seg),
+    % Map all bars in this segment to the segment
+    foreach(B in CurrentBar..CurrentBar+NumBars-1)
+        put(Map, B, Seg)
+    end,
+    Result = build_bar_segment_map_helper(Rest, CurrentBar + NumBars, Map).
+
+% Convert a single note using segment's mood for expression
+convert_note_for_bar(Note, BarToSegment) = VNote =>
+    Note = $note(_, _, $time_pos(Bar, _, _), _, _),
+
+    % Get segment for this bar
+    if BarToSegment.has_key(Bar) then
+        Seg = BarToSegment.get(Bar),
+        Mood = get_segment_mood(Seg),
+        % Get violin expression from mood
+        Expr = mood_to_expression(Mood),
+        Dyn = mood_to_dynamics(Mood),
+        VParams = mood_to_violin_params(Mood),
+        Art = get_articulation(VParams),
+        % Create violin note with mood-based parameters
+        VNote = $violin_note(Note, Art, auto, auto, auto, Expr, Dyn)
+    else
+        % Fallback: use defaults
+        VNote = note_to_violin_note(Note)
+    end.

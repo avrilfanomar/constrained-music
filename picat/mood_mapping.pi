@@ -37,7 +37,7 @@ get_randomness(music_params(_, _, _, _, _, _, _, _, _, R)) = R.
 
 % Convert a mood to music parameters (deterministic version)
 mood_to_params(Mood) = Params =>
-    mood_to_params(Mood, 0.0, Params).
+    Params = mood_to_params(Mood, 0.0).
 
 % Convert a mood to music parameters with randomness factor
 % Randomness: 0.0 = deterministic, 1.0 = maximum variation
@@ -361,3 +361,183 @@ demo_all_mappings() =>
         demo_mood_mapping(Name),
         println("---")
     end.
+
+% ==============================================================================
+% VIOLIN-SPECIFIC MOOD PARAMETERS
+% ==============================================================================
+% Maps valence-arousal to violin-specific musical parameters
+
+% Structure: violin_params(Articulation, Vibrato, BowPressure, BowSpeed, Technique)
+% - Articulation: arco, legato, staccato, spiccato, pizzicato, etc.
+% - Vibrato: 0.0-1.0 intensity
+% - BowPressure: 0.0-1.0 (light to heavy)
+% - BowSpeed: 0.0-1.0 (slow to fast)
+% - Technique: normal, sul_tasto, sul_ponticello, flautando
+
+% Default violin params
+default_violin_params() = $violin_params(arco, 0.5, 0.5, 0.5, normal).
+
+% Accessors for violin params
+get_articulation(violin_params(A, _, _, _, _)) = A.
+get_vibrato(violin_params(_, V, _, _, _)) = V.
+get_bow_pressure(violin_params(_, _, P, _, _)) = P.
+get_bow_speed(violin_params(_, _, _, S, _)) = S.
+get_technique(violin_params(_, _, _, _, T)) = T.
+
+% Main mapping function: mood to violin parameters
+mood_to_violin_params(Mood) = VParams =>
+    V = get_valence(Mood),
+    A = get_arousal(Mood),
+
+    Articulation = articulation_from_va(V, A),
+    Vibrato = vibrato_from_va(V, A),
+    BowPressure = bow_pressure_from_va(V, A),
+    BowSpeed = bow_speed_from_va(A),
+    Technique = technique_from_va(V, A),
+
+    VParams = $violin_params(Articulation, Vibrato, BowPressure, BowSpeed, Technique).
+
+% ==============================================================================
+% ARTICULATION FROM VALENCE-AROUSAL
+% ==============================================================================
+% High arousal → more detached/energetic articulations
+% Low arousal → more connected/smooth articulations
+
+articulation_from_va(V, A) = Art =>
+    if A >= 0.6 then
+        % High arousal: energetic articulations
+        if V >= 0.3 then
+            Art = spiccato      % Happy, energetic → bouncy
+        elseif V >= -0.3 then
+            Art = detache       % Neutral, energetic → separated
+        else
+            Art = martele       % Negative, energetic → aggressive
+        end
+    elseif A >= 0.2 then
+        % Moderate arousal
+        if V >= 0.0 then
+            Art = arco          % Default bowed
+        else
+            Art = detache       % Slightly tense
+        end
+    elseif A >= -0.3 then
+        % Low-moderate arousal: connected
+        Art = arco              % Standard smooth bowing
+    else
+        % Very low arousal: very connected
+        Art = legato            % Maximum smoothness
+    end.
+
+% ==============================================================================
+% VIBRATO FROM VALENCE-AROUSAL
+% ==============================================================================
+% Emotional intensity (extreme V or A) → more vibrato
+% Neutral → less vibrato
+
+vibrato_from_va(V, A) = Vib =>
+    % Intensity based on distance from neutral
+    EmotionalIntensity = abs(V) * 0.5 + abs(A) * 0.3,
+    % Base vibrato + intensity bonus
+    BaseVib = 0.2 + EmotionalIntensity * 0.6,
+    Vib = clamp(BaseVib, 0.1, 0.95).
+
+% ==============================================================================
+% BOW PRESSURE FROM VALENCE-AROUSAL
+% ==============================================================================
+% Higher arousal → more bow pressure (heavier sound)
+% Lower arousal → lighter bow pressure
+
+bow_pressure_from_va(_V, A) = Pressure =>
+    % Scale arousal to pressure range
+    BasePressure = 0.3 + (A + 1) * 0.3,  % Maps -1..1 to 0.3..0.9
+    Pressure = clamp(BasePressure, 0.15, 0.9).
+
+% ==============================================================================
+% BOW SPEED FROM AROUSAL
+% ==============================================================================
+% Higher arousal → faster bow speed
+% Lower arousal → slower, more sustained
+
+bow_speed_from_va(A) = Speed =>
+    BaseSpeed = 0.25 + (A + 1) * 0.3,  % Maps -1..1 to 0.25..0.85
+    Speed = clamp(BaseSpeed, 0.15, 0.9).
+
+% ==============================================================================
+% TECHNIQUE FROM VALENCE-AROUSAL
+% ==============================================================================
+% Special bow positions for extreme moods
+
+technique_from_va(V, A) = Tech =>
+    if V < -0.5, A < -0.4 then
+        Tech = sul_tasto        % Sad, subdued → soft, ethereal sound
+    elseif V < -0.3, A >= 0.5 then
+        Tech = sul_ponticello   % Tense, agitated → glassy, edgy sound
+    elseif V >= 0.5, A < -0.3 then
+        Tech = flautando        % Happy, calm → flute-like, gentle
+    else
+        Tech = normal           % Standard bow position
+    end.
+
+% ==============================================================================
+% EXPRESSION STRUCTURE FROM MOOD
+% ==============================================================================
+% Creates a full expression structure for violin_types
+
+mood_to_expression(Mood) = Expr =>
+    V = get_valence(Mood),
+    A = get_arousal(Mood),
+
+    Vibrato = vibrato_from_va(V, A),
+    BowPressure = bow_pressure_from_va(V, A),
+    BowSpeed = bow_speed_from_va(A),
+
+    % Bow position: 0=sul_tasto, 0.5=normale, 1=sul_ponticello
+    Tech = technique_from_va(V, A),
+    BowPosition = cond(Tech == sul_tasto, 0.2,
+                  cond(Tech == sul_ponticello, 0.85,
+                  cond(Tech == flautando, 0.3, 0.5))),
+
+    Expr = $expression(Vibrato, BowPressure, BowSpeed, BowPosition).
+
+% ==============================================================================
+% DYNAMICS STRUCTURE FROM MOOD
+% ==============================================================================
+% Creates dynamics for violin_types based on velocity params
+
+mood_to_dynamics(Mood) = Dyn =>
+    Params = mood_to_params(Mood),
+    VelBase = get_velocity_base(Params),
+
+    % Convert velocity to dynamic marking
+    Level = cond(VelBase < 50, pp,
+            cond(VelBase < 60, p,
+            cond(VelBase < 72, mp,
+            cond(VelBase < 85, mf,
+            cond(VelBase < 100, f, ff))))),
+
+    % Attack/decay based on arousal
+    A = get_arousal(Mood),
+    Attack = cond(A >= 0.3, 0.7, cond(A >= -0.3, 0.5, 0.3)),  % Quick attack for high arousal
+    Decay = cond(A >= 0.3, 0.3, cond(A >= -0.3, 0.5, 0.7)),   % Quick decay for high arousal
+
+    Dyn = $dynamics(Level, Attack, Decay, none, 0).
+
+% ==============================================================================
+% VIOLIN PARAMS PRINTING
+% ==============================================================================
+
+print_violin_params(VParams) =>
+    printf("Violin Parameters:%n"),
+    printf("  Articulation: %w%n", get_articulation(VParams)),
+    printf("  Vibrato:      %.2f%n", get_vibrato(VParams)),
+    printf("  Bow pressure: %.2f%n", get_bow_pressure(VParams)),
+    printf("  Bow speed:    %.2f%n", get_bow_speed(VParams)),
+    printf("  Technique:    %w%n", get_technique(VParams)).
+
+% Demo violin mapping for a preset
+demo_violin_mapping(PresetName) =>
+    Mood = mood_preset(PresetName),
+    printf("%nViolin mood mapping: %w%n", PresetName),
+    print_mood(Mood),
+    VParams = mood_to_violin_params(Mood),
+    print_violin_params(VParams).

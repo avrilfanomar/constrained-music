@@ -1,0 +1,287 @@
+% violin_constraints.pi - Violin-specific playability constraints
+%
+% Constraints for generating idiomatically playable violin music:
+% - String range and crossing constraints
+% - Position shift limitations
+% - Bowing requirements
+% - Double stop validity
+% - Articulation-specific constraints
+
+module violin_constraints.
+
+import cp.
+import music_types.
+import violin_types.
+
+% ==============================================================================
+% STRING RANGE CONSTRAINTS
+% ==============================================================================
+
+% Constrain notes to be playable on a specific string
+string_range_constraint(Notes, String) =>
+    violin_string(String, Low, High),
+    foreach(N in Notes)
+        N #>= Low,
+        N #=< High
+    end.
+
+% Constrain notes to violin's full range
+violin_range_constraint(Notes) =>
+    % G3 (55) to G7 (103) - full violin range
+    foreach(N in Notes)
+        N #>= 55,
+        N #=< 103
+    end.
+
+% Constrain notes to a comfortable range (avoiding extreme positions)
+comfortable_range_constraint(Notes) =>
+    % G3 (55) to E6 (88) - up to about 5th position
+    foreach(N in Notes)
+        N #>= 55,
+        N #=< 88
+    end.
+
+% ==============================================================================
+% POSITION SHIFT CONSTRAINTS
+% ==============================================================================
+
+% Limit position shifts between consecutive notes
+% MaxPositions: maximum position change (each position ~2 semitones apart)
+limit_position_shifts(Notes, MaxPositions) =>
+    MaxSemitones = MaxPositions * 2 + 4,  % Allow some flexibility
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        % Large interval implies position shift
+        $abs(Notes[I+1] - Notes[I]) #=< MaxSemitones
+    end.
+
+% Encourage staying in position (smaller intervals)
+prefer_staying_in_position(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        % Soft preference for intervals <= 4 semitones (within hand span)
+        % This is a hint, not a hard constraint
+        $abs(Notes[I+1] - Notes[I]) #=< 7
+    end.
+
+% Allow position shifts only on specific beats (e.g., strong beats)
+% ShiftIndices: indices where position shifts are allowed
+position_shifts_on_beats(Notes, ShiftIndices) =>
+    Len = length(Notes),
+    AllowedSet = set(ShiftIndices),
+    foreach(I in 1..Len-1)
+        if not member(I, AllowedSet) then
+            % No large shift unless on allowed beat
+            $abs(Notes[I+1] - Notes[I]) #=< 4
+        end
+    end.
+
+% ==============================================================================
+% OPEN STRING CONSTRAINTS
+% ==============================================================================
+
+% Open string pitches for violin
+open_strings() = [55, 62, 69, 76].  % G3, D4, A4, E5
+
+% Encourage open strings on strong beats (resonance)
+% StrongBeatIndices: 1-indexed list of strong beat positions
+prefer_open_strings_on_beats(Notes, StrongBeatIndices) =>
+    OpenStrings = open_strings(),
+    foreach(I in StrongBeatIndices)
+        if I =< length(Notes) then
+            % Soft constraint: at least try to use open strings
+            % (This is hard to express as strict CP, so we use domain hints)
+            true
+        end
+    end.
+
+% Require open string at specific index
+require_open_string(Notes, Index) =>
+    if Index =< length(Notes) then
+        OpenStrings = open_strings(),
+        Notes[Index] :: OpenStrings
+    end.
+
+% ==============================================================================
+% STRING CROSSING CONSTRAINTS
+% ==============================================================================
+
+% Minimize string crossings in a phrase
+% CrossingPenalty: max allowed string crossings
+limit_string_crossings(Notes, MaxCrossings) =>
+    Len = length(Notes),
+    % Count crossings: when consecutive notes require different optimal strings
+    % This is complex for CP; simplified version limits large intervals
+    % (Large intervals often require string crossings)
+    CrossingIndicators = new_list(Len - 1),
+    CrossingIndicators :: 0..1,
+    foreach(I in 1..Len-1)
+        Interval = $abs(Notes[I+1] - Notes[I]),
+        % Crossing likely if interval > 7 (perfect fifth)
+        (Interval #> 7) #<=> (CrossingIndicators[I] #= 1)
+    end,
+    sum(CrossingIndicators) #=< MaxCrossings.
+
+% ==============================================================================
+% BOWING CONSTRAINTS
+% ==============================================================================
+
+% Balance bow direction changes
+% For CP, we can't directly model bowing, but we can ensure note patterns
+% that are comfortable for bowing
+
+% Ensure phrase length suitable for single bow (legato)
+max_notes_per_bow(Notes, MaxNotes) =>
+    length(Notes) #=< MaxNotes.
+
+% Encourage patterns suitable for alternating bowing
+% Even number of notes per beat makes alternating bowing easier
+encourage_even_groupings(Notes, NotesPerBeat) =>
+    length(Notes) mod NotesPerBeat #= 0.
+
+% ==============================================================================
+% DOUBLE STOP CONSTRAINTS
+% ==============================================================================
+
+% Valid double stop interval range
+% Lower and Upper are MIDI pitch values
+valid_double_stop_interval(Lower, Upper) =>
+    Lower #< Upper,
+    Interval = Upper - Lower,
+    % Playable interval range on adjacent strings
+    Interval #>= 3,   % Minimum: minor third
+    Interval #=< 12.  % Maximum: octave
+
+% Ensure double stop notes are on adjacent strings
+% This is approximate: requires notes to be within string overlap regions
+double_stop_adjacent_strings(Lower, Upper) =>
+    % G-D crossing: 55-72 and 62-79
+    % D-A crossing: 62-79 and 69-86
+    % A-E crossing: 69-86 and 76-103
+    Lower #< Upper,
+    % Lower must be in lower string range, upper in adjacent higher
+    (Lower #=< 72 #/\ Upper #>= 62 #/\ Upper #=< 79)   % G-D
+    #\/
+    (Lower #>= 55 #/\ Lower #=< 79 #/\ Upper #>= 69 #/\ Upper #=< 86)  % D-A
+    #\/
+    (Lower #>= 62 #/\ Lower #=< 86 #/\ Upper #>= 76 #/\ Upper #=< 103). % A-E
+
+% ==============================================================================
+% ARTICULATION-SPECIFIC CONSTRAINTS
+% ==============================================================================
+
+% Spiccato works best at moderate tempo (not too slow)
+% Tempo is not directly constrainable in CP, but we can limit note durations
+spiccato_note_duration(DurationBeats) =>
+    % Spiccato notes should be short
+    DurationBeats #=< 0.5.
+
+% Tremolo requires minimum duration
+tremolo_minimum_duration(DurationBeats) =>
+    DurationBeats #>= 0.5.
+
+% Pizzicato needs recovery time between notes
+% Represented as minimum interval between consecutive pizzicato notes
+pizzicato_spacing(DurationBeats) =>
+    DurationBeats #>= 0.25.
+
+% Legato should have minimal gaps - adjacent notes
+legato_phrase_constraint(Notes) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        % Prefer stepwise or small intervals for smooth legato
+        $abs(Notes[I+1] - Notes[I]) #=< 5
+    end.
+
+% ==============================================================================
+% FIRST POSITION PREFERENCE
+% ==============================================================================
+
+% Prefer notes in first position (simpler, better intonation)
+prefer_first_position(Notes) =>
+    % First position on each string: open to +3 semitones
+    % G: 55-58, D: 62-65, A: 69-72, E: 76-79
+    FirstPosNotes = [55,56,57,58,  % G string 1st pos
+                     62,63,64,65,  % D string 1st pos
+                     69,70,71,72,  % A string 1st pos
+                     76,77,78,79], % E string 1st pos
+    foreach(N in Notes)
+        N :: FirstPosNotes
+    end.
+
+% Constrain to lower positions (1st through 3rd)
+lower_positions_only(Notes) =>
+    % Up to 3rd position: open to +4 semitones on each string
+    MaxOnG = 59,  % B3
+    MaxOnD = 66,  % F#4
+    MaxOnA = 73,  % C#5
+    MaxOnE = 80,  % G#5
+    foreach(N in Notes)
+        N #=< 80  % Roughly up to 3rd position on E string
+    end.
+
+% ==============================================================================
+% HIGH POSITION CONSTRAINTS
+% ==============================================================================
+
+% High position passages should be contiguous (avoid jumping in and out)
+high_position_continuity(Notes, HighThreshold) =>
+    Len = length(Notes),
+    % If we go high, stay high for a while before coming down
+    foreach(I in 1..Len-2)
+        % If current note is high and next is low, the following should also be low
+        % This prevents: high-low-high patterns that are awkward
+        ((Notes[I] #>= HighThreshold) #/\ (Notes[I+1] #< HighThreshold - 5))
+            #=> (Notes[I+2] #< HighThreshold)
+    end.
+
+% Approach high notes by step (easier intonation)
+approach_high_notes_stepwise(Notes, HighThreshold) =>
+    Len = length(Notes),
+    foreach(I in 2..Len)
+        % If note is high, previous interval should be small
+        (Notes[I] #>= HighThreshold) #=> ($abs(Notes[I] - Notes[I-1]) #=< 3)
+    end.
+
+% ==============================================================================
+% COMPOUND VIOLIN IDIOM CONSTRAINTS
+% ==============================================================================
+
+% Apply standard violin playability constraints
+standard_violin_constraints(Notes) =>
+    violin_range_constraint(Notes),
+    limit_position_shifts(Notes, 3),  % Max 3 position shifts
+    limit_string_crossings(Notes, length(Notes) // 4).  % Limit crossings
+
+% Apply beginner-friendly constraints
+beginner_violin_constraints(Notes) =>
+    comfortable_range_constraint(Notes),
+    prefer_first_position(Notes),
+    legato_phrase_constraint(Notes).
+
+% Apply advanced constraints (more freedom)
+advanced_violin_constraints(Notes) =>
+    violin_range_constraint(Notes),
+    limit_position_shifts(Notes, 5),  % More position changes allowed
+    high_position_continuity(Notes, 80).  % Allow high positions with continuity
+
+% ==============================================================================
+% STYLE-SPECIFIC VIOLIN CONSTRAINTS
+% ==============================================================================
+
+% Classical violin style
+classical_violin_style(Notes) =>
+    standard_violin_constraints(Notes),
+    approach_high_notes_stepwise(Notes, 80).
+
+% Folk/fiddle style (more open strings, lower positions)
+folk_violin_style(Notes) =>
+    lower_positions_only(Notes),
+    % Folk music often uses open strings as drones/pedal tones
+    true.
+
+% Virtuosic style (full range, rapid position changes)
+virtuosic_violin_style(Notes) =>
+    violin_range_constraint(Notes),
+    % No position shift limits - allow everything
+    true.

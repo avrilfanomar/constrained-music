@@ -1,0 +1,323 @@
+% violin_types.pi - Violin-specific musical representation
+%
+% Extends the core music_types with violin-specific structures:
+% - Articulations (arco, pizzicato, tremolo, etc.)
+% - Bowing (up-bow, down-bow)
+% - String selection and positions
+% - Expression parameters (vibrato, bow pressure, etc.)
+% - Enhanced dynamics with crescendo/decrescendo
+
+module violin_types.
+
+import music_types.
+
+% ==============================================================================
+% ARTICULATION TYPES
+% ==============================================================================
+% Standard violin articulations affecting tone production
+
+% Check if valid articulation
+articulation(arco).          % Normal bowed (default)
+articulation(pizzicato).     % Plucked
+articulation(tremolo).       % Rapid bow alternation
+articulation(staccato).      % Short, detached
+articulation(legato).        % Smooth, connected
+articulation(spiccato).      % Bouncing bow (off-string)
+articulation(detache).       % Separate bow strokes (on-string)
+articulation(martele).       % Hammered, accented
+articulation(col_legno).     % With the wood of the bow
+
+default_articulation() = arco.
+
+% ==============================================================================
+% BOWING DIRECTION
+% ==============================================================================
+
+bowing(up_bow).              % V symbol - bow moves toward scroll
+bowing(down_bow).            % n symbol - bow moves toward frog
+bowing(auto).                % Let system decide
+
+default_bowing() = auto.
+
+% ==============================================================================
+% VIOLIN STRINGS
+% ==============================================================================
+% Each string defined with: name, open string MIDI pitch, practical upper limit
+% Ranges overlap to allow position choices
+
+% violin_string(Name, OpenMidi, UpperLimit)
+violin_string(g_string, 55, 72).   % G3 (55) to C5 (72) - 7th position
+violin_string(d_string, 62, 79).   % D4 (62) to G5 (79)
+violin_string(a_string, 69, 86).   % A4 (69) to D6 (86)
+violin_string(e_string, 76, 103).  % E5 (76) to G7 (103)
+
+% Get open string pitch
+open_string_pitch(g_string) = 55.
+open_string_pitch(d_string) = 62.
+open_string_pitch(a_string) = 69.
+open_string_pitch(e_string) = 76.
+
+% Check if two strings are adjacent (needed for double stops)
+strings_adjacent(g_string, d_string).
+strings_adjacent(d_string, g_string).
+strings_adjacent(d_string, a_string).
+strings_adjacent(a_string, d_string).
+strings_adjacent(a_string, e_string).
+strings_adjacent(e_string, a_string).
+
+% String order (low to high)
+string_order(g_string) = 1.
+string_order(d_string) = 2.
+string_order(a_string) = 3.
+string_order(e_string) = 4.
+
+% ==============================================================================
+% POSITIONS
+% ==============================================================================
+% Hand positions on the fingerboard
+% Position offset = semitones from open string for first finger
+
+position(first, 0).          % 1st position: hand at nut
+position(second, 2).         % 2nd position
+position(third, 4).          % 3rd position (common)
+position(fourth, 5).         % 4th position
+position(fifth, 7).          % 5th position (common)
+position(sixth, 9).          % 6th position
+position(seventh, 12).       % 7th position (octave)
+
+position_offset(first) = 0.
+position_offset(second) = 2.
+position_offset(third) = 4.
+position_offset(fourth) = 5.
+position_offset(fifth) = 7.
+position_offset(sixth) = 9.
+position_offset(seventh) = 12.
+
+% ==============================================================================
+% EXPRESSION PARAMETERS
+% ==============================================================================
+% Continuous expression values (0.0 to 1.0 normalized)
+%
+% Structure: expression(Vibrato, BowPressure, BowSpeed, BowPosition)
+% - Vibrato: 0.0 = none, 1.0 = wide/intense
+% - BowPressure: 0.0 = light (flautando), 1.0 = heavy (crunchy)
+% - BowSpeed: 0.0 = slow, 1.0 = fast
+% - BowPosition: 0.0 = sul tasto (over fingerboard),
+%                0.5 = normale,
+%                1.0 = sul ponticello (near bridge)
+
+default_expression() = $expression(0.5, 0.5, 0.5, 0.5).
+
+% Expression presets
+expression_dolce() = $expression(0.6, 0.3, 0.4, 0.4).      % Sweet, singing
+expression_espressivo() = $expression(0.8, 0.5, 0.5, 0.5). % Highly expressive
+expression_brilliant() = $expression(0.4, 0.6, 0.7, 0.7).  % Bright, projected
+expression_mysterious() = $expression(0.3, 0.2, 0.3, 0.2). % Sul tasto, soft
+expression_intense() = $expression(0.9, 0.8, 0.6, 0.8).    % Passionate
+
+% ==============================================================================
+% DYNAMICS STRUCTURE
+% ==============================================================================
+% Enhanced dynamics with attack/decay envelope and hairpins
+%
+% Structure: dynamics(Level, Attack, Decay, CrescTarget, CrescDuration)
+% - Level: pp, p, mp, mf, f, ff (or numeric 0-127)
+% - Attack: 0.0-1.0 normalized attack time
+% - Decay: 0.0-1.0 normalized decay
+% - CrescTarget: target dynamic level or 'none'
+% - CrescDuration: beats until target reached (0 = immediate)
+
+default_dynamics() = $dynamics(mf, 0.5, 0.5, none, 0).
+
+% Dynamic level to velocity mapping
+dynamic_to_velocity(pp) = 35.
+dynamic_to_velocity(p) = 50.
+dynamic_to_velocity(mp) = 65.
+dynamic_to_velocity(mf) = 80.
+dynamic_to_velocity(f) = 100.
+dynamic_to_velocity(ff) = 120.
+dynamic_to_velocity(N) = N, integer(N), N >= 0, N =< 127 => true.
+
+% Velocity to dynamic level (approximate)
+velocity_to_dynamic(V) = pp, V < 42 => true.
+velocity_to_dynamic(V) = p, V < 57 => true.
+velocity_to_dynamic(V) = mp, V < 72 => true.
+velocity_to_dynamic(V) = mf, V < 90 => true.
+velocity_to_dynamic(V) = f, V < 110 => true.
+velocity_to_dynamic(_) = ff.
+
+% ==============================================================================
+% VIOLIN NOTE STRUCTURE
+% ==============================================================================
+% Extended note with all violin-specific parameters
+%
+% Structure: violin_note(BaseNote, Articulation, Bowing, String, Position,
+%                        Expression, Dynamics)
+% - BaseNote: note(Pitch, Duration, TimePos, Voice, Velocity) from music_types
+% - Articulation: one of the articulation atoms
+% - Bowing: up_bow, down_bow, or auto
+% - String: g_string, d_string, a_string, e_string, or auto
+% - Position: first through seventh, or auto
+% - Expression: expression structure
+% - Dynamics: dynamics structure
+
+% ==============================================================================
+% UTILITY FUNCTIONS
+% ==============================================================================
+
+% Create violin note with defaults from basic note
+note_to_violin_note(Note) = VNote =>
+    VNote = $violin_note(
+        Note,
+        default_articulation(),
+        default_bowing(),
+        auto,
+        auto,
+        default_expression(),
+        default_dynamics()
+    ).
+
+% Create violin note with specific articulation and bowing
+make_violin_note(BaseNote, Articulation, Bowing) = VNote =>
+    VNote = $violin_note(
+        BaseNote,
+        Articulation,
+        Bowing,
+        auto,
+        auto,
+        default_expression(),
+        default_dynamics()
+    ).
+
+% Create fully specified violin note
+make_violin_note_full(BaseNote, Articulation, Bowing, String, Position,
+                      Expression, Dynamics) = VNote =>
+    VNote = $violin_note(BaseNote, Articulation, Bowing, String, Position,
+                         Expression, Dynamics).
+
+% Determine optimal string for a given MIDI pitch
+% Prefers lower strings for richer tone, higher only when necessary
+optimal_string(Pitch) = String =>
+    if Pitch >= 76 then
+        String = e_string
+    elseif Pitch >= 69 then
+        String = a_string
+    elseif Pitch >= 62 then
+        String = d_string
+    else
+        String = g_string
+    end.
+
+% Alternative string (for tonal color - higher string = brighter)
+alternative_string(Pitch) = String =>
+    Primary = optimal_string(Pitch),
+    % Try next higher string if pitch is in overlap region
+    if Primary == g_string, Pitch >= 62 then String = d_string
+    elseif Primary == d_string, Pitch >= 69 then String = a_string
+    elseif Primary == a_string, Pitch >= 76 then String = e_string
+    else String = Primary
+    end.
+
+% Determine position for pitch on given string
+position_for_pitch(Pitch, String) = Position =>
+    OpenPitch = open_string_pitch(String),
+    Offset = Pitch - OpenPitch,
+    if Offset < 0 then
+        % Pitch below open string - shouldn't happen for valid string choice
+        Position = first
+    elseif Offset =< 3 then
+        Position = first
+    elseif Offset =< 5 then
+        Position = third
+    elseif Offset =< 7 then
+        Position = fifth
+    elseif Offset =< 9 then
+        Position = sixth
+    else
+        Position = seventh
+    end.
+
+% Check if pitch is playable on given string
+playable_on_string(Pitch, String) =>
+    violin_string(String, Low, High),
+    Pitch >= Low,
+    Pitch =< High.
+
+% Check if double stop is valid (pitches on adjacent strings)
+valid_double_stop(Pitch1, Pitch2) =>
+    String1 = optimal_string(Pitch1),
+    String2 = optimal_string(Pitch2),
+    strings_adjacent(String1, String2).
+
+% Get all strings that can play a given pitch
+available_strings(Pitch) = Strings =>
+    AllStrings = [g_string, d_string, a_string, e_string],
+    Strings = [S : S in AllStrings, playable_on_string(Pitch, S)].
+
+% ==============================================================================
+% ACCESSOR FUNCTIONS
+% ==============================================================================
+
+violin_note_base(violin_note(Base, _, _, _, _, _, _)) = Base.
+violin_note_articulation(violin_note(_, Art, _, _, _, _, _)) = Art.
+violin_note_bowing(violin_note(_, _, Bow, _, _, _, _)) = Bow.
+violin_note_string(violin_note(_, _, _, Str, _, _, _)) = Str.
+violin_note_position(violin_note(_, _, _, _, Pos, _, _)) = Pos.
+violin_note_expression(violin_note(_, _, _, _, _, Expr, _)) = Expr.
+violin_note_dynamics(violin_note(_, _, _, _, _, _, Dyn)) = Dyn.
+
+% Extract pitch from violin note
+violin_note_pitch(VNote) = Pitch =>
+    Base = violin_note_base(VNote),
+    Base = $note($pitch(midi, Pitch, _), _, _, _, _).
+
+% Extract velocity from violin note
+violin_note_velocity(VNote) = Vel =>
+    Base = violin_note_base(VNote),
+    Base = $note(_, _, _, _, Vel).
+
+% ==============================================================================
+% RESOLVE AUTO VALUES
+% ==============================================================================
+
+% Resolve 'auto' string to actual string based on pitch
+resolve_string(VNote) = ResolvedString =>
+    String = violin_note_string(VNote),
+    if String == auto then
+        Pitch = violin_note_pitch(VNote),
+        ResolvedString = optimal_string(Pitch)
+    else
+        ResolvedString = String
+    end.
+
+% Resolve 'auto' position based on pitch and string
+resolve_position(VNote) = ResolvedPos =>
+    Position = violin_note_position(VNote),
+    if Position == auto then
+        Pitch = violin_note_pitch(VNote),
+        String = resolve_string(VNote),
+        ResolvedPos = position_for_pitch(Pitch, String)
+    else
+        ResolvedPos = Position
+    end.
+
+% Fully resolve a violin note (replace all 'auto' values)
+resolve_violin_note(VNote) = Resolved =>
+    VNote = $violin_note(Base, Art, Bow, _, _, Expr, Dyn),
+    ResolvedString = resolve_string(VNote),
+    ResolvedPos = resolve_position(VNote),
+    % Bowing 'auto' left as-is for now (context-dependent)
+    Resolved = $violin_note(Base, Art, Bow, ResolvedString, ResolvedPos,
+                            Expr, Dyn).
+
+% ==============================================================================
+% CONVERSION UTILITIES
+% ==============================================================================
+
+% Convert list of basic notes to violin notes
+notes_to_violin_notes(Notes) = VNotes =>
+    VNotes = [note_to_violin_note(N) : N in Notes].
+
+% Convert violin notes back to basic notes (for MIDI export)
+violin_notes_to_notes(VNotes) = Notes =>
+    Notes = [violin_note_base(VN) : VN in VNotes].
