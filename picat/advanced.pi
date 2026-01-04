@@ -83,6 +83,259 @@ subdominant_resolution(Notes, RootPitch) =>
     end.
 
 % ==============================================================================
+% VOICE LEADING: MOTION RULES
+% ==============================================================================
+% Rule: Contrary motion preferred between voices
+
+% Types of motion between two voices:
+%   - Contrary: voices move in opposite directions
+%   - Similar: voices move in same direction
+%   - Oblique: one voice stays, other moves
+%   - Parallel: same direction, same interval (subset of similar)
+
+% Prefer contrary motion: count and enforce minimum percentage
+prefer_contrary_motion(Voice1, Voice2, MinPercent) =>
+    Len = length(Voice1),
+    NumTransitions = Len - 1,
+    MinContrary = (NumTransitions * MinPercent) // 100,
+    count_contrary_motion(Voice1, Voice2, ContraryCount),
+    ContraryCount #>= MinContrary.
+
+% Count contrary motion instances
+count_contrary_motion(Voice1, Voice2, Count) =>
+    Len = length(Voice1),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        % Contrary = opposite signs (product is negative)
+        Bools[I] #<=> (Motion1 * Motion2 #< 0)
+    end,
+    Count #= sum(Bools).
+
+% Count similar motion (same direction)
+count_similar_motion(Voice1, Voice2, Count) =>
+    Len = length(Voice1),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        % Similar = same sign (product is positive) and both moving
+        Bools[I] #<=> ((Motion1 * Motion2 #> 0))
+    end,
+    Count #= sum(Bools).
+
+% Count oblique motion (one voice stationary)
+count_oblique_motion(Voice1, Voice2, Count) =>
+    Len = length(Voice1),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        % Oblique = one motion is zero, other is not
+        Bools[I] #<=> (((Motion1 #= 0) #/\ (Motion2 #!= 0)) #\/
+                       ((Motion1 #!= 0) #/\ (Motion2 #= 0)))
+    end,
+    Count #= sum(Bools).
+
+% Strict contrary motion at specific points (e.g., cadences)
+require_contrary_at(Voice1, Voice2, Positions) =>
+    foreach(Pos in Positions)
+        if Pos >= 1, Pos < length(Voice1) then
+            Motion1 = Voice1[Pos+1] - Voice1[Pos],
+            Motion2 = Voice2[Pos+1] - Voice2[Pos],
+            Motion1 * Motion2 #< 0
+        end
+    end.
+
+% ==============================================================================
+% VOICE LEADING: VOICE CROSSING
+% ==============================================================================
+% Rule: Avoid voice crossing
+
+% No voice crossing: higher voice stays above lower voice
+no_voice_crossing(HigherVoice, LowerVoice) =>
+    Len = length(HigherVoice),
+    foreach(I in 1..Len)
+        HigherVoice[I] #>= LowerVoice[I]
+    end.
+
+% No voice crossing for multiple voices (SATB order: Soprano > Alto > Tenor > Bass)
+no_voice_crossing_satb(Soprano, Alto, Tenor, Bass) =>
+    no_voice_crossing(Soprano, Alto),
+    no_voice_crossing(Alto, Tenor),
+    no_voice_crossing(Tenor, Bass).
+
+% Soft constraint: allow occasional crossing but limit frequency
+limit_voice_crossings(Voice1, Voice2, MaxCrossings) =>
+    Len = length(Voice1),
+    Bools = new_list(Len),
+    Bools :: 0..1,
+    foreach(I in 1..Len)
+        % Crossing = Voice1 < Voice2 when Voice1 should be higher
+        Bools[I] #<=> (Voice1[I] #< Voice2[I])
+    end,
+    sum(Bools) #=< MaxCrossings.
+
+% Voice overlap: voice moves past where other voice was
+% (e.g., alto moves above where soprano was on previous beat)
+no_voice_overlap(HigherVoice, LowerVoice) =>
+    Len = length(HigherVoice),
+    foreach(I in 1..Len-1)
+        % Lower voice shouldn't go above where higher voice was
+        LowerVoice[I+1] #=< HigherVoice[I],
+        % Higher voice shouldn't go below where lower voice was
+        HigherVoice[I+1] #>= LowerVoice[I]
+    end.
+
+% ==============================================================================
+% VOICE LEADING: VOICE INDEPENDENCE
+% ==============================================================================
+% Rule: Maintain voice independence
+
+% Voices should not move in parallel too often
+maintain_voice_independence(Voice1, Voice2, MaxParallelPercent) =>
+    Len = length(Voice1),
+    NumTransitions = Len - 1,
+    MaxParallel = (NumTransitions * MaxParallelPercent) // 100,
+    count_parallel_motion(Voice1, Voice2, ParallelCount),
+    ParallelCount #=< MaxParallel.
+
+% Count parallel motion (same direction AND same interval size)
+count_parallel_motion(Voice1, Voice2, Count) =>
+    Len = length(Voice1),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        % Parallel = same interval (not just same direction)
+        Bools[I] #<=> (Motion1 #= Motion2)
+    end,
+    Count #= sum(Bools).
+
+% Voices should have different rhythms or contours (melodic independence)
+% Measured by correlation of motion directions
+melodic_independence(Voice1, Voice2, MaxCorrelation) =>
+    Len = length(Voice1),
+    NumTransitions = Len - 1,
+    count_same_direction(Voice1, Voice2, SameCount),
+    MaxSame = (NumTransitions * MaxCorrelation) // 100,
+    SameCount #=< MaxSame.
+
+% Count times voices move in same direction (including parallel)
+count_same_direction(Voice1, Voice2, Count) =>
+    Len = length(Voice1),
+    Bools = new_list(Len - 1),
+    Bools :: 0..1,
+    foreach(I in 1..Len-1)
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        % Same direction = product positive or both zero
+        Bools[I] #<=> ((Motion1 * Motion2 #> 0) #\/ ((Motion1 #= 0) #/\ (Motion2 #= 0)))
+    end,
+    Count #= sum(Bools).
+
+% Minimum spacing between voices (avoid muddiness)
+min_voice_spacing(Voice1, Voice2, MinInterval) =>
+    Len = length(Voice1),
+    foreach(I in 1..Len)
+        $abs(Voice1[I] - Voice2[I]) #>= MinInterval
+    end.
+
+% Maximum spacing between voices (avoid gaps in texture)
+max_voice_spacing(Voice1, Voice2, MaxInterval) =>
+    Len = length(Voice1),
+    foreach(I in 1..Len)
+        $abs(Voice1[I] - Voice2[I]) #=< MaxInterval
+    end.
+
+% ==============================================================================
+% VOICE LEADING: OUTER VOICES
+% ==============================================================================
+% Rule: Outer voices define harmonic clarity
+
+% Outer voices (soprano & bass) should have clearest voice leading
+outer_voices_clarity(Soprano, Bass, RootPitch) =>
+    % Soprano and bass should prefer contrary motion
+    prefer_contrary_motion(Soprano, Bass, 40),
+    % No parallel fifths/octaves in outer voices (strictest)
+    no_parallel_fifths(Soprano, Bass),
+    no_parallel_octaves(Soprano, Bass),
+    % Bass should emphasize root motion
+    bass_emphasizes_roots(Bass, RootPitch).
+
+% Bass emphasizes chord roots on strong beats
+bass_emphasizes_roots(Bass, RootPitch) =>
+    Len = length(Bass),
+    RootClass = RootPitch mod 12,
+    % First note should be root
+    music_constraints.pitch_class_var(Bass[1], FirstClass),
+    FirstClass #= RootClass,
+    % Last note should be root
+    music_constraints.pitch_class_var(Bass[Len], LastClass),
+    LastClass #= RootClass.
+
+% Soprano should have singable, memorable line
+soprano_melodic_priority(Soprano) =>
+    % Mostly stepwise
+    mostly_stepwise(Soprano, 60),
+    % Leap recovery
+    leap_recovery(Soprano),
+    % Single climax
+    single_climax(Soprano).
+
+% Outer voices should not be more than 2 octaves apart (typical)
+outer_voice_spacing(Soprano, Bass, MaxOctaves) =>
+    MaxInterval = MaxOctaves * 12,
+    max_voice_spacing(Soprano, Bass, MaxInterval).
+
+% Inner voices (alto, tenor) can be closer together
+inner_voice_spacing(Alto, Tenor) =>
+    % Inner voices typically within an octave of each other
+    max_voice_spacing(Alto, Tenor, 12),
+    % But not too close (avoid seconds)
+    min_voice_spacing(Alto, Tenor, 2).
+
+% Complete SATB voice leading constraints
+satb_voice_leading(Soprano, Alto, Tenor, Bass, RootPitch) =>
+    % No voice crossing
+    no_voice_crossing_satb(Soprano, Alto, Tenor, Bass),
+    % No voice overlap
+    no_voice_overlap(Soprano, Alto),
+    no_voice_overlap(Alto, Tenor),
+    no_voice_overlap(Tenor, Bass),
+    % Outer voices clarity
+    outer_voices_clarity(Soprano, Bass, RootPitch),
+    % Inner voice spacing
+    inner_voice_spacing(Alto, Tenor),
+    % Parallel fifths/octaves between all adjacent voice pairs
+    no_parallel_fifths(Soprano, Alto),
+    no_parallel_fifths(Alto, Tenor),
+    no_parallel_fifths(Tenor, Bass),
+    no_parallel_octaves(Soprano, Alto),
+    no_parallel_octaves(Alto, Tenor),
+    no_parallel_octaves(Tenor, Bass),
+    % Voice independence
+    maintain_voice_independence(Soprano, Alto, 50),
+    maintain_voice_independence(Alto, Tenor, 50),
+    maintain_voice_independence(Tenor, Bass, 50).
+
+% Helper: single_climax for soprano (imported from elsewhere but defined here for completeness)
+single_climax(Notes) =>
+    Len = length(Notes),
+    ThirdStart = Len // 3 + 1,
+    ThirdEnd = 2 * Len // 3,
+    MaxNote = max([Notes[I] : I in 1..Len]),
+    % Max appears in middle third
+    sum([Notes[I] #= MaxNote : I in ThirdStart..ThirdEnd]) #>= 1,
+    % Max appears only once
+    sum([Notes[I] #= MaxNote : I in 1..Len]) #= 1.
+
+% ==============================================================================
 % MELODIC CONSTRAINTS (Advanced)
 % ==============================================================================
 
