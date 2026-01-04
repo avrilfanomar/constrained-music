@@ -107,10 +107,12 @@ reify_leap_recovery(Notes, ViolationCount) =>
         Violations = new_list(Len - 2),
         Violations :: 0..1,
         foreach(I in 1..Len-2)
-            Interval1 = Notes[I+1] - Notes[I],
-            Interval2 = Notes[I+2] - Notes[I+1],
+            % Use CP expressions directly - no intermediate assignment
             % Violation: leap >= 5 AND next interval is same direction (product >= 0)
-            Violations[I] #<=> (($abs(Interval1) #>= 5) #/\ (Interval1 * Interval2 #>= 0))
+            Violations[I] #<=> (
+                ($abs(Notes[I+1] - Notes[I]) #>= 5) #/\
+                ((Notes[I+1] - Notes[I]) * (Notes[I+2] - Notes[I+1]) #>= 0)
+            )
         end,
         ViolationCount #= sum(Violations)
     else
@@ -150,10 +152,12 @@ reify_consecutive_same_direction_leaps(Notes, ViolationCount) =>
         Violations = new_list(Len - 2),
         Violations :: 0..1,
         foreach(I in 1..Len-2)
-            Int1 = Notes[I+1] - Notes[I],
-            Int2 = Notes[I+2] - Notes[I+1],
             % Violation: both are leaps (>= 3) and same direction
-            Violations[I] #<=> (($abs(Int1) #>= 3) #/\ ($abs(Int2) #>= 3) #/\ (Int1 * Int2 #> 0))
+            Violations[I] #<=> (
+                ($abs(Notes[I+1] - Notes[I]) #>= 3) #/\
+                ($abs(Notes[I+2] - Notes[I+1]) #>= 3) #/\
+                ((Notes[I+1] - Notes[I]) * (Notes[I+2] - Notes[I+1]) #> 0)
+            )
         end,
         ViolationCount #= sum(Violations)
     else
@@ -366,9 +370,8 @@ reify_sequence_encouraged(Notes, ViolationCount) =>
         Sequences = new_list(Len - 2),
         Sequences :: 0..1,
         foreach(I in 1..Len-2)
-            Int1 = Notes[I+1] - Notes[I],
-            Int2 = Notes[I+2] - Notes[I+1],
-            Sequences[I] #<=> (Int1 #= Int2)
+            % Equal consecutive intervals = sequence pattern
+            Sequences[I] #<=> ((Notes[I+1] - Notes[I]) #= (Notes[I+2] - Notes[I+1]))
         end,
         SeqCount #= sum(Sequences),
         HasSequence :: 0..1,
