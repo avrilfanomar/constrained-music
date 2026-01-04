@@ -7,6 +7,10 @@ that respects musical theory rules while maintaining emotional expressiveness.
 
 - **Constraint-Based Melody Generation**: Generate melodies using constraint programming with rules for intervals,
   contours, voice leading, and resolutions
+- **Soft Constraints with Optimization**: Relaxable constraints with weighted costs - minimize violations instead of
+  hard failure
+- **Genre-Based Constraint Profiles**: Pre-configured constraint sets for classical, baroque, jazz, folk, and more
+- **Constraint Registry**: Central catalogue of 35+ musical constraints with metadata for dynamic selection
 - **Extensive Scale Support**: Major/minor, church modes (Dorian, Phrygian, Lydian, etc.), pentatonic, blues,
   whole-tone, and more
 - **Emotional Music System**: Valence-Arousal mood model that maps emotional states to musical parameters
@@ -17,24 +21,36 @@ that respects musical theory rules while maintaining emotional expressiveness.
 
 ```
 constrained-music/
-├── picat/                    # Core Picat modules
-│   ├── companion.pi         # Music Companion orchestrator, main entry point
-│   ├── music_types.pi       # Musical primitives (pitch, duration, voice)
-│   ├── scale_utils.pi       # Scale/mode definitions
-│   ├── melody.pi            # Melody generation with constraints
-│   ├── music_constraints.pi # Basic constraints (intervals, ranges)
-│   ├── advanced.pi          # Voice leading, parallel fifths avoidance
-│   ├── harmonic.pi          # Chord progressions and cadences
-│   ├── rhythmic.pi          # Rhythm and meter constraints
-│   ├── mood.pi              # Valence-Arousal mood model
-│   ├── mood_mapping.pi      # Maps moods to musical parameters
-│   ├── transition.pi        # Emotional transition planning
-│   ├── midi_export.pi       # JSON export for MIDI conversion
-│   └── test_music_types.pi  # Unit tests
+├── picat/                      # Core Picat modules
+│   ├── companion.pi            # Music Companion orchestrator, main entry point
+│   ├── music_types.pi          # Musical primitives (pitch, duration, voice)
+│   ├── temporal.pi             # Time positions, meter handling
+│   ├── scale_utils.pi          # Scale/mode definitions
+│   ├── melody.pi               # Melody generation with constraints
+│   │
+│   ├── music_constraints.pi    # Basic constraints (intervals, ranges)
+│   ├── advanced.pi             # Voice leading, parallel fifths avoidance
+│   ├── harmonic.pi             # Chord progressions and cadences
+│   ├── rhythmic.pi             # Rhythm and meter constraints
+│   ├── soft_constraints.pi     # Reified constraints for cost optimization
+│   │
+│   ├── constraint_registry.pi  # Central catalogue of all constraints
+│   ├── genre_profiles.pi       # Genre-specific constraint configurations
+│   ├── constraint_selector.pi  # Dynamic constraint selection engine
+│   │
+│   ├── mood.pi                 # Valence-Arousal mood model
+│   ├── mood_mapping.pi         # Maps moods to musical parameters
+│   ├── transition.pi           # Emotional transition planning
+│   │
+│   ├── violin_types.pi         # Violin articulations, bowing, expression
+│   ├── violin_constraints.pi   # Violin-specific playing constraints
+│   │
+│   ├── midi_export.pi          # JSON export for MIDI conversion
+│   └── test_music_types.pi     # Unit tests
 │
 └── scripts/
-    ├── run_picat.sh         # Helper script to run Picat
-    └── midi_writer.py       # Converts JSON to MIDI files
+    ├── run_picat.sh            # Helper script to run Picat
+    └── midi_writer.py          # Converts JSON to MIDI files
 ```
 
 ## Requirements
@@ -74,6 +90,7 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 
 ```bash
 ./scripts/run_picat.sh picat/companion.pi demo
+./scripts/run_picat.sh picat/companion.pi demo genre=baroque randomness=0.5
 ```
 
 ### Generate MIDI File
@@ -102,6 +119,17 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 | `--midi`         | Convert output JSON to MIDI after running      |
 | `--play`         | Convert to MIDI and play with timidity         |
 | `--output <name>`| Specify output file base name                  |
+
+### Companion Options
+
+| Option              | Description                                      |
+|---------------------|--------------------------------------------------|
+| `genre=<id>`        | Use genre profile (classical_period, baroque...) |
+| `randomness=<0-1>`  | Variation level (0=strict, 1=loose)              |
+| `intensity=<level>` | Constraint strictness (light, standard, strict)  |
+| `from=<mood>`       | Starting emotional state                         |
+| `to=<mood>`         | Ending emotional state                           |
+| `duration=<secs>`   | Total duration for transitions                   |
 
 ### Clean Compiled Files
 
@@ -181,6 +209,98 @@ Easing functions: linear, ease-in, ease-out, ease-in-out, cubic variants.
 
 - Valid chord progressions
 - Cadence types (authentic, plagal, half, deceptive)
+
+## Soft Constraints & Optimization
+
+Traditional hard constraints either pass or fail. The soft constraint system converts constraints into **violation
+counts** that can be weighted and minimized, enabling:
+
+- Graceful degradation when constraints conflict
+- Genre-specific weighting (e.g., leap recovery more important in classical than jazz)
+- User-configurable strictness via `intensity` parameter
+
+### How It Works
+
+```
+apply_soft(constraint_id, Notes, RootPitch, Weight, Cost)
+  → Cost = Weight × ViolationCount
+```
+
+Each constraint returns 0 (satisfied) or a positive count. The solver minimizes total cost.
+
+### Available Soft Constraints
+
+| Constraint | Description |
+|------------|-------------|
+| `leap_recovery` | After leap ≥5 semitones, move opposite direction |
+| `mostly_stepwise` | Prefer intervals ≤2 semitones |
+| `no_consecutive_same_direction_leaps` | Avoid two consecutive leaps same direction |
+| `approach_climax_by_step` | Highest note approached stepwise |
+| `leave_climax_contrary` | Descend after highest note |
+| `balanced_motion` | Equal ascending/descending intervals |
+| `leading_tone_resolution` | Scale degree 7 resolves to tonic |
+| `phrase_ends_stable` | End on stable tone (1, 3, or 5) |
+| `single_climax` | One clear highest point in middle third |
+| `arch_contour` | Rise then fall melodic shape |
+| `tonic_anchoring` | Tonic appears regularly |
+| `sequence_encouraged` | At least one melodic sequence |
+
+## Genre Profiles
+
+The genre system provides pre-configured constraint sets for different musical styles. Each genre specifies:
+
+- **Hard constraints**: Must be satisfied (e.g., `no_augmented_seconds`)
+- **Soft constraints**: Weighted preferences (e.g., `leap_recovery` at weight 80)
+- **Parameter overrides**: Style-specific limits (e.g., `max_interval=5`)
+
+### Available Genres
+
+| Genre | Description | Key Constraints |
+|-------|-------------|-----------------|
+| `classical_period` | Mozart, Haydn | Balanced phrases, strict voice leading |
+| `baroque` | Bach, Handel | Sequences, continuous motion |
+| `romantic` | Chopin, Brahms | Wide range, expressive leaps |
+| `traditional_jazz` | Bebop, Standards | Extended intervals, chromatic approaches |
+| `folk_traditional` | Traditional melodies | Stepwise, simple range, arch contour |
+| `sacred_chant` | Gregorian | Stepwise, modal, narrow range |
+| `children_songs` | Simple songs | Very stepwise, limited range |
+| `minimalist` | Reich, Glass | Pattern repetition, gradual change |
+| `modal` | Debussy, Ravel | Color over function |
+| `blues` | Blues idiom | Blue notes, call-response |
+
+### Usage Example
+
+```bash
+# Generate with classical period constraints
+./scripts/run_picat.sh picat/companion.pi genre=classical_period randomness=0.3
+
+# Folk style with strict intensity
+./scripts/run_picat.sh picat/companion.pi genre=folk_traditional intensity=strict
+```
+
+### Constraint Registry
+
+The constraint registry (`constraint_registry.pi`) catalogues 35+ constraints with metadata:
+
+```picat
+constraint_def(Id, Category, Type, DefaultWeight, ApplicableGenres, Description)
+```
+
+**Categories:**
+- `melodic` - Interval patterns, motion, range
+- `harmonic` - Resolutions, leading tones
+- `voice_leading` - Parallel motion, spacing
+- `phrase_structure` - Cadences, contours
+- `motivic` - Sequences, patterns
+- `idiomatic` - Style-specific rules
+
+Query constraints programmatically:
+
+```picat
+constraints_for_genre(baroque)        % All constraints for baroque
+hard_constraints_for_genre(classical) % Only hard constraints
+soft_constraints_for_genre(folk)      % Soft with weights
+```
 
 ## Supported Scales
 
