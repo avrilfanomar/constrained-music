@@ -223,3 +223,191 @@ strong_beats(meter(2, 4)) = [0].
 strong_beats(meter(6, 8)) = [0, 6].
 strong_beats(meter(2, 2)) = [0].
 strong_beats(_) = [0].
+
+% ==============================================================================
+% ANACRUSIS (PICKUP) CONSTRAINTS
+% ==============================================================================
+% Rule: Piece may start before beat 1; final bar compensates duration
+
+% Check if first bar is a pickup (anacrusis)
+% PickupDuration is the duration of the pickup bar (less than full bar)
+is_anacrusis(FirstBarDuration, FullBarLength) =>
+    FirstBarDuration < FullBarLength,
+    FirstBarDuration > 0.
+
+% Anacrusis constraint: first bar + last bar = full bar
+% This ensures proper metric compensation
+anacrusis_compensated(FirstBarDuration, LastBarDuration, FullBarLength) =>
+    FirstBarDuration + LastBarDuration #= FullBarLength.
+
+% Full anacrusis constraint for a piece
+% Durations: list of all note durations
+% BarLength: full bar length in ticks
+% HasAnacrusis: boolean flag indicating if piece has pickup
+anacrusis_constraint(DurationsByBar, BarLength, HasAnacrusis) =>
+    NumBars = length(DurationsByBar),
+    FirstBarDur = sum(DurationsByBar[1]),
+    LastBarDur = sum(DurationsByBar[NumBars]),
+    if HasAnacrusis == true then
+        % First bar is partial
+        is_anacrusis(FirstBarDur, BarLength),
+        % Last bar compensates
+        anacrusis_compensated(FirstBarDur, LastBarDur, BarLength),
+        % Middle bars are full
+        foreach(I in 2..NumBars-1)
+            sum(DurationsByBar[I]) #= BarLength
+        end
+    else
+        % All bars are full
+        all_bars_fill_correctly(DurationsByBar, BarLength)
+    end.
+
+% Create pickup pattern: common pickup durations
+pickup_single_beat(BarLength, BeatValue) = PickupDur =>
+    PickupDur = BeatValue.  % One beat pickup
+
+pickup_half_bar(BarLength) = PickupDur =>
+    PickupDur = BarLength // 2.
+
+pickup_quarter_bar(BarLength) = PickupDur =>
+    PickupDur = BarLength // 4.
+
+% ==============================================================================
+% SYNCOPATION CONSTRAINTS
+% ==============================================================================
+% Rule: Emphasis on weak beats is marked, not default
+% Syncopation = accent on weak beat or off-beat
+
+% Check if a note position is syncopated (on weak beat)
+% Position: note start position in ticks within bar
+% StrongBeats: list of strong beat positions
+is_syncopated_position(Position, StrongBeats, BarLength) =>
+    not member(Position, StrongBeats),
+    Position mod (BarLength // 4) !== 0.  % Not on any beat
+
+% Count syncopated notes in a bar
+% Positions: list of note start positions
+% Durations: list of note durations
+% StrongBeats: positions of strong beats
+count_syncopations(Positions, Durations, StrongBeats, BarLength, Count) =>
+    Len = length(Positions),
+    Count = sum([syncopation_score(Positions[I], Durations[I], StrongBeats, BarLength)
+                 : I in 1..Len]).
+
+% Syncopation score: longer notes on weak beats = stronger syncopation
+syncopation_score(Position, Duration, StrongBeats, BarLength) = Score =>
+    if is_syncopated_note(Position, Duration, StrongBeats, BarLength) then
+        % Weight by duration (longer = more syncopated feel)
+        Score = 1
+    else
+        Score = 0
+    end.
+
+% Check if note is syncopated (starts on weak beat but is long)
+is_syncopated_note(Position, Duration, StrongBeats, BarLength) =>
+    % Note doesn't start on strong beat
+    not member(Position, StrongBeats),
+    % But is relatively long (at least a beat)
+    Duration >= BarLength // 4.
+
+% Limit syncopation percentage
+% MaxPercent: maximum percentage of notes that can be syncopated (0-100)
+limit_syncopation(Positions, Durations, StrongBeats, BarLength, MaxPercent) =>
+    Len = length(Positions),
+    count_syncopations(Positions, Durations, StrongBeats, BarLength, Count),
+    MaxSyncopated = (Len * MaxPercent) // 100,
+    Count #=< MaxSyncopated.
+
+% No unintended syncopation (strict - for classical styles)
+% Allows at most 20% syncopation
+no_unintended_syncopation(Positions, Durations, Meter) =>
+    BarLength = bar_length_for_meter(Meter),
+    StrongBeats = strong_beats(Meter),
+    limit_syncopation(Positions, Durations, StrongBeats, BarLength, 20).
+
+% Allow unlimited syncopation (for jazz/blues)
+allow_syncopation(_, _, _) => true.
+
+% ==============================================================================
+% TUPLET ALIGNMENT CONSTRAINTS
+% ==============================================================================
+% Rule: Tuplets subdivide evenly against the meter
+
+% Tuplet must start on a beat boundary
+tuplet_starts_on_beat(TupletStartPos, BarLength, BeatLength) =>
+    TupletStartPos mod BeatLength #= 0.
+
+% Tuplet duration must fit evenly into beat structure
+tuplet_fits_beat_structure(TupletDuration, BeatLength) =>
+    TupletDuration mod BeatLength == 0 ; BeatLength mod TupletDuration == 0.
+
+% Constrain tuplet placement within a bar
+% TupletPositions: list of start positions for tuplets
+% TupletDurations: list of durations for each tuplet
+tuplet_alignment_constraint(TupletPositions, TupletDurations, Meter) =>
+    BarLength = bar_length_for_meter(Meter),
+    BeatLength = BarLength // beats_per_meter(Meter),
+    Len = length(TupletPositions),
+    foreach(I in 1..Len)
+        % Tuplet should start on or near beat
+        tuplet_starts_on_beat(TupletPositions[I], BarLength, BeatLength)
+    end.
+
+% Get number of beats from meter
+beats_per_meter(meter(Beats, _)) = Beats.
+
+% Validate tuplet doesn't cross bar line inappropriately
+tuplet_within_bar(TupletStartPos, TupletDuration, BarLength) =>
+    BarNum = TupletStartPos // BarLength,
+    EndPos = TupletStartPos + TupletDuration,
+    EndBarNum = (EndPos - 1) // BarLength,
+    BarNum == EndBarNum.  % Must end in same bar
+
+% ==============================================================================
+% TEMPO STABILITY CONSTRAINTS
+% ==============================================================================
+% Rule: Tempo changes are indicated explicitly (rit., accel.)
+
+% Tempo must be constant unless marked
+% TempoMarkers: list of (Position, BPM, Type) tuples
+% Type: constant, ritardando, accelerando, rubato
+tempo_stability_constraint(TempoMarkers) =>
+    Len = length(TempoMarkers),
+    if Len > 1 then
+        foreach(I in 1..Len-1)
+            (_, BPM1, Type1) = TempoMarkers[I],
+            (_, BPM2, _) = TempoMarkers[I+1],
+            % If type is constant, BPM must not change
+            if Type1 == constant then
+                BPM1 == BPM2
+            end
+        end
+    end.
+
+% Check if tempo change is gradual (not abrupt)
+gradual_tempo_change(FromBPM, ToBPM, NumBars) =>
+    % Change should be at most 10% per bar
+    MaxChangePerBar = max(FromBPM, ToBPM) // 10,
+    TotalChange = abs(ToBPM - FromBPM),
+    TotalChange =< MaxChangePerBar * NumBars.
+
+% Validate tempo change type matches direction
+tempo_change_valid(FromBPM, ToBPM, Type) =>
+    if Type == ritardando then
+        ToBPM < FromBPM
+    elseif Type == accelerando then
+        ToBPM > FromBPM
+    elseif Type == constant then
+        ToBPM == FromBPM
+    else
+        true  % rubato allows any variation
+    end.
+
+% Generate tempo curve for gradual change
+% Returns list of BPMs for each bar
+tempo_curve(FromBPM, ToBPM, NumBars, constant) = [FromBPM : _ in 1..NumBars].
+tempo_curve(FromBPM, ToBPM, NumBars, Type) = Curve =>
+    (Type == ritardando ; Type == accelerando),
+    Step = (ToBPM - FromBPM) / NumBars,
+    Curve = [round(FromBPM + Step * (I - 1)) : I in 1..NumBars].
+tempo_curve(FromBPM, _, NumBars, rubato) = [FromBPM : _ in 1..NumBars].

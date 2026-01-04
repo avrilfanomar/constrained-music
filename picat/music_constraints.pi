@@ -286,3 +286,198 @@ same_pitch_class(Note1, Note2) =>
     Note1 #= 12 * Q1 + PC1,
     Note2 #= 12 * Q2 + PC2,
     PC1 #= PC2.
+
+% ==============================================================================
+% TIE CONSTRAINTS
+% ==============================================================================
+% Rule: Ties connect notes of the same pitch across barlines
+
+% Tied notes must have the same pitch
+% TieFlags is a list parallel to Notes: [none, start, end, none, start, continue, end, ...]
+tie_same_pitch_constraint(Notes, TieFlags) =>
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        Flag1 = TieFlags[I],
+        Flag2 = TieFlags[I+1],
+        % If current is tie_start/continue and next is tie_continue/end, pitches must match
+        if (Flag1 == start ; Flag1 == continue),
+           (Flag2 == continue ; Flag2 == end) then
+            Notes[I] #= Notes[I+1]
+        end
+    end.
+
+% Tie continuity constraint: tie_start must be followed by continue/end
+tie_continuity_constraint(TieFlags) =>
+    Len = length(TieFlags),
+    foreach(I in 1..Len-1)
+        Flag = TieFlags[I],
+        NextFlag = TieFlags[I+1],
+        % After start, must have continue or end
+        if Flag == start then
+            (NextFlag == continue ; NextFlag == end)
+        % After continue, must have continue or end
+        elseif Flag == continue then
+            (NextFlag == continue ; NextFlag == end)
+        % end or none can be followed by anything
+        else
+            true
+        end
+    end.
+
+% Validate tie structure (no orphaned tie ends)
+tie_structure_valid(TieFlags) =>
+    tie_continuity_constraint(TieFlags),
+    % First note cannot be tie_end or tie_continue
+    TieFlags[1] !== end,
+    TieFlags[1] !== continue,
+    % Last note cannot be tie_start or tie_continue
+    Len = length(TieFlags),
+    TieFlags[Len] !== start,
+    TieFlags[Len] !== continue.
+
+% Calculate total duration of tied notes
+% Returns the sum of durations for a tie group starting at index Start
+resolve_tied_duration(Notes, Durations, TieFlags, Start, TotalDur) =>
+    find_tie_end(TieFlags, Start, EndIdx),
+    TotalDur = sum([Durations[I] : I in Start..EndIdx]).
+
+% Helper: find end of tie group
+find_tie_end(TieFlags, Start, EndIdx) =>
+    Len = length(TieFlags),
+    find_tie_end_helper(TieFlags, Start, Len, EndIdx).
+
+find_tie_end_helper(TieFlags, Idx, Len, EndIdx) =>
+    if Idx > Len then
+        EndIdx = Len
+    elseif TieFlags[Idx] == end then
+        EndIdx = Idx
+    elseif TieFlags[Idx] == none, Idx > 1 then
+        EndIdx = Idx - 1
+    else
+        find_tie_end_helper(TieFlags, Idx + 1, Len, EndIdx)
+    end.
+
+% ==============================================================================
+% ACCIDENTAL SCOPE CONSTRAINTS
+% ==============================================================================
+% Rule: Accidentals apply within the bar unless tied
+
+% Accidental resets at barline (unless tied)
+% BarNumbers is a list parallel to Notes indicating which bar each note is in
+accidental_scope_constraint(Notes, Accidentals, BarNumbers, TieFlags) =>
+    Len = length(Notes),
+    foreach(I in 2..Len)
+        PrevBar = BarNumbers[I-1],
+        CurrBar = BarNumbers[I],
+        PrevTie = TieFlags[I-1],
+        % If bar changed and not tied, accidental cannot carry over
+        if CurrBar > PrevBar, (PrevTie !== start, PrevTie !== continue) then
+            % Accidental must be explicitly stated or none
+            % (This is more of a notation hint than a hard constraint)
+            true
+        end
+    end.
+
+% Track accidentals within a bar
+% Returns list of (PitchClass, Accidental) pairs active in bar
+bar_active_accidentals(Notes, Accidentals, BarNumbers, BarNum) = Active =>
+    Len = length(Notes),
+    Active = [{Notes[I] mod 12, Accidentals[I]} : I in 1..Len,
+              BarNumbers[I] == BarNum, Accidentals[I] !== none].
+
+% ==============================================================================
+% KEY SIGNATURE CONSTRAINTS
+% ==============================================================================
+% Rule: Key signatures define default accidentals
+
+% Check if note needs accidental display given key signature
+% KeySigAccidentals is list of pitch classes that are altered in key
+note_needs_accidental_display(NotePitchClass, NoteAccidental, KeySigAccidentals) =>
+    IsInKeySig = member(NotePitchClass, KeySigAccidentals),
+    if IsInKeySig then
+        % Note is in key sig - only need accidental if natural or different
+        (NoteAccidental == natural ; NoteAccidental !== none)
+    else
+        % Note not in key sig - need accidental if any applied
+        NoteAccidental !== none
+    end.
+
+% Constrain notes to fit key signature (diatonic constraint)
+notes_fit_key_signature(Notes, KeyRoot, KeyMode) =>
+    KeyClass = KeyRoot mod 12,
+    Intervals = key_mode_intervals(KeyMode),
+    foreach(N in Notes)
+        PC :: 0..11,
+        Q :: 0..10,
+        N #= 12 * Q + PC,
+        Offset :: 0..11,
+        Offset #= (PC - KeyClass + 12) mod 12,
+        member(Offset, Intervals)
+    end.
+
+% Mode intervals for key signature
+key_mode_intervals(major) = [0, 2, 4, 5, 7, 9, 11].
+key_mode_intervals(minor) = [0, 2, 3, 5, 7, 8, 10].
+key_mode_intervals(natural_minor) = [0, 2, 3, 5, 7, 8, 10].
+
+% ==============================================================================
+% TUPLET CONSTRAINTS
+% ==============================================================================
+% Rule: Tuplets subdivide evenly against the meter
+
+% Tuplet must fill its expected duration slot
+% TupletDur is in same units as BarDuration (e.g., sixteenth notes)
+tuplet_fills_correctly(ActualCount, NormalCount, NoteDur, TupletDur) =>
+    % Total duration = NormalCount * NoteDur
+    % Each note in tuplet = (NormalCount * NoteDur) / ActualCount
+    TupletDur #= NormalCount * NoteDur.
+
+% Tuplet notes should have equal duration (for standard tuplets)
+% Durations is list of duration values for notes in tuplet
+tuplet_notes_equal_duration(Durations) =>
+    Len = length(Durations),
+    if Len > 1 then
+        foreach(I in 2..Len)
+            Durations[I] #= Durations[1]
+        end
+    end.
+
+% Tuplet must have correct note count
+tuplet_correct_count(Notes, ActualCount) =>
+    length(Notes) == ActualCount.
+
+% Tuplet alignment: tuplet should start on a beat
+tuplet_beat_aligned(TupletStartBeat, TupletStartSub) =>
+    TupletStartSub #= 0.
+
+% Constrain tuplet pitches to follow melodic rules
+tuplet_melodic_constraints(TupletPitches, MaxInterval) =>
+    Len = length(TupletPitches),
+    foreach(I in 1..Len-1)
+        $abs(TupletPitches[I+1] - TupletPitches[I]) #=< MaxInterval
+    end.
+
+% ==============================================================================
+% CLEF RANGE CONSTRAINTS
+% ==============================================================================
+% Rule: Clefs define pitch space
+
+% Constrain notes to clef range
+clef_range_constraint(Notes, Clef) =>
+    Range = get_clef_range(Clef),
+    Range = range(Low, High),
+    all_in_range(Notes, Low, High).
+
+% Get range for clef type
+get_clef_range(treble) = $range(60, 84).   % C4-C6
+get_clef_range(bass) = $range(36, 60).     % C2-C4
+get_clef_range(alto) = $range(48, 72).     % C3-C5
+get_clef_range(tenor) = $range(43, 67).    % G2-G4
+
+% Voice-clef consistency: voice range should match clef
+voice_clef_consistent(voice(_, _, _, range(VLow, VHigh)), Clef) =>
+    range(CLow, CHigh) = get_clef_range(Clef),
+    % Voice range should overlap significantly with clef range
+    OverlapLow = max(VLow, CLow),
+    OverlapHigh = min(VHigh, CHigh),
+    OverlapHigh - OverlapLow >= 12.  % At least an octave overlap

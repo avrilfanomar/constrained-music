@@ -216,3 +216,107 @@ increasing([_]) => true.
 increasing([A, B | Rest]) =>
     A #=< B,
     increasing([B | Rest]).
+
+% ==============================================================================
+% BARLINE ALIGNMENT CONSTRAINTS
+% ==============================================================================
+% Rule: Harmonic rhythm usually aligns with strong beats
+
+% Chord changes should occur on strong beats
+% ChordChangePositions: list of tick positions where chord changes occur
+% StrongBeatPositions: list of tick positions that are strong beats
+chord_changes_on_strong_beats(ChordChangePositions, StrongBeatPositions, BarLength) =>
+    foreach(ChangePos in ChordChangePositions)
+        % Position within bar
+        PosInBar = ChangePos mod BarLength,
+        member(PosInBar, StrongBeatPositions)
+    end.
+
+% Harmonic rhythm aligns with barlines
+% ChordRoots: list of chord roots by position
+% Positions: list of time positions
+% Meter: time signature
+harmonic_rhythm_aligns_with_barline(ChordRoots, Positions, Meter) =>
+    Len = length(ChordRoots),
+    BarLength = bar_length_for_meter(Meter),
+    StrongBeats = strong_beat_positions(Meter),
+    foreach(I in 2..Len)
+        if ChordRoots[I] !== ChordRoots[I-1] then
+            % Chord changed - check if on strong beat
+            PosInBar = Positions[I] mod BarLength,
+            member(PosInBar, StrongBeats)
+        end
+    end.
+
+% Get bar length for meter (in ticks - 16 = whole note)
+bar_length_for_meter(meter(Beats, Unit)) = Length =>
+    WholeNoteLength = 16,
+    BeatLength = WholeNoteLength // Unit,
+    Length = Beats * BeatLength.
+
+% Get strong beat positions for meter
+strong_beat_positions(meter(4, 4)) = [0, 8].      % Beat 1 and 3
+strong_beat_positions(meter(3, 4)) = [0].          % Beat 1 only
+strong_beat_positions(meter(2, 4)) = [0].          % Beat 1 only
+strong_beat_positions(meter(6, 8)) = [0, 6].       % Beat 1 and 4
+strong_beat_positions(meter(2, 2)) = [0].          % Beat 1 only
+strong_beat_positions(meter(9, 8)) = [0, 6, 12].   % Beat 1, 4, 7
+strong_beat_positions(meter(12, 8)) = [0, 6, 12, 18].  % Beat 1, 4, 7, 10
+strong_beat_positions(_) = [0].                    % Default: downbeat only
+
+% Chord change prefers downbeat (beat 1)
+chord_change_on_downbeat(ChordRoots, Positions, BarLength) =>
+    Len = length(ChordRoots),
+    foreach(I in 2..Len)
+        if ChordRoots[I] !== ChordRoots[I-1] then
+            % Chord changed - should be on downbeat
+            PosInBar = Positions[I] mod BarLength,
+            PosInBar == 0
+        end
+    end.
+
+% Soft constraint: prefer chord changes on downbeat (counts violations)
+count_non_downbeat_changes(ChordRoots, Positions, BarLength, Count) =>
+    Len = length(ChordRoots),
+    Count = count_changes_not_on_downbeat(ChordRoots, Positions, BarLength, 2, Len, 0).
+
+% Helper: count chord changes not on downbeat
+count_changes_not_on_downbeat(_, _, _, Idx, Len, Acc) = Acc, Idx > Len => true.
+count_changes_not_on_downbeat(ChordRoots, Positions, BarLength, Idx, Len, Acc) = Result =>
+    Idx =< Len,
+    if ChordRoots[Idx] !== ChordRoots[Idx-1], Positions[Idx] mod BarLength !== 0 then
+        NewAcc = Acc + 1
+    else
+        NewAcc = Acc
+    end,
+    Result = count_changes_not_on_downbeat(ChordRoots, Positions, BarLength, Idx + 1, Len, NewAcc).
+
+% Harmonic rhythm regularity: chord changes at predictable intervals
+harmonic_rhythm_predictable(ChordRoots, Positions, MinDuration, MaxDuration) =>
+    Len = length(ChordRoots),
+    foreach(I in 2..Len-1)
+        if ChordRoots[I] !== ChordRoots[I-1] then
+            % Find next change
+            find_next_change(ChordRoots, I, NextChangeIdx),
+            if NextChangeIdx =< Len then
+                Duration = Positions[NextChangeIdx] - Positions[I],
+                Duration >= MinDuration,
+                Duration =< MaxDuration
+            end
+        end
+    end.
+
+% Helper: find next chord change after index
+find_next_change(ChordRoots, FromIdx, ChangeIdx) =>
+    Len = length(ChordRoots),
+    find_next_change_helper(ChordRoots, FromIdx + 1, Len, ChordRoots[FromIdx], ChangeIdx).
+
+find_next_change_helper(_, Idx, Len, _, ChangeIdx) =>
+    Idx > Len,
+    ChangeIdx = Len + 1.  % No more changes
+find_next_change_helper(ChordRoots, Idx, _, PrevChord, ChangeIdx) =>
+    ChordRoots[Idx] !== PrevChord,
+    ChangeIdx = Idx.
+find_next_change_helper(ChordRoots, Idx, Len, PrevChord, ChangeIdx) =>
+    ChordRoots[Idx] == PrevChord,
+    find_next_change_helper(ChordRoots, Idx + 1, Len, PrevChord, ChangeIdx).

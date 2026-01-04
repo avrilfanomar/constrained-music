@@ -72,6 +72,49 @@ seconds_per_bar(Tempo, Meter) = Seconds =>
     Seconds = (MsPerBeat * Beats) / 1000.
 
 % ==============================================================================
+% TEMPO CHANGES
+% ==============================================================================
+% Structure: tempo_change(FromBPM, ToBPM, StartBar, EndBar, Type)
+% Type: constant, ritardando, accelerando, rubato
+%
+% Tempo stability rule: tempo is constant unless explicitly changed
+
+tempo_change_type(constant).       % No change
+tempo_change_type(ritardando).     % Gradual slowdown (rit.)
+tempo_change_type(accelerando).    % Gradual speedup (accel.)
+tempo_change_type(rubato).         % Flexible tempo
+tempo_change_type(fermata).        % Hold/pause
+
+% Create a tempo change
+make_tempo_change(FromBPM, ToBPM, StartBar, EndBar, Type) =
+    $tempo_change(FromBPM, ToBPM, StartBar, EndBar, Type).
+
+% Get tempo at a specific bar during a tempo change
+tempo_at_bar(tempo_change(From, To, Start, End, constant), _) = From =>
+    To == From.  % Constant means no change
+tempo_at_bar(tempo_change(From, To, Start, End, Type), Bar) = BPM =>
+    (Type == ritardando ; Type == accelerando),
+    if Bar =< Start then
+        BPM = From
+    elseif Bar >= End then
+        BPM = To
+    else
+        % Linear interpolation
+        Progress = (Bar - Start) / (End - Start),
+        BPM = From + (To - From) * Progress
+    end.
+tempo_at_bar(tempo_change(From, _, _, _, rubato), _) = From.  % Base tempo for rubato
+
+% Check if tempo is stable (no changes in segment)
+is_tempo_stable([]) => true.
+is_tempo_stable([_]) => true.
+is_tempo_stable(TempoChanges) =>
+    % All changes must be 'constant' type
+    foreach(tempo_change(_, _, _, _, Type) in TempoChanges)
+        Type == constant
+    end.
+
+% ==============================================================================
 % PHRASE STRUCTURE
 % ==============================================================================
 % Structure: phrase(Id, StartBar, Length, PhraseType)
@@ -216,6 +259,73 @@ pattern_fills_bar(Pattern, Meter) =>
     BeatUnit = beat_unit(Meter),
     BarDuration = $duration(BeatsPerBar, BeatUnit),
     duration_compare(Total, BarDuration) == 0.
+
+% ==============================================================================
+% TUPLET REPRESENTATION
+% ==============================================================================
+% Structure: tuplet(ActualCount, NormalCount, NormalDuration, Notes)
+% ActualCount: number of notes in the tuplet
+% NormalCount: number of notes this replaces
+% NormalDuration: duration of each normal note (e.g., eighth = duration(1,8))
+% Notes: list of note pitches/durations in the tuplet
+%
+% Examples:
+%   Triplet (3 in the time of 2): tuplet(3, 2, duration(1,8), Notes)
+%   Quintuplet (5 in the time of 4): tuplet(5, 4, duration(1,16), Notes)
+%   Duplet in compound (2 in the time of 3): tuplet(2, 3, duration(1,8), Notes)
+
+% Common tuplet types
+tuplet_triplet() = $tuplet_type(3, 2).      % 3:2 - eighth note triplets
+tuplet_duplet() = $tuplet_type(2, 3).       % 2:3 - duplet in compound meter
+tuplet_quintuplet() = $tuplet_type(5, 4).   % 5:4 - quintuplet
+tuplet_sextuplet() = $tuplet_type(6, 4).    % 6:4 - sextuplet
+tuplet_septuplet() = $tuplet_type(7, 4).    % 7:4 - septuplet
+
+% Create a tuplet
+make_tuplet(ActualCount, NormalCount, NormalDuration, Notes) =
+    $tuplet(ActualCount, NormalCount, NormalDuration, Notes).
+
+% Create a triplet (most common tuplet)
+make_triplet(NormalDuration, Notes) =
+    $tuplet(3, 2, NormalDuration, Notes).
+
+% Get the total duration a tuplet occupies (same as NormalCount * NormalDuration)
+tuplet_total_duration(tuplet(_, NormalCount, duration(N, D), _)) =
+    $duration(N * NormalCount, D).
+
+% Get the effective duration of each note within the tuplet
+% For a triplet of eighths: each note = (2/3) of an eighth
+tuplet_note_duration(tuplet(ActualCount, NormalCount, duration(N, D), _)) =
+    $duration(N * NormalCount, D * ActualCount).
+
+% Check if a tuplet has the correct number of notes
+tuplet_valid_count(tuplet(ActualCount, _, _, Notes)) =>
+    length(Notes) == ActualCount.
+
+% Check if all notes in tuplet have equal duration (standard tuplet)
+tuplet_notes_equal(tuplet(_, _, _, [])) => true.
+tuplet_notes_equal(tuplet(_, _, _, [_])) => true.
+tuplet_notes_equal(tuplet(A, N, D, Notes)) =>
+    ExpectedDur = tuplet_note_duration($tuplet(A, N, D, Notes)),
+    foreach(Note in Notes)
+        % Note duration should match expected tuplet note duration
+        note_duration_matches(Note, ExpectedDur)
+    end.
+
+% Helper: check if note duration matches (used for validation)
+note_duration_matches(note(_, Dur, _, _, _), ExpectedDur) =>
+    duration_compare(Dur, ExpectedDur) == 0.
+note_duration_matches(Pitch, _) => integer(Pitch).  % Pitch-only representation
+
+% Check if tuplet is on a beat boundary
+tuplet_aligned_to_beat(tuplet(_, _, _, _), time_pos(_, Beat, Sub)) =>
+    Sub == 0,  % No subdivision offset
+    Beat > 0.  % Valid beat
+
+% Common tuplet patterns
+pattern_triplet_eighths() = make_triplet($duration(1, 8), [p, p, p]).
+pattern_triplet_quarters() = make_triplet($duration(1, 4), [p, p, p]).
+pattern_quintuplet_sixteenths() = make_tuplet(5, 4, $duration(1, 16), [p, p, p, p, p]).
 
 % ==============================================================================
 % TIME UTILITIES

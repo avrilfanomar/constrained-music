@@ -580,3 +580,104 @@ combine_styles(Notes, RootPitch, Config, Styles) =>
     foreach(Style in Styles)
         apply_style_light(Notes, RootPitch, Config, Style)
     end.
+
+% ==============================================================================
+% SLUR/PHRASING CONSTRAINTS
+% ==============================================================================
+% Rule: Slurs indicate phrasing/articulation groups
+
+% Notes within a slur should be played legato (smooth, connected)
+% SlurGroups: list of slur_group(Id, StartIdx, EndIdx)
+% Notes: list of pitches
+slur_articulation_constraint(Notes, SlurGroups) =>
+    foreach(slur_group(_, StartIdx, EndIdx) in SlurGroups)
+        % Notes within slur should have smooth intervals
+        foreach(I in StartIdx..EndIdx-1)
+            if I >= 1, I < length(Notes) then
+                % Prefer stepwise motion within slurs
+                Interval = $abs(Notes[I+1] - Notes[I]),
+                Interval #=< 5  % No large leaps within slur
+            end
+        end
+    end.
+
+% Slurs should not cross phrase boundaries
+% SlurGroups: list of slur_group structures
+% PhraseBoundaries: list of note indices where phrases end
+slur_boundary_constraint(SlurGroups, PhraseBoundaries) =>
+    foreach(slur_group(_, StartIdx, EndIdx) in SlurGroups)
+        foreach(Boundary in PhraseBoundaries)
+            % Slur should not span across phrase boundary
+            not (StartIdx < Boundary, EndIdx > Boundary)
+        end
+    end.
+
+% Maximum slur length (practical limit for wind instruments, vocals)
+max_slur_length(SlurGroups, MaxNotes) =>
+    foreach(slur_group(_, StartIdx, EndIdx) in SlurGroups)
+        EndIdx - StartIdx + 1 =< MaxNotes
+    end.
+
+% Minimum slur length (slur must include at least 2 notes)
+min_slur_length(SlurGroups) =>
+    foreach(slur_group(_, StartIdx, EndIdx) in SlurGroups)
+        EndIdx - StartIdx + 1 >= 2
+    end.
+
+% Slurs should not overlap
+slurs_non_overlapping(SlurGroups) =>
+    Len = length(SlurGroups),
+    foreach(I in 1..Len)
+        foreach(J in I+1..Len)
+            slur_group(_, S1, E1) = SlurGroups[I],
+            slur_group(_, S2, E2) = SlurGroups[J],
+            % Either first ends before second starts, or second ends before first starts
+            (E1 < S2 ; E2 < S1)
+        end
+    end.
+
+% Slur should start on a beat (preference)
+slur_starts_on_beat(SlurStartPositions, BeatPositions) =>
+    foreach(StartPos in SlurStartPositions)
+        member(StartPos, BeatPositions)
+    end.
+
+% Phrase-ending slur pattern: slur to phrase end
+phrase_ending_slur(Notes, SlurGroups, PhraseBoundaries) =>
+    foreach(Boundary in PhraseBoundaries)
+        % There should be a slur ending at or just before phrase boundary
+        exists_slur_near_boundary(SlurGroups, Boundary)
+    end.
+
+% Helper: check if any slur ends near boundary
+exists_slur_near_boundary(SlurGroups, Boundary) =>
+    SomeSlurEndsNear = [1 : slur_group(_, _, EndIdx) in SlurGroups,
+                        EndIdx >= Boundary - 2, EndIdx =< Boundary],
+    length(SomeSlurEndsNear) >= 1.
+
+% Validate slur structure
+slur_structure_valid(SlurGroups, NumNotes) =>
+    min_slur_length(SlurGroups),
+    slurs_non_overlapping(SlurGroups),
+    % All indices within valid range
+    foreach(slur_group(_, StartIdx, EndIdx) in SlurGroups)
+        StartIdx >= 1,
+        EndIdx =< NumNotes,
+        StartIdx < EndIdx
+    end.
+
+% Create automatic slur groupings based on phrase structure
+% Returns list of slur groups
+auto_slur_phrases(PhraseBoundaries, NumNotes) = SlurGroups =>
+    Len = length(PhraseBoundaries),
+    SlurGroups = [],
+    PrevEnd = 0,
+    foreach(I in 1..Len)
+        Boundary = PhraseBoundaries[I],
+        StartIdx = PrevEnd + 1,
+        EndIdx = Boundary,
+        if EndIdx > StartIdx then
+            SlurGroups := SlurGroups ++ [$slur_group(I, StartIdx, EndIdx)]
+        end,
+        PrevEnd := Boundary
+    end.

@@ -159,16 +159,170 @@ rotate_list(List, N) = Rotated =>
     Rotated = [List[((I + ActualN - 1) mod Len) + 1] : I in 1..Len].
 
 % ==============================================================================
+% TIE REPRESENTATION
+% ==============================================================================
+% Ties connect notes of the same pitch across barlines
+% Tie values: none, start, continue, end
+%   none     - not tied
+%   start    - beginning of tie
+%   continue - middle of multi-note tie
+%   end      - end of tie
+
+tie_none() = none.
+tie_start() = start.
+tie_continue() = continue.
+tie_end() = end.
+
+% Check if note is part of a tie
+is_tied(none) => fail.
+is_tied(_) => true.
+
+is_tie_start(start) => true.
+is_tie_start(_) => fail.
+
+is_tie_end(end) => true.
+is_tie_end(_) => fail.
+
+% ==============================================================================
+% SLUR/PHRASING REPRESENTATION
+% ==============================================================================
+% Slurs indicate phrasing and articulation groupings
+% Structure: slur_group(Id, StartIndex, EndIndex)
+% Notes within a slur should be played legato
+
+make_slur_group(Id, StartIdx, EndIdx) = $slur_group(Id, StartIdx, EndIdx).
+
+% Check if index is within a slur group
+in_slur_group(Index, slur_group(_, Start, End)) =>
+    Index >= Start, Index =< End.
+
+% Check if index is slur boundary
+is_slur_start(Index, slur_group(_, Start, _)) => Index == Start.
+is_slur_end(Index, slur_group(_, _, End)) => Index == End.
+
+% ==============================================================================
+% ACCIDENTAL REPRESENTATION
+% ==============================================================================
+% Accidentals modify pitch within a bar (reset at barline unless tied)
+% Values: natural, sharp, flat, double_sharp, double_flat, none
+
+accidental_none() = none.
+accidental_natural() = natural.
+accidental_sharp() = sharp.
+accidental_flat() = flat.
+accidental_double_sharp() = double_sharp.
+accidental_double_flat() = double_flat.
+
+% Semitone offset for each accidental
+accidental_offset(none) = 0.
+accidental_offset(natural) = 0.
+accidental_offset(sharp) = 1.
+accidental_offset(flat) = -1.
+accidental_offset(double_sharp) = 2.
+accidental_offset(double_flat) = -2.
+
+% ==============================================================================
+% KEY SIGNATURE REPRESENTATION
+% ==============================================================================
+% Structure: key_sig(Root, Mode, NumAccidentals, AccidentalType)
+% Root: MIDI pitch class (0-11, where 0=C)
+% Mode: major or minor
+% NumAccidentals: number of sharps/flats (0-7)
+% AccidentalType: sharp or flat
+
+% Key signature constants (major keys)
+key_c_major() = $key_sig(0, major, 0, none).
+key_g_major() = $key_sig(7, major, 1, sharp).
+key_d_major() = $key_sig(2, major, 2, sharp).
+key_a_major() = $key_sig(9, major, 3, sharp).
+key_e_major() = $key_sig(4, major, 4, sharp).
+key_b_major() = $key_sig(11, major, 5, sharp).
+key_f_sharp_major() = $key_sig(6, major, 6, sharp).
+key_c_sharp_major() = $key_sig(1, major, 7, sharp).
+key_f_major() = $key_sig(5, major, 1, flat).
+key_b_flat_major() = $key_sig(10, major, 2, flat).
+key_e_flat_major() = $key_sig(3, major, 3, flat).
+key_a_flat_major() = $key_sig(8, major, 4, flat).
+key_d_flat_major() = $key_sig(1, major, 5, flat).
+key_g_flat_major() = $key_sig(6, major, 6, flat).
+key_c_flat_major() = $key_sig(11, major, 7, flat).
+
+% Key signature constants (minor keys - relative to major)
+key_a_minor() = $key_sig(9, minor, 0, none).
+key_e_minor() = $key_sig(4, minor, 1, sharp).
+key_b_minor() = $key_sig(11, minor, 2, sharp).
+key_f_sharp_minor() = $key_sig(6, minor, 3, sharp).
+key_c_sharp_minor() = $key_sig(1, minor, 4, sharp).
+key_g_sharp_minor() = $key_sig(8, minor, 5, sharp).
+key_d_sharp_minor() = $key_sig(3, minor, 6, sharp).
+key_a_sharp_minor() = $key_sig(10, minor, 7, sharp).
+key_d_minor() = $key_sig(2, minor, 1, flat).
+key_g_minor() = $key_sig(7, minor, 2, flat).
+key_c_minor() = $key_sig(0, minor, 3, flat).
+key_f_minor() = $key_sig(5, minor, 4, flat).
+key_b_flat_minor() = $key_sig(10, minor, 5, flat).
+key_e_flat_minor() = $key_sig(3, minor, 6, flat).
+key_a_flat_minor() = $key_sig(8, minor, 7, flat).
+
+% Order of sharps: F C G D A E B (pitch classes: 5 0 7 2 9 4 11)
+sharp_order() = [5, 0, 7, 2, 9, 4, 11].
+% Order of flats: B E A D G C F (pitch classes: 11 4 9 2 7 0 5)
+flat_order() = [11, 4, 9, 2, 7, 0, 5].
+
+% Get list of altered pitch classes for a key signature
+key_sig_accidentals(key_sig(_, _, 0, _)) = [].
+key_sig_accidentals(key_sig(_, _, N, sharp)) = Accidentals =>
+    Order = sharp_order(),
+    Accidentals = [Order[I] : I in 1..N].
+key_sig_accidentals(key_sig(_, _, N, flat)) = Accidentals =>
+    Order = flat_order(),
+    Accidentals = [Order[I] : I in 1..N].
+
+% Check if a pitch class needs an accidental in this key
+needs_accidental(PitchClass, KeySig) =>
+    Altered = key_sig_accidentals(KeySig),
+    not member(PitchClass, Altered).
+
+% ==============================================================================
+% CLEF REPRESENTATION
+% ==============================================================================
+% Clefs define the pitch space for notation
+% Structure: clef(Type, ReferenceLine, ReferencePitch)
+
+clef_treble() = $clef(treble, 2, 67).      % G4 on line 2
+clef_bass() = $clef(bass, 4, 53).          % F3 on line 4
+clef_alto() = $clef(alto, 3, 60).          % C4 on line 3
+clef_tenor() = $clef(tenor, 4, 60).        % C4 on line 4
+
+% Standard ranges for clefs (comfortable reading range)
+clef_range(treble) = $range(60, 84).       % C4-C6
+clef_range(bass) = $range(36, 60).         % C2-C4
+clef_range(alto) = $range(48, 72).         % C3-C5
+clef_range(tenor) = $range(43, 67).        % G2-G4
+
+% Suggest appropriate clef for a pitch range
+suggest_clef(Low, High) = Clef =>
+    Mid = (Low + High) // 2,
+    if Mid >= 65 then Clef = treble
+    elseif Mid >= 55 then Clef = alto
+    elseif Mid >= 48 then Clef = tenor
+    else Clef = bass
+    end.
+
+% ==============================================================================
 % NOTE (Complete musical event)
 % ==============================================================================
 % Structure: note(Pitch, Duration, TimePos, Voice, Velocity)
+% OR extended: note(Pitch, Duration, TimePos, Voice, Velocity, Tie, Accidental)
 % Pitch: pitch structure
 % Duration: duration structure
 % TimePos: time_pos structure
 % Voice: Voice ID (integer)
 % Velocity: MIDI velocity (1-127), 0 = rest
+% Tie: tie marker (none, start, continue, end)
+% Accidental: accidental type (none, natural, sharp, flat, etc.)
 
-% Create a simple note from MIDI values
+% Create a simple note from MIDI values (backward compatible)
 make_note(MidiPitch, DurNum, DurDen, Bar, Beat, VoiceId, Velocity) = Note =>
     Note = $note(
         $pitch(midi, MidiPitch, MidiPitch // 12 - 1),
@@ -176,6 +330,18 @@ make_note(MidiPitch, DurNum, DurDen, Bar, Beat, VoiceId, Velocity) = Note =>
         $time_pos(Bar, Beat, 0),
         VoiceId,
         Velocity
+    ).
+
+% Create a note with tie and accidental information
+make_note_full(MidiPitch, DurNum, DurDen, Bar, Beat, VoiceId, Velocity, Tie, Accidental) = Note =>
+    Note = $note_full(
+        $pitch(midi, MidiPitch, MidiPitch // 12 - 1),
+        duration(DurNum, DurDen),
+        $time_pos(Bar, Beat, 0),
+        VoiceId,
+        Velocity,
+        Tie,
+        Accidental
     ).
 
 % Check if note is a rest
