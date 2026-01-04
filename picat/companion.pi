@@ -14,6 +14,8 @@ import violin_types.
 import temporal.
 import midi_export.
 import util.
+import genre_profiles.
+import constraint_selector.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -80,6 +82,86 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
 
     println("Done! Run midi_writer.py to convert to MIDI."),
     nl.
+
+% ==============================================================================
+% GENRE-BASED COMPANION
+% ==============================================================================
+
+% Run companion with genre-based constraint optimization
+run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomness, Genre, Preferences) =>
+    println("=== Music Companion (Genre Mode) ==="),
+    nl,
+
+    % Validate genre
+    if not genre_profiles.genre_exists(Genre) then
+        printf("Error: Unknown genre '%w'%n", Genre),
+        printf("Available genres: %w%n", genre_profiles.all_genres()),
+        halt
+    end,
+
+    % Print session info
+    printf("Generating emotional transition:%n"),
+    printf("  From: "), print_mood(StartMood),
+    printf("  To:   "), print_mood(EndMood),
+    printf("  Duration: %d seconds (%.1f minutes)%n", DurationSecs, DurationSecs / 60.0),
+    printf("  Genre: %w%n", Genre),
+    printf("  Randomness: %.2f%n%n", Randomness),
+
+    % Plan the transition
+    println("Planning transition path..."),
+    Segments = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out, Randomness),
+    printf("  Created %d segments%n%n", length(Segments)),
+
+    % Generate melodies with genre constraints
+    println("Generating music with genre constraints..."),
+    KeyRoot = 60,  % C4
+    AllNotes = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
+    printf("  Generated %d total notes%n%n", length(AllNotes)),
+
+    % Collect tempo changes
+    TempoChanges = collect_tempo_changes(Segments),
+
+    % Export to JSON
+    println("Exporting to JSON..."),
+    export_session_json(AllNotes, TempoChanges, OutputPath),
+    printf("  Saved to: %s%n%n", OutputPath),
+
+    println("Done! Run midi_writer.py to convert to MIDI."),
+    nl.
+
+% Generate segments with genre-based constraints
+generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences) = AllNotes =>
+    AllNotes = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, []).
+
+generate_segments_genre_helper([], _, _, _, _, _, Acc) = flatten(reverse(Acc)).
+generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc) = Result =>
+    NumBars = get_segment_num_bars(Seg),
+    Params = get_segment_params(Seg),
+
+    % Generate melody with genre constraints
+    if Acc == [] then
+        % First segment
+        once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+    else
+        % Connect to previous segment
+        PrevMelody = head(Acc),
+        PrevLastPitch = melody.last_pitch(PrevMelody),
+        if once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody0)) then
+            SegmentMelody = SegmentMelody0
+        else
+            % Fallback: generate without connection
+            once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+        end
+    end,
+
+    printf("  Segment %2d: bars %3d-%3d, tempo=%3d, genre=%w%n",
+           SegIndex, CurrentBar + 1, CurrentBar + NumBars,
+           get_tempo(Params), Genre),
+
+    % Adjust timing
+    TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
+
+    Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
 
 % ==============================================================================
 % SEGMENT GENERATION
@@ -163,6 +245,9 @@ main(Args) =>
     elseif FirstArg == "moods" then
         print_all_presets(),
         halt
+    elseif FirstArg == "genres" then
+        print_all_genres(),
+        halt
     elseif FirstArg == "demo" then
         % Parse additional options for demo
         ParsedOpts = parse_args(RestArgs),
@@ -202,7 +287,15 @@ main(Args) =>
     ToVA = get_arg(ParsedArgs, to_va, none),
     EndMood = cond(ToVA != none, parse_va(ToVA), mood_preset(EndPreset)),
 
-    run_companion(StartMood, EndMood, Duration, Output, Randomness).
+    % Check for genre-based generation
+    Genre = get_arg(ParsedArgs, genre, none),
+    if Genre != none then
+        % Build preferences from CLI args
+        Preferences = build_preferences(ParsedArgs),
+        run_companion_with_genre(StartMood, EndMood, Duration, Output, Randomness, Genre, Preferences)
+    else
+        run_companion(StartMood, EndMood, Duration, Output, Randomness)
+    end.
 
 % Parse VA coordinate string like "-0.7,-0.3"
 parse_va(VAString) = Mood =>
@@ -258,8 +351,24 @@ set_arg(Map, "randomness", Value) = Map =>
     Map.put(randomness, to_float(Value)).
 set_arg(Map, "random", Value) = Map =>
     Map.put(randomness, to_float(Value)).
-set_arg(Map, Key, _Value) = Map =>
-    printf("Warning: Unknown option '%s'%n", Key).
+set_arg(Map, "genre", Value) = Map =>
+    Map.put(genre, to_atom(Value)).
+set_arg(Map, "disable", Value) = Map =>
+    % Disable a constraint: disable=constraint_id
+    Existing = Map.get(disable, []),
+    Map.put(disable, Existing ++ [to_atom(Value)]).
+set_arg(Map, "intensity", Value) = Map =>
+    Map.put(intensity, to_atom(Value)).
+set_arg(Map, Key, Value) = Map =>
+    % Check for weight:constraint=value pattern
+    if append("weight:", ConstraintStr, Key) then
+        Constraint = to_atom(ConstraintStr),
+        Weight = to_integer(Value),
+        Existing = Map.get(weights, []),
+        Map.put(weights, Existing ++ [(Constraint, Weight)])
+    else
+        printf("Warning: Unknown option '%s'%n", Key)
+    end.
 
 % Get argument with default
 get_arg(Map, Key, Default) = Value =>
@@ -291,6 +400,7 @@ print_usage() =>
     println("  test         Quick functionality test"),
     println("  path         Show transition path without generating music"),
     println("  moods        List available mood presets"),
+    println("  genres       List available genres with constraint info"),
     println("  help, -h     Show this help message"),
     nl,
     println("Options (key=value format):"),
@@ -302,7 +412,15 @@ print_usage() =>
     println("  output=PATH      Output JSON file (default: session.json)"),
     println("  randomness=VAL   Randomness factor 0.0-1.0 (default: 0.0)"),
     println("                   0.0 = deterministic, 1.0 = maximum variation"),
-    println("                   Affects tempo, mode selection, velocity, and melodies"),
+    nl,
+    println("Genre Options (for weighted constraint optimization):"),
+    println("  genre=GENRE      Use genre-based constraint selection"),
+    println("                   (classical_period, baroque, romantic, traditional_jazz,"),
+    println("                   folk_traditional, contemporary, sacred_chant, children_songs,"),
+    println("                   minimalist, modal, blues)"),
+    println("  intensity=LEVEL  Constraint intensity: light, standard, strict"),
+    println("  disable=ID       Disable a specific constraint (can use multiple times)"),
+    println("  weight:ID=N      Override constraint weight (0-100)"),
     nl,
     println("Examples:"),
     println("  picat companion.pi demo"),
@@ -310,8 +428,46 @@ print_usage() =>
     println("  picat companion.pi from_va=-0.7,-0.3 to_va=0.5,0.8 duration=600"),
     println("  picat companion.pi from=calm_peaceful to=energized randomness=0.5"),
     nl,
+    println("Genre examples:"),
+    println("  picat companion.pi genre=classical_period randomness=0.3"),
+    println("  picat companion.pi genre=baroque intensity=strict"),
+    println("  picat companion.pi genre=jazz disable=leap_recovery"),
+    println("  picat companion.pi genre=folk_traditional weight:mostly_stepwise=90"),
+    nl,
     println("After generating the JSON file, run:"),
     println("  python scripts/midi_writer.py session.json session.mid").
+
+% Build preferences list from parsed CLI arguments
+build_preferences(ParsedArgs) = Preferences =>
+    Prefs = [],
+    % Add disabled constraints
+    Disabled = get_arg(ParsedArgs, disable, []),
+    foreach(D in Disabled)
+        Prefs := Prefs ++ [disable=D]
+    end,
+    % Add weight overrides (using weight_override(id, weight) structure)
+    Weights = get_arg(ParsedArgs, weights, []),
+    foreach((C, W) in Weights)
+        Prefs := Prefs ++ [$weight_override(C, W)]
+    end,
+    % Add intensity
+    Intensity = get_arg(ParsedArgs, intensity, standard),
+    Prefs := Prefs ++ [intensity=Intensity],
+    Preferences = Prefs.
+
+% Print all available genres
+print_all_genres() =>
+    println("Available genres:"),
+    nl,
+    foreach(Genre in genre_profiles.all_genres())
+        Desc = genre_profiles.genre_description(Genre),
+        Hard = genre_profiles.hard_constraints(Genre),
+        Soft = genre_profiles.soft_constraints(Genre),
+        printf("  %w%n", Genre),
+        printf("    %s%n", Desc),
+        printf("    Hard: %d constraints, Soft: %d constraints%n", length(Hard), length(Soft)),
+        nl
+    end.
 
 % ==============================================================================
 % DEMO AND TESTING

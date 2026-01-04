@@ -1,0 +1,485 @@
+% constraint_registry.pi - Central registry of all music constraints
+% Each constraint is catalogued with metadata for dynamic selection
+%
+% constraint_def(Id, Category, Type, DefaultWeight, ApplicableGenres, Description)
+%   Id: Unique atom identifier
+%   Category: melodic | harmonic | voice_leading | phrase_structure | rhythmic | idiomatic
+%   Type: hard | soft
+%   DefaultWeight: 0-100 (for soft constraints; 100 = always try to satisfy)
+%   ApplicableGenres: List of genre atoms where this constraint applies
+%   Description: Human-readable description
+
+module constraint_registry.
+
+% ==============================================================================
+% MELODIC CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    leap_recovery,
+    melodic,
+    soft,
+    75,
+    [classical_period, baroque, folk_traditional, children_songs, sacred_chant],
+    "After leap >= 5 semitones, move in opposite direction"
+).
+
+constraint_def(
+    mostly_stepwise,
+    melodic,
+    soft,
+    70,
+    [folk_traditional, children_songs, sacred_chant, minimalist],
+    "Prefer stepwise motion (intervals <= 2 semitones)"
+).
+
+constraint_def(
+    no_consecutive_same_direction_leaps,
+    melodic,
+    soft,
+    80,
+    [classical_period, baroque, folk_traditional],
+    "Avoid two consecutive leaps in same direction"
+).
+
+constraint_def(
+    no_augmented_seconds,
+    melodic,
+    hard,
+    100,
+    [classical_period, baroque, folk_traditional],
+    "Avoid augmented seconds (3 semitones)"
+).
+
+constraint_def(
+    no_tritone_outline,
+    melodic,
+    hard,
+    100,
+    [classical_period, folk_traditional, children_songs],
+    "Avoid tritone across 3 consecutive notes"
+).
+
+constraint_def(
+    approach_climax_by_step,
+    melodic,
+    soft,
+    65,
+    [classical_period, baroque],
+    "Highest note should be approached stepwise"
+).
+
+constraint_def(
+    leave_climax_contrary,
+    melodic,
+    soft,
+    60,
+    [classical_period],
+    "After highest note, descend"
+).
+
+constraint_def(
+    single_climax,
+    melodic,
+    soft,
+    50,
+    [classical_period, folk_traditional],
+    "One clear highest point in middle third"
+).
+
+constraint_def(
+    balanced_motion,
+    melodic,
+    soft,
+    55,
+    [classical_period, baroque],
+    "Roughly equal ascending and descending intervals"
+).
+
+constraint_def(
+    max_range,
+    melodic,
+    hard,
+    100,
+    [folk_traditional, children_songs, minimalist, sacred_chant],
+    "Maximum pitch span (ambitus)"
+).
+
+constraint_def(
+    min_range,
+    melodic,
+    hard,
+    100,
+    [romantic, traditional_jazz, blues],
+    "Minimum pitch span for variety"
+).
+
+constraint_def(
+    min_unique_pitches,
+    melodic,
+    soft,
+    60,
+    [romantic, traditional_jazz, contemporary],
+    "Minimum number of distinct pitches"
+).
+
+constraint_def(
+    max_octave_leaps,
+    melodic,
+    soft,
+    70,
+    [classical_period, folk_traditional],
+    "Limit leaps of octave or larger"
+).
+
+constraint_def(
+    max_consecutive_repeats,
+    melodic,
+    soft,
+    65,
+    [folk_traditional, blues, minimalist],
+    "Limit consecutive note repetitions"
+).
+
+constraint_def(
+    no_immediate_repeat,
+    melodic,
+    soft,
+    50,
+    [classical_period, baroque, romantic],
+    "No immediate pitch repetition"
+).
+
+% ==============================================================================
+% HARMONIC CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    leading_tone_resolution,
+    harmonic,
+    soft,
+    85,
+    [classical_period, baroque, traditional_jazz],
+    "Scale degree 7 resolves up to tonic"
+).
+
+constraint_def(
+    seventh_resolves_down,
+    harmonic,
+    hard,
+    100,
+    [classical_period, baroque],
+    "Chordal 7th resolves down by step"
+).
+
+constraint_def(
+    subdominant_resolution,
+    harmonic,
+    soft,
+    60,
+    [classical_period],
+    "Scale degree 4 tends to resolve to 3"
+).
+
+constraint_def(
+    no_leading_tone_emphasis,
+    harmonic,
+    soft,
+    70,
+    [modal, sacred_chant],
+    "Avoid overusing leading tone"
+).
+
+% ==============================================================================
+% VOICE LEADING CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    no_parallel_fifths,
+    voice_leading,
+    soft,
+    90,
+    [classical_period, baroque, romantic],
+    "Avoid parallel perfect fifths"
+).
+
+constraint_def(
+    no_parallel_octaves,
+    voice_leading,
+    soft,
+    90,
+    [classical_period, baroque, romantic],
+    "Avoid parallel octaves/unisons"
+).
+
+constraint_def(
+    no_parallel_fifths_single,
+    voice_leading,
+    soft,
+    75,
+    [classical_period],
+    "Avoid tritone in single voice (pseudo-parallel 5th)"
+).
+
+constraint_def(
+    prefer_contrary_motion,
+    voice_leading,
+    soft,
+    65,
+    [classical_period, baroque],
+    "Prefer voices moving in opposite directions"
+).
+
+constraint_def(
+    no_voice_crossing,
+    voice_leading,
+    hard,
+    100,
+    [classical_period, baroque, romantic],
+    "Higher voice stays above lower voice"
+).
+
+constraint_def(
+    no_voice_overlap,
+    voice_leading,
+    hard,
+    100,
+    [classical_period, baroque],
+    "Voice doesn't cross previous position of adjacent voice"
+).
+
+constraint_def(
+    maintain_voice_independence,
+    voice_leading,
+    soft,
+    60,
+    [classical_period, baroque],
+    "Limit parallel motion between voices"
+).
+
+constraint_def(
+    min_voice_spacing,
+    voice_leading,
+    hard,
+    100,
+    [classical_period, baroque],
+    "Minimum interval between voices"
+).
+
+constraint_def(
+    max_voice_spacing,
+    voice_leading,
+    hard,
+    100,
+    [classical_period, baroque],
+    "Maximum interval between voices"
+).
+
+% ==============================================================================
+% PHRASE STRUCTURE CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    phrase_ends_stable,
+    phrase_structure,
+    soft,
+    80,
+    [classical_period, baroque, romantic, folk_traditional, traditional_jazz, blues, sacred_chant],
+    "Phrase ends on stable tone (1, 3, or 5)"
+).
+
+constraint_def(
+    ends_on_tonic,
+    phrase_structure,
+    hard,
+    100,
+    [children_songs, sacred_chant, folk_traditional],
+    "Melody ends on tonic"
+).
+
+constraint_def(
+    antecedent_consequent,
+    phrase_structure,
+    soft,
+    55,
+    [classical_period, folk_traditional],
+    "Half cadence then full cadence structure"
+).
+
+constraint_def(
+    strong_beat_stability,
+    phrase_structure,
+    soft,
+    60,
+    [classical_period, baroque],
+    "Stable tones on strong beats"
+).
+
+constraint_def(
+    golden_section_climax,
+    phrase_structure,
+    soft,
+    45,
+    [classical_period, romantic],
+    "Climax at ~62% through piece"
+).
+
+constraint_def(
+    arch_contour,
+    phrase_structure,
+    soft,
+    50,
+    [folk_traditional, children_songs],
+    "Rise then fall melodic shape"
+).
+
+constraint_def(
+    tonic_anchoring,
+    phrase_structure,
+    soft,
+    55,
+    [folk_traditional, children_songs],
+    "Tonic appears regularly"
+).
+
+% ==============================================================================
+% MOTIVIC CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    sequence_encouraged,
+    motivic,
+    soft,
+    65,
+    [baroque],
+    "Encourage at least one melodic sequence"
+).
+
+constraint_def(
+    sequence_pattern,
+    motivic,
+    soft,
+    50,
+    [baroque],
+    "Repeated melodic pattern transposed"
+).
+
+% ==============================================================================
+% IDIOMATIC CONSTRAINTS (Style-specific)
+% ==============================================================================
+
+constraint_def(
+    max_leaps,
+    idiomatic,
+    soft,
+    70,
+    [baroque, minimalist, children_songs, sacred_chant],
+    "Limit total number of leaps"
+).
+
+constraint_def(
+    register_consistency,
+    idiomatic,
+    soft,
+    55,
+    [sacred_chant, minimalist],
+    "Limit large register jumps"
+).
+
+constraint_def(
+    avoid_monotony,
+    idiomatic,
+    soft,
+    50,
+    [sacred_chant],
+    "Avoid long runs in same direction"
+).
+
+constraint_def(
+    stepwise_approach_to_tonic,
+    idiomatic,
+    soft,
+    50,
+    [classical_period],
+    "Approach tonic by step"
+).
+
+% ==============================================================================
+% REGISTRY QUERY FUNCTIONS
+% ==============================================================================
+
+% Get all constraints
+all_constraints() = Ids =>
+    Ids = findall(Id, constraint_def(Id, _, _, _, _, _)).
+
+% Get constraints by category
+constraints_by_category(Category) = Ids =>
+    Ids = findall(Id, constraint_def(Id, Category, _, _, _, _)).
+
+% Get constraints for a genre
+constraints_for_genre(Genre) = Ids =>
+    Ids = findall(Id, (constraint_def(Id, _, _, _, Genres, _), member(Genre, Genres))).
+
+% Get hard constraints for a genre
+hard_constraints_for_genre(Genre) = Ids =>
+    Ids = findall(Id, (constraint_def(Id, _, hard, _, Genres, _), member(Genre, Genres))).
+
+% Get soft constraints for a genre with weights
+soft_constraints_for_genre(Genre) = Pairs =>
+    Pairs = findall((Id, Weight),
+        (constraint_def(Id, _, soft, Weight, Genres, _), member(Genre, Genres))).
+
+% Get constraint metadata
+get_constraint_info(Id) = Info =>
+    if constraint_def(Id, Cat, Type, Weight, Genres, Desc) then
+        Info = $constraint_info(
+            id = Id,
+            category = Cat,
+            type = Type,
+            default_weight = Weight,
+            genres = Genres,
+            description = Desc
+        )
+    else
+        Info = not_found
+    end.
+
+% Check if constraint exists
+constraint_exists(Id) =>
+    constraint_def(Id, _, _, _, _, _).
+
+% Get default weight
+default_weight(Id) = Weight =>
+    constraint_def(Id, _, _, Weight, _, _).
+
+% Is constraint hard?
+is_hard_constraint(Id) =>
+    constraint_def(Id, _, hard, _, _, _).
+
+% Is constraint soft?
+is_soft_constraint(Id) =>
+    constraint_def(Id, _, soft, _, _, _).
+
+% Get all categories
+all_categories() = [melodic, harmonic, voice_leading, phrase_structure, motivic, idiomatic].
+
+% Get all genres
+all_genres() = [
+    classical_period, baroque, romantic, traditional_jazz,
+    folk_traditional, contemporary, sacred_chant, children_songs,
+    minimalist, modal, blues
+].
+
+% Print constraint summary
+print_constraint_summary() =>
+    println("=== Constraint Registry Summary ==="),
+    foreach(Cat in all_categories())
+        Ids = constraints_by_category(Cat),
+        printf("  %w: %d constraints%n", Cat, length(Ids))
+    end,
+    println(""),
+    foreach(Genre in all_genres())
+        Hard = hard_constraints_for_genre(Genre),
+        Soft = soft_constraints_for_genre(Genre),
+        printf("  %w: %d hard, %d soft%n", Genre, length(Hard), length(Soft))
+    end.

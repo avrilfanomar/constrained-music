@@ -1,0 +1,512 @@
+% soft_constraints.pi - Reified constraint wrappers for cost-based optimization
+% Each constraint is converted to a violation count that can be minimized
+%
+% Violation counting approach:
+%   - Each constraint returns a ViolationCount (0 = fully satisfied)
+%   - ViolationCount can be weighted and summed for optimization
+%   - Use: Cost #= Weight * ViolationCount
+
+module soft_constraints.
+
+import cp.
+import music_constraints.
+
+% ==============================================================================
+% MAIN INTERFACE
+% ==============================================================================
+
+% Apply a soft constraint by ID, returning weighted cost
+% apply_soft(ConstraintId, Notes, RootPitch, Weight, Cost)
+apply_soft(leap_recovery, Notes, _Root, Weight, Cost) =>
+    reify_leap_recovery(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(mostly_stepwise, Notes, _Root, Weight, Cost) =>
+    reify_mostly_stepwise(Notes, 60, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(no_consecutive_same_direction_leaps, Notes, _Root, Weight, Cost) =>
+    reify_consecutive_same_direction_leaps(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(approach_climax_by_step, Notes, _Root, Weight, Cost) =>
+    reify_approach_climax_by_step(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(leave_climax_contrary, Notes, _Root, Weight, Cost) =>
+    reify_leave_climax_contrary(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(balanced_motion, Notes, _Root, Weight, Cost) =>
+    reify_balanced_motion(Notes, 30, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(leading_tone_resolution, Notes, Root, Weight, Cost) =>
+    reify_leading_tone_resolution(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(phrase_ends_stable, Notes, Root, Weight, Cost) =>
+    reify_phrase_ends_stable(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(no_parallel_fifths_single, Notes, _Root, Weight, Cost) =>
+    reify_no_parallel_fifths_single(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(max_octave_leaps, Notes, _Root, Weight, Cost) =>
+    reify_max_octave_leaps(Notes, 1, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(single_climax, Notes, _Root, Weight, Cost) =>
+    reify_single_climax(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(no_immediate_repeat, Notes, _Root, Weight, Cost) =>
+    reify_no_immediate_repeat(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(min_unique_pitches, Notes, _Root, Weight, Cost) =>
+    Len = length(Notes),
+    MinRequired = max(3, Len // 4),
+    reify_min_unique_pitches(Notes, MinRequired, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(sequence_encouraged, Notes, _Root, Weight, Cost) =>
+    reify_sequence_encouraged(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(no_leading_tone_emphasis, Notes, Root, Weight, Cost) =>
+    reify_no_leading_tone_emphasis(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(max_consecutive_repeats, Notes, _Root, Weight, Cost) =>
+    reify_max_consecutive_repeats(Notes, 2, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(arch_contour, Notes, _Root, Weight, Cost) =>
+    reify_arch_contour(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(tonic_anchoring, Notes, Root, Weight, Cost) =>
+    reify_tonic_anchoring(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Default: unknown constraint returns 0 cost (no penalty)
+apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
+    Cost #= 0.
+
+% ==============================================================================
+% REIFIED CONSTRAINT IMPLEMENTATIONS
+% ==============================================================================
+
+% Leap recovery: after leap >= 5 semitones, next move should be opposite direction
+% Returns count of violations
+reify_leap_recovery(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 1..Len-2)
+            Interval1 = Notes[I+1] - Notes[I],
+            Interval2 = Notes[I+2] - Notes[I+1],
+            % Violation: leap >= 5 AND next interval is same direction (product >= 0)
+            Violations[I] #<=> (($abs(Interval1) #>= 5) #/\ (Interval1 * Interval2 #>= 0))
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Mostly stepwise: at least MinPercent% stepwise motion
+% Returns inverse: how many "missing" steps from target
+reify_mostly_stepwise(Notes, MinPercent, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        NumIntervals = Len - 1,
+        MinSteps = (NumIntervals * MinPercent) // 100,
+        Steps = new_list(NumIntervals),
+        Steps :: 0..1,
+        foreach(I in 1..NumIntervals)
+            Interval = $abs(Notes[I+1] - Notes[I]),
+            Steps[I] #<=> (Interval #=< 2)
+        end,
+        StepCount #= sum(Steps),
+        % Violation is shortfall from target (0 if we meet/exceed)
+        % Use constraint max: ViolationCount = max(0, MinSteps - StepCount)
+        Shortfall #= MinSteps - StepCount,
+        ViolationCount :: 0..NumIntervals,
+        ViolationCount #>= 0,
+        ViolationCount #>= Shortfall,
+        (Shortfall #=< 0) #=> (ViolationCount #= 0),
+        (Shortfall #> 0) #=> (ViolationCount #= Shortfall)
+    else
+        ViolationCount = 0
+    end.
+
+% No consecutive same-direction leaps
+reify_consecutive_same_direction_leaps(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 1..Len-2)
+            Int1 = Notes[I+1] - Notes[I],
+            Int2 = Notes[I+2] - Notes[I+1],
+            % Violation: both are leaps (>= 3) and same direction
+            Violations[I] #<=> (($abs(Int1) #>= 3) #/\ ($abs(Int2) #>= 3) #/\ (Int1 * Int2 #> 0))
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Approach climax by step: highest note approached by interval <= 2
+reify_approach_climax_by_step(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        MaxPitch = max(Notes),
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 2..Len)
+            Interval = $abs(Notes[I] - Notes[I-1]),
+            % Violation: note is climax AND approach interval > 2
+            Violations[I-1] #<=> ((Notes[I] #= MaxPitch) #/\ (Interval #> 2))
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Leave climax by descending: after highest note, next note is lower
+reify_leave_climax_contrary(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        MaxPitch = max(Notes),
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            % Violation: note is climax AND next note is not lower
+            Violations[I] #<=> ((Notes[I] #= MaxPitch) #/\ (Notes[I+1] #>= Notes[I]))
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Balanced motion: similar count of ascending and descending
+reify_balanced_motion(Notes, TolerancePercent, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        NumIntervals = Len - 1,
+        Tolerance = max(1, (NumIntervals * TolerancePercent) // 100),
+        Ascending = new_list(NumIntervals),
+        Descending = new_list(NumIntervals),
+        Ascending :: 0..1,
+        Descending :: 0..1,
+        foreach(I in 1..NumIntervals)
+            Ascending[I] #<=> (Notes[I+1] #> Notes[I]),
+            Descending[I] #<=> (Notes[I+1] #< Notes[I])
+        end,
+        AscCount #= sum(Ascending),
+        DescCount #= sum(Descending),
+        % Compute absolute difference using constraint
+        AbsDiff :: 0..NumIntervals,
+        (AscCount #>= DescCount) #=> (AbsDiff #= AscCount - DescCount),
+        (AscCount #< DescCount) #=> (AbsDiff #= DescCount - AscCount),
+        % Violation is excess beyond tolerance
+        Excess #= AbsDiff - Tolerance,
+        ViolationCount :: 0..NumIntervals,
+        (Excess #=< 0) #=> (ViolationCount #= 0),
+        (Excess #> 0) #=> (ViolationCount #= Excess)
+    else
+        ViolationCount = 0
+    end.
+
+% Leading tone resolution: scale degree 7 resolves to tonic
+reify_leading_tone_resolution(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        LeadingTone = (RootPitch + 11) mod 12,
+        Tonic = RootPitch mod 12,
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            NotePC :: 0..11,
+            NextPC :: 0..11,
+            Q1 :: 0..10,
+            Q2 :: 0..10,
+            Notes[I] #= 12 * Q1 + NotePC,
+            Notes[I+1] #= 12 * Q2 + NextPC,
+            % Violation: note is leading tone AND next is not tonic or same leading tone
+            Violations[I] #<=> ((NotePC #= LeadingTone) #/\ (NextPC #!= Tonic) #/\ (NextPC #!= LeadingTone))
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Phrase ends stable: last note on 1, 3, or 5 of scale
+reify_phrase_ends_stable(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 1 then
+        Root = RootPitch mod 12,
+        Third = (RootPitch + 4) mod 12,
+        Fifth = (RootPitch + 7) mod 12,
+        EndPC :: 0..11,
+        Q :: 0..10,
+        Notes[Len] #= 12 * Q + EndPC,
+        % B = 1 if stable, 0 if not
+        Stable :: 0..1,
+        Stable #<=> ((EndPC #= Root) #\/ (EndPC #= Third) #\/ (EndPC #= Fifth)),
+        ViolationCount #= 1 - Stable
+    else
+        ViolationCount = 0
+    end.
+
+% No parallel fifths (single voice - avoid tritone interval)
+reify_no_parallel_fifths_single(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            Interval = $abs(Notes[I+1] - Notes[I]),
+            Violations[I] #<=> (Interval #= 6)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Max octave leaps
+reify_max_octave_leaps(Notes, MaxAllowed, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        OctaveLeaps = new_list(Len - 1),
+        OctaveLeaps :: 0..1,
+        foreach(I in 1..Len-1)
+            Interval = $abs(Notes[I+1] - Notes[I]),
+            OctaveLeaps[I] #<=> (Interval #>= 12)
+        end,
+        LeapCount #= sum(OctaveLeaps),
+        % ViolationCount = max(0, LeapCount - MaxAllowed) using constraints
+        Excess #= LeapCount - MaxAllowed,
+        ViolationCount :: 0..Len,
+        (Excess #=< 0) #=> (ViolationCount #= 0),
+        (Excess #> 0) #=> (ViolationCount #= Excess)
+    else
+        ViolationCount = 0
+    end.
+
+% Single climax: highest note appears once, in middle third
+reify_single_climax(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        ThirdStart = Len // 3 + 1,
+        ThirdEnd = 2 * Len // 3,
+        MaxPitch = max(Notes),
+
+        % Count climax in middle third
+        MiddleClimax = new_list(ThirdEnd - ThirdStart + 1),
+        MiddleClimax :: 0..1,
+        foreach(I in ThirdStart..ThirdEnd)
+            MiddleClimax[I - ThirdStart + 1] #<=> (Notes[I] #= MaxPitch)
+        end,
+        MiddleCount #= sum(MiddleClimax),
+
+        % Count total climax occurrences
+        AllClimax = new_list(Len),
+        AllClimax :: 0..1,
+        foreach(I in 1..Len)
+            AllClimax[I] #<=> (Notes[I] #= MaxPitch)
+        end,
+        TotalCount #= sum(AllClimax),
+
+        % Violations: not exactly 1 climax, or not in middle
+        NotInMiddle :: 0..1,
+        NotInMiddle #<=> (MiddleCount #= 0),
+        NotSingle :: 0..1,
+        NotSingle #<=> (TotalCount #!= 1),
+        ViolationCount #= NotInMiddle + NotSingle
+    else
+        ViolationCount = 0
+    end.
+
+% No immediate repetition
+reify_no_immediate_repeat(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Repeats = new_list(Len - 1),
+        Repeats :: 0..1,
+        foreach(I in 1..Len-1)
+            Repeats[I] #<=> (Notes[I] #= Notes[I+1])
+        end,
+        ViolationCount #= sum(Repeats)
+    else
+        ViolationCount = 0
+    end.
+
+% Minimum unique pitches
+reify_min_unique_pitches(Notes, MinRequired, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 1 then
+        nvalue(UniqueCount, Notes),
+        Diff #= MinRequired - UniqueCount,
+        ViolationCount :: 0..Len,
+        (Diff #=< 0) #=> (ViolationCount #= 0),
+        (Diff #> 0) #=> (ViolationCount #= Diff)
+    else
+        ViolationCount = 0
+    end.
+
+% Sequence encouraged: at least one pair of equal intervals
+reify_sequence_encouraged(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        Sequences = new_list(Len - 2),
+        Sequences :: 0..1,
+        foreach(I in 1..Len-2)
+            Int1 = Notes[I+1] - Notes[I],
+            Int2 = Notes[I+2] - Notes[I+1],
+            Sequences[I] #<=> (Int1 #= Int2)
+        end,
+        SeqCount #= sum(Sequences),
+        HasSequence :: 0..1,
+        HasSequence #<=> (SeqCount #>= 1),
+        ViolationCount #= 1 - HasSequence
+    else
+        ViolationCount = 0
+    end.
+
+% No leading tone emphasis: limit occurrences of scale degree 7
+reify_no_leading_tone_emphasis(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 1 then
+        LeadingTone = (RootPitch + 11) mod 12,
+        MaxAllowed = max(1, Len // 4),
+        LTCount = new_list(Len),
+        LTCount :: 0..1,
+        foreach(I in 1..Len)
+            NotePC :: 0..11,
+            Q :: 0..10,
+            Notes[I] #= 12 * Q + NotePC,
+            LTCount[I] #<=> (NotePC #= LeadingTone)
+        end,
+        TotalLT #= sum(LTCount),
+        Excess #= TotalLT - MaxAllowed,
+        ViolationCount :: 0..Len,
+        (Excess #=< 0) #=> (ViolationCount #= 0),
+        (Excess #> 0) #=> (ViolationCount #= Excess)
+    else
+        ViolationCount = 0
+    end.
+
+% Max consecutive repeats
+reify_max_consecutive_repeats(Notes, MaxReps, ViolationCount) =>
+    Len = length(Notes),
+    if Len > MaxReps then
+        RunViolations = new_list(Len - MaxReps),
+        RunViolations :: 0..1,
+        foreach(I in 1..Len-MaxReps)
+            % Check if all MaxReps+1 notes starting at I are the same
+            AllSame = new_list(MaxReps),
+            AllSame :: 0..1,
+            foreach(J in 1..MaxReps)
+                AllSame[J] #<=> (Notes[I] #= Notes[I+J])
+            end,
+            SameCount #= sum(AllSame),
+            RunViolations[I] #<=> (SameCount #= MaxReps)
+        end,
+        ViolationCount #= sum(RunViolations)
+    else
+        ViolationCount = 0
+    end.
+
+% Arch contour: melody should rise in first half, fall in second half
+% Counts violations where direction doesn't match expected arch
+reify_arch_contour(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 4 then
+        MidPoint = Len // 2,
+        NumIntervals = Len - 1,
+        Violations = new_list(NumIntervals),
+        Violations :: 0..1,
+        foreach(I in 1..NumIntervals)
+            if I =< MidPoint then
+                % First half: should be ascending (or level)
+                % Violation if descending more than 2 semitones
+                Violations[I] #<=> (Notes[I+1] - Notes[I] #< -2)
+            else
+                % Second half: should be descending (or level)
+                % Violation if ascending more than 2 semitones
+                Violations[I] #<=> (Notes[I+1] - Notes[I] #> 2)
+            end
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Tonic anchoring: melody should return to tonic (or its octave) regularly
+% Every N notes, at least one should be on tonic pitch class
+reify_tonic_anchoring(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 4 then
+        TonicPC = RootPitch mod 12,
+        % Check windows of 4 notes - at least one should be tonic
+        NumWindows = Len // 4,
+        if NumWindows >= 1 then
+            WindowViolations = new_list(NumWindows),
+            WindowViolations :: 0..1,
+            foreach(W in 1..NumWindows)
+                Start = (W - 1) * 4 + 1,
+                End = min(Start + 3, Len),
+                TonicInWindow = new_list(End - Start + 1),
+                TonicInWindow :: 0..1,
+                foreach(I in Start..End)
+                    NotePC :: 0..11,
+                    Q :: 0..10,
+                    Notes[I] #= 12 * Q + NotePC,
+                    TonicInWindow[I - Start + 1] #<=> (NotePC #= TonicPC)
+                end,
+                TonicCount #= sum(TonicInWindow),
+                % Violation if no tonic in this window
+                WindowViolations[W] #<=> (TonicCount #= 0)
+            end,
+            ViolationCount #= sum(WindowViolations)
+        else
+            ViolationCount = 0
+        end
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
+% UTILITY FUNCTIONS
+% ==============================================================================
+
+% Get list of all supported soft constraint IDs
+supported_soft_constraints() = [
+    leap_recovery,
+    mostly_stepwise,
+    no_consecutive_same_direction_leaps,
+    approach_climax_by_step,
+    leave_climax_contrary,
+    balanced_motion,
+    leading_tone_resolution,
+    phrase_ends_stable,
+    no_parallel_fifths_single,
+    max_octave_leaps,
+    single_climax,
+    no_immediate_repeat,
+    min_unique_pitches,
+    sequence_encouraged,
+    no_leading_tone_emphasis,
+    max_consecutive_repeats,
+    arch_contour,
+    tonic_anchoring
+].
+
+% Check if a constraint ID is supported for soft application
+is_supported_soft(Id) =>
+    member(Id, supported_soft_constraints()).

@@ -1,0 +1,242 @@
+% constraint_selector.pi - Dynamic constraint selection engine
+% Selects and configures constraints based on genre, preferences, and randomness
+
+module constraint_selector.
+
+import genre_profiles.
+import soft_constraints.
+
+% ==============================================================================
+% MAIN SELECTION INTERFACE
+% ==============================================================================
+
+% Select constraints for a genre with optional preferences
+% Returns: constraints(hard=HardList, soft=SoftList, params=ParamMap)
+select_constraints(Genre, Preferences, Randomness) = ConstraintSet =>
+    % Get base genre profile
+    HardBase = genre_profiles.hard_constraints(Genre),
+    SoftBase = genre_profiles.soft_constraints(Genre),
+    Params = genre_profiles.param_overrides(Genre),
+
+    % Apply preferences (disable/enable, weight overrides)
+    (HardFiltered, SoftAdjusted) = apply_preferences(HardBase, SoftBase, Preferences),
+
+    % Apply intensity if specified in preferences
+    Intensity = get_intensity(Preferences),
+    SoftWithIntensity = genre_profiles.apply_intensity(SoftAdjusted, Intensity),
+
+    % Randomize weights based on randomness level
+    SoftFinal = randomize_weights(SoftWithIntensity, Randomness),
+
+    ConstraintSet = $constraints(
+        hard = HardFiltered,
+        soft = SoftFinal,
+        params = Params
+    ).
+
+% Simplified version without preferences
+select_constraints(Genre, Randomness) = ConstraintSet =>
+    ConstraintSet = select_constraints(Genre, [], Randomness).
+
+% ==============================================================================
+% PREFERENCE APPLICATION
+% ==============================================================================
+
+% Preference format:
+%   disable=constraint_id   - Remove constraint entirely
+%   enable=constraint_id    - Add constraint (for hard constraints)
+%   weight(constraint_id)=N - Override weight to N
+%   intensity=light|standard|strict
+
+apply_preferences(HardBase, SoftBase, Preferences) = (HardResult, SoftResult) =>
+    % Get disabled constraints
+    DisabledSet = get_disabled(Preferences),
+
+    % Filter hard constraints (remove disabled)
+    HardFiltered = [C : C in HardBase, not member(C, DisabledSet)],
+
+    % Add enabled hard constraints
+    EnabledHard = get_enabled_hard(Preferences),
+    HardResult = HardFiltered ++ EnabledHard,
+
+    % Filter soft constraints (remove disabled)
+    SoftFiltered = [(Id, W) : (Id, W) in SoftBase, not member(Id, DisabledSet)],
+
+    % Apply weight overrides
+    WeightOverrides = get_weight_overrides(Preferences),
+    SoftResult = apply_weight_overrides(SoftFiltered, WeightOverrides).
+
+% Get list of disabled constraint IDs from preferences
+get_disabled(Preferences) = Disabled =>
+    Disabled = [Id : disable=Id in Preferences].
+
+% Get list of enabled hard constraint IDs
+get_enabled_hard(Preferences) = Enabled =>
+    Enabled = [Id : enable=Id in Preferences].
+
+% Get weight overrides as (Id, Weight) pairs
+get_weight_overrides(Preferences) = Overrides =>
+    Overrides = [(Id, W) : P in Preferences, P = $weight_override(Id, W)].
+
+% Get intensity from preferences (default: standard)
+get_intensity(Preferences) = Intensity =>
+    if member(intensity=I, Preferences) then
+        Intensity = I
+    else
+        Intensity = standard
+    end.
+
+% Apply weight overrides to soft constraint list
+apply_weight_overrides(SoftList, Overrides) = Result =>
+    Result = [apply_single_override(Id, W, Overrides) : (Id, W) in SoftList].
+
+apply_single_override(Id, DefaultWeight, Overrides) = (Id, FinalWeight) =>
+    if member((Id, NewWeight), Overrides) then
+        FinalWeight = NewWeight
+    else
+        FinalWeight = DefaultWeight
+    end.
+
+% ==============================================================================
+% RANDOMIZATION
+% ==============================================================================
+
+% Randomize weights based on randomness level
+% Randomness 0.0 = no change
+% Randomness 0.5 = ±20% perturbation
+% Randomness 1.0 = ±40% perturbation
+randomize_weights(SoftList, Randomness) = Result =>
+    if Randomness < 0.05 then
+        Result = SoftList  % No randomization for very low randomness
+    else
+        Result = [(Id, perturb_weight(W, Randomness)) : (Id, W) in SoftList]
+    end.
+
+% Perturb a single weight based on randomness
+perturb_weight(Weight, Randomness) = NewWeight =>
+    % Scale: randomness 0->0%, 0.5->20%, 1.0->40% variation
+    MaxPerturbPercent = 40 * Randomness,
+    % Random value between -1 and 1
+    RandFactor = (random() mod 2001 - 1000) / 1000.0,
+    % Calculate perturbation
+    Perturbation = Weight * MaxPerturbPercent * RandFactor / 100,
+    % Apply and clamp
+    NewWeight = max(1, min(100, round(Weight + Perturbation))).
+
+% ==============================================================================
+% CONSTRAINT SET OPERATIONS
+% ==============================================================================
+
+% Merge two constraint sets (for blending genres)
+merge_constraints(Set1, Set2) = Merged =>
+    Set1 = $constraints(hard=Hard1, soft=Soft1, params=_),
+    Set2 = $constraints(hard=Hard2, soft=Soft2, params=Params2),
+    % Union of hard constraints
+    MergedHard = remove_dups(Hard1 ++ Hard2),
+    % Average weights for overlapping soft constraints
+    MergedSoft = merge_soft(Soft1, Soft2),
+    Merged = $constraints(hard=MergedHard, soft=MergedSoft, params=Params2).
+
+% Merge soft constraint lists, averaging overlapping weights
+merge_soft(Soft1, Soft2) = Result =>
+    % Collect all IDs
+    Ids1 = [Id : (Id, _) in Soft1],
+    Ids2 = [Id : (Id, _) in Soft2],
+    AllIds = remove_dups(Ids1 ++ Ids2),
+    % For each ID, compute merged weight
+    Result = [merge_soft_pair(Id, Soft1, Soft2) : Id in AllIds].
+
+merge_soft_pair(Id, Soft1, Soft2) = (Id, AvgWeight) =>
+    W1 = find_weight(Id, Soft1),
+    W2 = find_weight(Id, Soft2),
+    if W1 > 0, W2 > 0 then
+        AvgWeight = (W1 + W2) // 2
+    elseif W1 > 0 then
+        AvgWeight = W1
+    else
+        AvgWeight = W2
+    end.
+
+find_weight(Id, SoftList) = Weight =>
+    if member((Id, W), SoftList) then
+        Weight = W
+    else
+        Weight = 0
+    end.
+
+% Remove duplicates from a list
+remove_dups([]) = [].
+remove_dups([H|T]) = Result =>
+    T2 = remove_dups(T),
+    if member(H, T2) then
+        Result = T2
+    else
+        Result = [H|T2]
+    end.
+
+% ==============================================================================
+% HELPER FUNCTIONS
+% ==============================================================================
+
+% Check if a constraint is in the hard list
+is_hard(ConstraintSet, Id) =>
+    ConstraintSet = $constraints(hard=HardList, soft=_, params=_),
+    member(Id, HardList).
+
+% Get weight for a soft constraint
+get_soft_weight(ConstraintSet, Id) = Weight =>
+    ConstraintSet = $constraints(hard=_, soft=SoftList, params=_),
+    Weight = find_weight(Id, SoftList).
+
+% Get parameter value
+get_param(ConstraintSet, ParamName, Default) = Value =>
+    ConstraintSet = $constraints(hard=_, soft=_, params=Params),
+    if member(ParamName=V, Params) then
+        Value = V
+    else
+        Value = Default
+    end.
+
+% Print constraint set summary
+print_constraint_set(ConstraintSet) =>
+    ConstraintSet = $constraints(hard=Hard, soft=Soft, params=Params),
+    println("=== Constraint Set ==="),
+    printf("Hard constraints (%d):%n", length(Hard)),
+    foreach(C in Hard)
+        printf("  - %w%n", C)
+    end,
+    printf("Soft constraints (%d):%n", length(Soft)),
+    foreach((Id, W) in Soft)
+        printf("  - %w (weight: %d)%n", Id, W)
+    end,
+    printf("Parameters:%n"),
+    foreach(P=V in Params)
+        printf("  - %w = %w%n", P, V)
+    end.
+
+% ==============================================================================
+% RANDOMNESS AFFECTS ON SOLVING STRATEGY
+% ==============================================================================
+
+% Get solve options based on randomness
+% Used by melody generation to decide optimization approach
+solve_strategy(Randomness) = Strategy =>
+    if Randomness < 0.3 then
+        Strategy = optimize     % Minimize cost strictly
+    elseif Randomness < 0.7 then
+        Strategy = optimize_random  % Optimize with random value selection
+    else
+        Strategy = satisfice    % Accept any valid solution
+    end.
+
+% Should we skip soft constraint optimization?
+skip_soft_optimization(Randomness) =>
+    Randomness >= 0.8.
+
+% Get solve options for Picat CP solver
+picat_solve_options(Randomness) = Opts =>
+    if Randomness < 0.3 then
+        Opts = [ff]  % First-fail, deterministic
+    else
+        Opts = [ff, rand_val]  % First-fail with random value selection
+    end.

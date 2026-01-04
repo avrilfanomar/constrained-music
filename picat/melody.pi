@@ -14,6 +14,9 @@ import rhythmic.
 import cp.
 import mood.
 import mood_mapping.
+import constraint_selector.
+import soft_constraints.
+import genre_profiles.
 
 % ==============================================================================
 % MAIN MELODY GENERATION
@@ -798,4 +801,260 @@ print_available_styles() =>
     println("Available musical styles:"),
     foreach(Style in available_styles())
         printf("  %w: %s%n", Style, style_description(Style))
+    end.
+
+% ==============================================================================
+% GENRE-BASED MELODY GENERATION WITH SOFT CONSTRAINTS
+% ==============================================================================
+% Uses constraint_selector and soft_constraints for weighted optimization
+
+% Generate melody with genre, applying soft constraint optimization
+% Genre: classical_period, baroque, romantic, traditional_jazz, folk_traditional,
+%        contemporary, sacred_chant, children_songs, minimalist, modal, blues
+generate_melody_with_genre(Config, Genre, Preferences, Randomness, Melody) =>
+    Config = $config(
+        meter = Meter,
+        key_root = Root,
+        mode = Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = _Tempo,
+        voice = Voice
+    ),
+    TotalNotes = NumBars * NotesPerBar,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(Root, Mode, LowMidi, HighMidi),
+
+    % Create pitch variables
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Get constraints for genre
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+
+    % Get max_interval from genre params
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    % Apply base melodic constraints
+    apply_base_melodic_constraints(Pitches, Root, MaxInterval, ScaleNotes),
+
+    % Apply hard constraints
+    apply_genre_hard_constraints(Pitches, Root, ConstraintSet),
+
+    % Apply soft constraints and build cost
+    TotalCost = apply_genre_soft_constraints(Pitches, Root, ConstraintSet, Randomness),
+
+    % Solve with appropriate strategy
+    solve_genre_melody(Pitches, TotalCost, Randomness),
+
+    % Build melody
+    BeatsPerBar = beats_per_bar(Meter),
+    Melody = build_melody(Pitches, NumBars, NotesPerBar, BeatsPerBar, VoiceId).
+
+% Simplified version without preferences
+generate_melody_with_genre(Config, Genre, Randomness, Melody) =>
+    generate_melody_with_genre(Config, Genre, [], Randomness, Melody).
+
+% Apply base melodic constraints (always applied)
+apply_base_melodic_constraints(Pitches, Root, MaxInterval, ScaleNotes) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Maximum interval constraint
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
+    end,
+
+    % Start on stable tones
+    StablePitchClasses = [RootClass, (RootClass + 4) mod 12, (RootClass + 7) mod 12],
+    ValidStartNotes = [N : N in ScaleNotes, member(N mod 12, StablePitchClasses)],
+    Pitches[1] :: ValidStartNotes,
+
+    % End on tonic
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes,
+
+    % Minimum variety
+    nvalue(N, Pitches),
+    N #>= min(3, Len // 2).
+
+% Apply hard constraints from genre profile
+apply_genre_hard_constraints(Pitches, Root, ConstraintSet) =>
+    ConstraintSet = $constraints(hard=HardList, soft=_, params=Params),
+    Len = length(Pitches),
+
+    foreach(CId in HardList)
+        apply_hard_constraint_by_id(CId, Pitches, Root, Params, Len)
+    end.
+
+% Dispatch hard constraints by ID
+apply_hard_constraint_by_id(no_augmented_seconds, Notes, _Root, _Params, _Len) =>
+    advanced.no_augmented_seconds(Notes).
+apply_hard_constraint_by_id(no_tritone_outline, Notes, _Root, _Params, _Len) =>
+    advanced.no_tritone_outline(Notes).
+apply_hard_constraint_by_id(seventh_resolves_down, Notes, Root, _Params, _Len) =>
+    advanced.seventh_resolves_down(Notes, Root).
+apply_hard_constraint_by_id(ends_on_tonic, Notes, Root, _Params, Len) =>
+    RootClass = Root mod 12,
+    music_constraints.pitch_class_var(Notes[Len], EndPC),
+    EndPC #= RootClass.
+apply_hard_constraint_by_id(max_range, Notes, _Root, Params, _Len) =>
+    MaxRangeVal = cond(member(max_range=V, Params), V, 12),
+    music_constraints.max_range(Notes, MaxRangeVal).
+apply_hard_constraint_by_id(min_range, Notes, _Root, Params, _Len) =>
+    MinRangeVal = cond(member(min_range=V, Params), V, 5),
+    music_constraints.min_range(Notes, MinRangeVal).
+apply_hard_constraint_by_id(_UnknownId, _Notes, _Root, _Params, _Len) =>
+    true.  % Unknown constraint - skip
+
+% Apply soft constraints and return total cost variable
+apply_genre_soft_constraints(Pitches, Root, ConstraintSet, Randomness) = TotalCost =>
+    ConstraintSet = $constraints(hard=_, soft=SoftList, params=_),
+
+    if constraint_selector.skip_soft_optimization(Randomness) then
+        % High randomness: skip soft constraint optimization
+        TotalCost = 0
+    elseif SoftList == [] then
+        TotalCost = 0
+    else
+        % Build cost variables for each soft constraint
+        NumSoft = length(SoftList),
+        Costs = new_list(NumSoft),
+        Costs :: 0..10000,
+
+        foreach(I in 1..NumSoft)
+            (CId, Weight) = SoftList[I],
+            soft_constraints.apply_soft(CId, Pitches, Root, Weight, Costs[I])
+        end,
+
+        TotalCost #= sum(Costs)
+    end.
+
+% Solve with appropriate strategy based on randomness
+% TotalCost is either 0 (integer) or a constraint variable
+solve_genre_melody(Pitches, TotalCost, Randomness) =>
+    Strategy = constraint_selector.solve_strategy(Randomness),
+    SolveOpts = constraint_selector.picat_solve_options(Randomness),
+
+    % Check if we have soft constraints to optimize
+    % TotalCost == 0 (integer) means no soft constraints were applied
+    if (integer(TotalCost), TotalCost == 0) then
+        % No soft constraints, just solve
+        solve(SolveOpts, Pitches)
+    elseif Strategy == optimize then
+        % Optimize with timeout, fallback to satisficing
+        if time_out(solve($[min(TotalCost)|SolveOpts], Pitches ++ [TotalCost]), 3000, Status), Status == success then
+            true
+        else
+            solve(SolveOpts, Pitches)
+        end
+    elseif Strategy == optimize_random then
+        % Optimize with random value selection
+        if time_out(solve($[min(TotalCost)|SolveOpts], Pitches ++ [TotalCost]), 3000, Status), Status == success then
+            true
+        else
+            solve(SolveOpts, Pitches)
+        end
+    else
+        % Satisficing: any valid solution
+        solve(SolveOpts, Pitches)
+    end.
+
+% ==============================================================================
+% GENRE-BASED SEGMENT GENERATION
+% ==============================================================================
+
+% Generate segment melody with genre (for mood transitions)
+generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Preferences, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Get constraints for genre
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    % Apply constraints
+    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
+    TotalCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+
+    % Solve
+    solve_genre_melody(Pitches, TotalCost, Randomness),
+
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% Generate connected segment with genre
+generate_connected_segment_with_genre(MusicParams, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Get constraints for genre
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    % Apply constraints
+    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
+    TotalCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+
+    % Connection constraint
+    ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
+    if ValidConnectionNotes != [] then
+        Pitches[1] :: ValidConnectionNotes
+    end,
+
+    % Solve
+    solve_genre_melody(Pitches, TotalCost, Randomness),
+
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% ==============================================================================
+% GENRE UTILITIES
+% ==============================================================================
+
+% Get recommended genre based on mood
+recommended_genre_for_mood(Mood) = Genre =>
+    Mood = $mood(Valence, Arousal),
+    if Valence >= 0.5, Arousal >= 0.5 then
+        Genre = traditional_jazz
+    elseif Valence >= 0.5, Arousal < 0 then
+        Genre = folk_traditional
+    elseif Valence < -0.3, Arousal >= 0.5 then
+        Genre = romantic
+    elseif Valence < -0.3, Arousal < -0.3 then
+        Genre = sacred_chant
+    elseif Valence >= 0, Arousal >= 0 then
+        Genre = classical_period
+    else
+        Genre = modal
+    end.
+
+% Print available genres
+print_available_genres() =>
+    println("Available genres:"),
+    foreach(Genre in genre_profiles.all_genres())
+        Desc = genre_profiles.genre_description(Genre),
+        printf("  %w: %s%n", Genre, Desc)
     end.

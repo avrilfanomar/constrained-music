@@ -1,0 +1,314 @@
+% genre_profiles.pi - Genre definitions wrapping styles with constraint sets
+% Each genre has a base style, hard constraints, soft constraints with weights,
+% and parameter overrides.
+%
+% genre_profile(GenreId, BaseStyle, HardConstraints, SoftConstraints, ParamOverrides)
+%   GenreId: Unique atom identifier
+%   BaseStyle: Existing style from advanced.pi (classical, baroque, etc.)
+%   HardConstraints: List of constraint IDs that MUST be satisfied
+%   SoftConstraints: List of (constraint_id, weight) pairs
+%   ParamOverrides: List of param=value pairs
+
+module genre_profiles.
+
+% ==============================================================================
+% GENRE PROFILE DEFINITIONS
+% ==============================================================================
+
+% CLASSICAL PERIOD (Mozart, Haydn)
+% Balanced phrases, clear cadences, strict voice leading
+genre_profile(
+    classical_period,
+    classical,
+    [no_augmented_seconds, no_tritone_outline],
+    [
+        (no_parallel_fifths_single, 90),
+        (leading_tone_resolution, 85),
+        (leap_recovery, 80),
+        (phrase_ends_stable, 80),
+        (mostly_stepwise, 70),
+        (balanced_motion, 65),
+        (approach_climax_by_step, 60),
+        (leave_climax_contrary, 55),
+        (single_climax, 50),
+        (max_octave_leaps, 70)
+    ],
+    [max_interval=5, tempo_range=(80,140)]
+).
+
+% BAROQUE (Bach, Handel)
+% Continuous motion, sequences, ornamental figures
+genre_profile(
+    baroque,
+    baroque,
+    [no_augmented_seconds],
+    [
+        (leading_tone_resolution, 85),
+        (sequence_encouraged, 75),
+        (leap_recovery, 70),
+        (phrase_ends_stable, 75),
+        (no_consecutive_same_direction_leaps, 65)
+    ],
+    [max_interval=6, tempo_range=(60,120)]
+).
+
+% ROMANTIC (Chopin, Brahms)
+% Wide range, expressive leaps, emotional intensity
+genre_profile(
+    romantic,
+    romantic,
+    [min_range],
+    [
+        (phrase_ends_stable, 75),
+        (min_unique_pitches, 70),
+        (single_climax, 55),
+        (leading_tone_resolution, 60)
+    ],
+    [max_interval=7, tempo_range=(50,160), min_range=7]
+).
+
+% TRADITIONAL JAZZ (Bebop, Standards)
+% Extended intervals, chromatic approaches, bebop idioms
+genre_profile(
+    traditional_jazz,
+    jazz,
+    [min_range],
+    [
+        (phrase_ends_stable, 70),
+        (leading_tone_resolution, 75),
+        (min_unique_pitches, 80),
+        (no_immediate_repeat, 60)
+    ],
+    [max_interval=8, tempo_range=(100,240), min_range=10]
+).
+
+% FOLK/TRADITIONAL
+% Stepwise motion, simple ranges, repetitive patterns
+genre_profile(
+    folk_traditional,
+    folk,
+    [no_augmented_seconds, no_tritone_outline, max_range],
+    [
+        (mostly_stepwise, 80),
+        (phrase_ends_stable, 75),
+        (leap_recovery, 70),
+        (max_consecutive_repeats, 65),
+        (arch_contour, 55),
+        (tonic_anchoring, 50)
+    ],
+    [max_interval=4, tempo_range=(70,130), max_range=12]
+).
+
+% CONTEMPORARY/ATONAL
+% Few restrictions, wide intervals, atonal tendencies
+genre_profile(
+    contemporary,
+    contemporary,
+    [],
+    [
+        (min_unique_pitches, 75),
+        (no_immediate_repeat, 40)
+    ],
+    [max_interval=10, tempo_range=(40,200)]
+).
+
+% SACRED CHANT (Gregorian)
+% Stepwise, narrow range, modal
+genre_profile(
+    sacred_chant,
+    chant,
+    [ends_on_tonic, max_range],
+    [
+        (mostly_stepwise, 90),
+        (leap_recovery, 85),
+        (no_leading_tone_emphasis, 80),
+        (no_consecutive_same_direction_leaps, 75),
+        (phrase_ends_stable, 70)
+    ],
+    [max_interval=3, tempo_range=(50,80), max_range=10]
+).
+
+% CHILDREN'S SONGS
+% Simple, stepwise, limited range
+genre_profile(
+    children_songs,
+    children,
+    [ends_on_tonic, no_tritone_outline, max_range],
+    [
+        (mostly_stepwise, 85),
+        (phrase_ends_stable, 80),
+        (leap_recovery, 75),
+        (arch_contour, 60),
+        (tonic_anchoring, 55)
+    ],
+    [max_interval=4, tempo_range=(80,120), max_range=8]
+).
+
+% MINIMALIST (Reich, Glass)
+% Pattern repetition, gradual change, limited material
+genre_profile(
+    minimalist,
+    minimalist,
+    [max_range],
+    [
+        (mostly_stepwise, 85),
+        (max_consecutive_repeats, 50),  % low weight - repeats OK
+        (no_immediate_repeat, 30)
+    ],
+    [max_interval=3, tempo_range=(90,140), max_range=7]
+).
+
+% MODAL/IMPRESSIONIST (Debussy, Ravel)
+% Parallel motion, color over function
+genre_profile(
+    modal,
+    modal,
+    [],
+    [
+        (phrase_ends_stable, 70),
+        (no_leading_tone_emphasis, 85),
+        (min_unique_pitches, 65),
+        (single_climax, 45)
+    ],
+    [max_interval=6, tempo_range=(50,100)]
+).
+
+% BLUES
+% Blue notes, call-response, expressive bends
+genre_profile(
+    blues,
+    blues,
+    [min_range],
+    [
+        (phrase_ends_stable, 75),
+        (max_consecutive_repeats, 60),
+        (leap_recovery, 55)
+    ],
+    [max_interval=7, tempo_range=(60,120), min_range=5]
+).
+
+% ==============================================================================
+% GENRE QUERY FUNCTIONS
+% ==============================================================================
+
+% Get all available genres
+all_genres() = [
+    classical_period, baroque, romantic, traditional_jazz,
+    folk_traditional, contemporary, sacred_chant, children_songs,
+    minimalist, modal, blues
+].
+
+% Get genre profile by ID
+get_profile(GenreId) = Profile =>
+    if genre_profile(GenreId, Style, Hard, Soft, Params) then
+        Profile = $genre_profile(
+            id = GenreId,
+            base_style = Style,
+            hard_constraints = Hard,
+            soft_constraints = Soft,
+            param_overrides = Params
+        )
+    else
+        Profile = not_found
+    end.
+
+% Get base style for genre
+base_style(GenreId) = Style =>
+    genre_profile(GenreId, Style, _, _, _).
+
+% Get hard constraints for genre
+hard_constraints(GenreId) = HardList =>
+    genre_profile(GenreId, _, HardList, _, _).
+
+% Get soft constraints with weights for genre
+soft_constraints(GenreId) = SoftList =>
+    genre_profile(GenreId, _, _, SoftList, _).
+
+% Get parameter overrides for genre
+param_overrides(GenreId) = Params =>
+    genre_profile(GenreId, _, _, _, Params).
+
+% Check if genre exists
+genre_exists(GenreId) =>
+    genre_profile(GenreId, _, _, _, _).
+
+% Get parameter value with default
+get_param(GenreId, ParamName, Default) = Value =>
+    genre_profile(GenreId, _, _, _, Params),
+    if member(ParamName=V, Params) then
+        Value = V
+    else
+        Value = Default
+    end.
+
+% Get max_interval for genre
+max_interval(GenreId) = Value =>
+    Value = get_param(GenreId, max_interval, 5).
+
+% Get tempo range for genre
+tempo_range(GenreId) = Range =>
+    Range = get_param(GenreId, tempo_range, (60, 140)).
+
+% ==============================================================================
+% GENRE DESCRIPTIONS
+% ==============================================================================
+
+genre_description(classical_period) =
+    "Classical Period (Mozart, Haydn): Balanced phrases, clear cadences, strict voice leading".
+genre_description(baroque) =
+    "Baroque (Bach, Handel): Continuous motion, sequences, ornamental figures".
+genre_description(romantic) =
+    "Romantic (Chopin, Brahms): Wide range, expressive leaps, emotional intensity".
+genre_description(traditional_jazz) =
+    "Traditional Jazz (Bebop): Extended intervals, chromatic approaches".
+genre_description(folk_traditional) =
+    "Folk/Traditional: Stepwise motion, simple ranges, repetitive patterns".
+genre_description(contemporary) =
+    "Contemporary/Atonal: Few restrictions, wide intervals".
+genre_description(sacred_chant) =
+    "Sacred Chant (Gregorian): Stepwise, narrow range, modal".
+genre_description(children_songs) =
+    "Children's Songs: Simple, stepwise, limited range".
+genre_description(minimalist) =
+    "Minimalist (Reich, Glass): Pattern repetition, gradual change".
+genre_description(modal) =
+    "Modal/Impressionist (Debussy): Parallel motion, color over function".
+genre_description(blues) =
+    "Blues: Blue notes, call-response, expressive bends".
+genre_description(_) = "Unknown genre".
+
+% Print all genre summaries
+print_genre_summary() =>
+    println("=== Available Genres ==="),
+    foreach(GenreId in all_genres())
+        Desc = genre_description(GenreId),
+        printf("  %w%n    %s%n", GenreId, Desc),
+        Hard = hard_constraints(GenreId),
+        Soft = soft_constraints(GenreId),
+        printf("    Hard: %d, Soft: %d%n", length(Hard), length(Soft))
+    end.
+
+% ==============================================================================
+% GENRE INTENSITY MODIFIERS
+% ==============================================================================
+
+% Light intensity: reduce soft constraint weights by 30%
+light_intensity_modifier() = 0.7.
+
+% Standard intensity: no modification
+standard_intensity_modifier() = 1.0.
+
+% Strict intensity: increase soft constraint weights by 20%
+strict_intensity_modifier() = 1.2.
+
+% Apply intensity modifier to soft constraints
+apply_intensity(SoftList, Intensity) = Modified =>
+    Modifier = cond(Intensity == light, light_intensity_modifier(),
+               cond(Intensity == strict, strict_intensity_modifier(),
+                    standard_intensity_modifier())),
+    Modified = [(Id, round(W * Modifier)) : (Id, W) in SoftList].
+
+% Get soft constraints for genre with intensity applied
+soft_constraints_with_intensity(GenreId, Intensity) = SoftList =>
+    BaseSoft = soft_constraints(GenreId),
+    SoftList = apply_intensity(BaseSoft, Intensity).
