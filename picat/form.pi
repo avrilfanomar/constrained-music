@@ -1,0 +1,274 @@
+% =============================================================================
+% form.pi - Musical Form Structure Constraints
+% =============================================================================
+% Implements large-scale form structures: binary (AB), ternary (ABA), rondo (ABACA)
+% Forms are optional and parallel to the mood-based segment system.
+% =============================================================================
+
+module form.
+
+import scale_utils.
+
+% -----------------------------------------------------------------------------
+% Form Types
+% -----------------------------------------------------------------------------
+
+form_type(binary).       % AB - two contrasting sections
+form_type(ternary).      % ABA - statement, contrast, return
+form_type(rondo).        % ABACA... - recurring refrain with episodes
+form_type(through).      % No repetition (free form / through-composed)
+
+% -----------------------------------------------------------------------------
+% Section Structure
+% -----------------------------------------------------------------------------
+% section(Label, StartBar, NumBars, KeyRoot, Mode)
+%   Label: a, b, c, etc. (section identifier)
+%   StartBar: 1-indexed bar number where section begins
+%   NumBars: duration of section in bars
+%   KeyRoot: MIDI pitch class 0-11 (0=C, 2=D, etc.)
+%   Mode: major, minor, dorian, phrygian, lydian, mixolydian, aeolian, locrian
+
+% Accessor functions
+section_label($section(Label, _, _, _, _)) = Label.
+section_start($section(_, Start, _, _, _)) = Start.
+section_bars($section(_, _, Bars, _, _)) = Bars.
+section_key($section(_, _, _, Key, _)) = Key.
+section_mode($section(_, _, _, _, Mode)) = Mode.
+
+% -----------------------------------------------------------------------------
+% Binary Form (AB)
+% -----------------------------------------------------------------------------
+% Two sections of roughly equal length.
+% Section B provides contrast (different key or mode).
+
+binary_form(TotalBars, KeyRoot, Mode) = Sections =>
+    HalfPoint = TotalBars // 2,
+    RemainderBars = TotalBars - HalfPoint,
+
+    % Section A: tonic key
+    SectionA = $section(a, 1, HalfPoint, KeyRoot, Mode),
+
+    % Section B: contrasting key
+    ContrastKey = contrast_key(KeyRoot, Mode),
+    ContrastMode = contrast_mode(Mode),
+    SectionB = $section(b, HalfPoint + 1, RemainderBars, ContrastKey, ContrastMode),
+
+    Sections = [SectionA, SectionB].
+
+% -----------------------------------------------------------------------------
+% Ternary Form (ABA)
+% -----------------------------------------------------------------------------
+% Three sections: statement, contrast, return.
+% A sections share the same key; B section contrasts.
+
+ternary_form(TotalBars, KeyRoot, Mode) = Sections =>
+    ThirdLen = TotalBars // 3,
+    Remainder = TotalBars - 2 * ThirdLen,
+
+    % Section A1: tonic key
+    SectionA1 = section(a, 1, ThirdLen, KeyRoot, Mode),
+
+    % Section B: contrasting key
+    ContrastKey = contrast_key(KeyRoot, Mode),
+    ContrastMode = contrast_mode(Mode),
+    SectionB = section(b, ThirdLen + 1, ThirdLen, ContrastKey, ContrastMode),
+
+    % Section A2: return to tonic (may be varied)
+    SectionA2 = section(a, 2 * ThirdLen + 1, Remainder, KeyRoot, Mode),
+
+    Sections = [SectionA1, SectionB, SectionA2].
+
+% -----------------------------------------------------------------------------
+% Rondo Form (ABACA...)
+% -----------------------------------------------------------------------------
+% Recurring refrain (A) alternates with contrasting episodes (B, C, etc.)
+% Default: ABACA (2 episodes)
+
+rondo_form(TotalBars, KeyRoot, Mode) = rondo_form(TotalBars, KeyRoot, Mode, 2).
+
+rondo_form(TotalBars, KeyRoot, Mode, NumEpisodes) = Sections =>
+    % Total sections: A + (B+A) * NumEpisodes = 2*NumEpisodes + 1
+    NumSections = 2 * NumEpisodes + 1,
+    BaseSectionLen = TotalBars // NumSections,
+    ExtraBars = TotalBars mod NumSections,
+
+    Sections = build_rondo_sections(KeyRoot, Mode, NumEpisodes, BaseSectionLen, ExtraBars).
+
+% Build rondo section list
+build_rondo_sections(KeyRoot, Mode, NumEpisodes, SectionLen, ExtraBars) = Sections =>
+    EpisodeLabels = [b, c, d, e, f],  % Labels for episodes
+    TotalSections = 2 * NumEpisodes + 1,
+    Sections = build_rondo_list(1, TotalSections, KeyRoot, Mode, 0, SectionLen, ExtraBars, EpisodeLabels).
+
+% Build rondo list recursively
+build_rondo_list(SectionNum, TotalSections, _KeyRoot, _Mode, _CurrentBar, _SectionLen, _ExtraBars, _EpisodeLabels) = [] ,
+    SectionNum > TotalSections => true.
+
+build_rondo_list(SectionNum, TotalSections, KeyRoot, Mode, CurrentBar, SectionLen, ExtraBars, EpisodeLabels) = Result =>
+    StartBar = CurrentBar + 1,
+    % Give extra bars to last section
+    Bars = cond(SectionNum == TotalSections, SectionLen + ExtraBars, SectionLen),
+
+    % Odd sections are A (refrain), even sections are episodes
+    (SectionNum mod 2 == 1 ->
+        % A section (refrain) - tonic key
+        Section = section(a, StartBar, Bars, KeyRoot, Mode)
+    ;
+        % Episode - contrasting key
+        EpisodeIdx = SectionNum // 2,
+        EpisodeLabel = EpisodeLabels[EpisodeIdx],
+        ContrastKey = episode_key(KeyRoot, Mode, EpisodeIdx),
+        ContrastMode = contrast_mode(Mode),
+        Section = section(EpisodeLabel, StartBar, Bars, ContrastKey, ContrastMode)
+    ),
+    Rest = build_rondo_list(SectionNum + 1, TotalSections, KeyRoot, Mode, CurrentBar + Bars, SectionLen, ExtraBars, EpisodeLabels),
+    Result = [Section | Rest].
+
+% -----------------------------------------------------------------------------
+% Through-composed (no form)
+% -----------------------------------------------------------------------------
+% Single section spanning entire piece - no structural repetition
+
+through_form(TotalBars, KeyRoot, Mode) = Sections =>
+    Sections = [section(a, 1, TotalBars, KeyRoot, Mode)].
+
+% -----------------------------------------------------------------------------
+% Key Contrast Functions
+% -----------------------------------------------------------------------------
+
+% Get contrasting key for B sections
+% Major -> Dominant (up P5)
+% Minor -> Relative major (up m3)
+contrast_key(KeyRoot, major) = (KeyRoot + 7) mod 12.  % Dominant
+contrast_key(KeyRoot, minor) = (KeyRoot + 3) mod 12.  % Relative major
+contrast_key(KeyRoot, aeolian) = (KeyRoot + 3) mod 12.  % Relative major
+contrast_key(KeyRoot, dorian) = (KeyRoot + 5) mod 12.  % Up P4
+contrast_key(KeyRoot, _) = (KeyRoot + 7) mod 12.  % Default: dominant
+
+% Get contrasting mode
+contrast_mode(major) = major.        % Stay major, different key
+contrast_mode(minor) = major.        % Go to relative major
+contrast_mode(aeolian) = major.      % Go to relative major
+contrast_mode(Mode) = Mode.          % Keep same mode for modal music
+
+% Get key for rondo episodes (vary by episode number)
+episode_key(KeyRoot, Mode, 1) = contrast_key(KeyRoot, Mode).  % First: dominant/relative
+episode_key(KeyRoot, major, 2) = (KeyRoot + 5) mod 12.  % Second: subdominant
+episode_key(KeyRoot, _, 2) = (KeyRoot + 8) mod 12.  % Second: minor 6th up
+episode_key(KeyRoot, _, EpisodeNum) = (KeyRoot + 2 * EpisodeNum) mod 12.  % Further episodes
+
+% -----------------------------------------------------------------------------
+% Form Selection
+% -----------------------------------------------------------------------------
+
+% Get sections for a given form type
+get_form_sections(binary, TotalBars, KeyRoot, Mode) = binary_form(TotalBars, KeyRoot, Mode).
+get_form_sections(ternary, TotalBars, KeyRoot, Mode) = ternary_form(TotalBars, KeyRoot, Mode).
+get_form_sections(rondo, TotalBars, KeyRoot, Mode) = rondo_form(TotalBars, KeyRoot, Mode).
+get_form_sections(through, TotalBars, KeyRoot, Mode) = through_form(TotalBars, KeyRoot, Mode).
+get_form_sections(none, TotalBars, KeyRoot, Mode) = through_form(TotalBars, KeyRoot, Mode).
+
+% Parse form type from string
+parse_form_type("binary") = binary.
+parse_form_type("ternary") = ternary.
+parse_form_type("rondo") = rondo.
+parse_form_type("through") = through.
+parse_form_type("none") = through.
+parse_form_type(_) = through.  % Default: no form constraint
+
+% -----------------------------------------------------------------------------
+% Section Validation
+% -----------------------------------------------------------------------------
+
+% Validate sections fill total duration exactly
+sections_fill_duration(Sections, TotalBars) =>
+    Total = sum([section_bars(S) : S in Sections]),
+    Total == TotalBars.
+
+% Validate all A sections have same key (for ternary/rondo)
+a_sections_same_key(Sections) =>
+    ASections = [S : S in Sections, section_label(S) == a],
+    (ASections.length > 1 ->
+        FirstKey = section_key(ASections[1]),
+        FirstMode = section_mode(ASections[1]),
+        foreach(S in ASections)
+            section_key(S) == FirstKey,
+            section_mode(S) == FirstMode
+        end
+    ;
+        true
+    ).
+
+% Get section containing a given bar number
+section_at_bar(Sections, BarNum) = Result =>
+    Found = [S : S in Sections,
+             section_start(S) =< BarNum,
+             BarNum < section_start(S) + section_bars(S)],
+    (Found.length > 0 ->
+        Result = Found[1]
+    ;
+        Result = none
+    ).
+
+% -----------------------------------------------------------------------------
+% Section Info for Generation
+% -----------------------------------------------------------------------------
+
+% Get all section boundaries (bar numbers where sections change)
+section_boundaries(Sections) = [section_start(S) : S in Sections].
+
+% Check if bar is a section boundary
+is_section_boundary(Sections, BarNum) =>
+    member(BarNum, section_boundaries(Sections)).
+
+% Get cadence type for end of section
+% A sections: authentic cadence (V-I)
+% B/C sections ending: half cadence (I-V) to set up return
+section_cadence_type(Section, true) = authentic.  % Final section always authentic
+section_cadence_type(Section, false) = half,      % Non-final sections end with half cadence
+    section_label(Section) == a => true.
+section_cadence_type(_Section, false) = half.     % Episodes also half cadence
+
+% -----------------------------------------------------------------------------
+% Form Descriptions (for output/logging)
+% -----------------------------------------------------------------------------
+
+form_description(binary) = "Binary form (AB)".
+form_description(ternary) = "Ternary form (ABA)".
+form_description(rondo) = "Rondo form (ABACA)".
+form_description(through) = "Through-composed (free form)".
+form_description(_) = "Unknown form".
+
+section_description(Section) = Desc =>
+    Label = section_label(Section),
+    Start = section_start(Section),
+    Bars = section_bars(Section),
+    Key = section_key(Section),
+    Mode = section_mode(Section),
+    KeyName = pitch_class_name(Key),
+    EndBar = Start + Bars - 1,
+    Desc = to_string(Label) ++ " (" ++ KeyName ++ " " ++ to_string(Mode) ++
+           "): bars " ++ to_string(Start) ++ "-" ++ to_string(EndBar).
+
+% Pitch class to note name
+pitch_class_name(0) = "C".
+pitch_class_name(1) = "C#".
+pitch_class_name(2) = "D".
+pitch_class_name(3) = "Eb".
+pitch_class_name(4) = "E".
+pitch_class_name(5) = "F".
+pitch_class_name(6) = "F#".
+pitch_class_name(7) = "G".
+pitch_class_name(8) = "Ab".
+pitch_class_name(9) = "A".
+pitch_class_name(10) = "Bb".
+pitch_class_name(11) = "B".
+pitch_class_name(N) = pitch_class_name(N mod 12).
+
+% Print form structure
+print_form_structure(FormType, Sections) =>
+    println("Form: " ++ form_description(FormType)),
+    println("Sections:"),
+    foreach(S in Sections)
+        println("  " ++ section_description(S))
+    end.
