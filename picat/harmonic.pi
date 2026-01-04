@@ -320,3 +320,398 @@ find_next_change_helper(ChordRoots, Idx, _, PrevChord, ChangeIdx) =>
 find_next_change_helper(ChordRoots, Idx, Len, PrevChord, ChangeIdx) =>
     ChordRoots[Idx] == PrevChord,
     find_next_change_helper(ChordRoots, Idx + 1, Len, PrevChord, ChangeIdx).
+
+% ==============================================================================
+% TONAL HIERARCHY CONSTRAINTS
+% ==============================================================================
+% Rule: Tonal center (tonic) governs hierarchy
+
+% Tonic should appear regularly (anchoring the key)
+tonic_anchoring_harmonic(ChordDegrees, MaxGap) =>
+    Len = length(ChordDegrees),
+    foreach(I in 1..Len-MaxGap)
+        % Within any MaxGap consecutive chords, at least one should be tonic
+        Bools = new_list(MaxGap),
+        Bools :: 0..1,
+        foreach(J in 0..MaxGap-1)
+            Bools[J+1] #<=> (ChordDegrees[I+J] #= 1)
+        end,
+        sum(Bools) #>= 1
+    end.
+
+% Tonic must appear at structural points
+tonic_at_structure(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    % Must start on tonic
+    ChordDegrees[1] #= 1,
+    % Must end on tonic
+    ChordDegrees[Len] #= 1.
+
+% Tonic is most frequent chord
+tonic_most_frequent(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    TonicCount #= sum([ChordDegrees[I] #= 1 : I in 1..Len]),
+    DominantCount #= sum([ChordDegrees[I] #= 5 : I in 1..Len]),
+    SubdominantCount #= sum([ChordDegrees[I] #= 4 : I in 1..Len]),
+    TonicCount #>= DominantCount,
+    TonicCount #>= SubdominantCount.
+
+% ==============================================================================
+% FUNCTIONAL HARMONY CONSTRAINTS
+% ==============================================================================
+% Rule: Functional harmony follows T → PD → D → T progression
+
+% Chord function categories
+% Tonic function: I, vi, (iii)
+% Predominant function: ii, IV, (vi)
+% Dominant function: V, vii°
+
+chord_function_category(1) = tonic.
+chord_function_category(3) = tonic.      % iii can function as tonic
+chord_function_category(6) = tonic.      % vi can function as tonic (also PD)
+chord_function_category(2) = predominant.
+chord_function_category(4) = predominant.
+chord_function_category(5) = dominant.
+chord_function_category(7) = dominant.   % vii° is dominant function
+
+% Get function for degree (with mode awareness)
+get_chord_function(Degree, _Mode) = Func =>
+    Func = chord_function_category(Degree).
+
+% Functional progression constraint: T → (PD) → D → T
+% PD is optional, but D must precede T (except at start)
+functional_harmony_constraint(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    foreach(I in 2..Len)
+        PrevDegree = ChordDegrees[I-1],
+        CurrDegree = ChordDegrees[I],
+        PrevFunc = chord_function_category(PrevDegree),
+        CurrFunc = chord_function_category(CurrDegree),
+        % Valid function progressions
+        valid_function_progression(PrevFunc, CurrFunc)
+    end.
+
+% Valid functional progressions
+% T → T, T → PD, T → D (all ok from tonic)
+% PD → PD, PD → D (predominant moves to itself or dominant)
+% D → T, D → D (dominant resolves to tonic, or extends)
+valid_function_progression(tonic, tonic) => true.
+valid_function_progression(tonic, predominant) => true.
+valid_function_progression(tonic, dominant) => true.
+valid_function_progression(predominant, predominant) => true.
+valid_function_progression(predominant, dominant) => true.
+valid_function_progression(predominant, tonic) => true.  % Plagal motion
+valid_function_progression(dominant, tonic) => true.
+valid_function_progression(dominant, dominant) => true.
+valid_function_progression(dominant, predominant) => true.  % Retrogression (less common)
+
+% Strict functional harmony (no retrogressions)
+strict_functional_harmony(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    foreach(I in 2..Len)
+        PrevDegree = ChordDegrees[I-1],
+        CurrDegree = ChordDegrees[I],
+        PrevFunc = chord_function_category(PrevDegree),
+        CurrFunc = chord_function_category(CurrDegree),
+        strict_function_progression(PrevFunc, CurrFunc)
+    end.
+
+% Strict progressions (no retrogressions like D → PD)
+strict_function_progression(tonic, tonic) => true.
+strict_function_progression(tonic, predominant) => true.
+strict_function_progression(tonic, dominant) => true.
+strict_function_progression(predominant, predominant) => true.
+strict_function_progression(predominant, dominant) => true.
+strict_function_progression(dominant, tonic) => true.
+strict_function_progression(dominant, dominant) => true.
+
+% ==============================================================================
+% CADENCE CONSTRAINTS (Extended)
+% ==============================================================================
+% Rule: Cadences mark closure
+
+% Perfect authentic cadence: V → I with soprano on tonic, bass on root
+perfect_authentic_cadence(ChordDegrees, SopranoNotes, BassNotes, RootPitch) =>
+    Len = length(ChordDegrees),
+    % V → I
+    ChordDegrees[Len-1] #= 5,
+    ChordDegrees[Len] #= 1,
+    % Soprano ends on tonic
+    RootClass = RootPitch mod 12,
+    music_constraints.pitch_class_var(SopranoNotes[Len], SopClass),
+    SopClass #= RootClass,
+    % Bass ends on root
+    music_constraints.pitch_class_var(BassNotes[Len], BassClass),
+    BassClass #= RootClass.
+
+% Imperfect authentic cadence: V → I but soprano not on tonic
+imperfect_authentic_cadence(ChordDegrees, SopranoNotes, RootPitch) =>
+    Len = length(ChordDegrees),
+    % V → I
+    ChordDegrees[Len-1] #= 5,
+    ChordDegrees[Len] #= 1,
+    % Soprano NOT on tonic (on 3rd or 5th)
+    RootClass = RootPitch mod 12,
+    Third = (RootPitch + 4) mod 12,
+    Fifth = (RootPitch + 7) mod 12,
+    music_constraints.pitch_class_var(SopranoNotes[Len], SopClass),
+    (SopClass #= Third) #\/ (SopClass #= Fifth).
+
+% Half cadence: ends on V
+half_cadence(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    ChordDegrees[Len] #= 5.
+
+% Phrygian half cadence: iv6 → V in minor
+phrygian_half_cadence(ChordDegrees, Mode) =>
+    Mode == minor,
+    Len = length(ChordDegrees),
+    ChordDegrees[Len-1] #= 4,
+    ChordDegrees[Len] #= 5.
+
+% Plagal cadence: IV → I
+plagal_cadence(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    ChordDegrees[Len-1] #= 4,
+    ChordDegrees[Len] #= 1.
+
+% Deceptive cadence: V → vi
+deceptive_cadence(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    ChordDegrees[Len-1] #= 5,
+    ChordDegrees[Len] #= 6.
+
+% Cadence at phrase boundaries
+cadences_at_phrases(ChordDegrees, PhraseBoundaries, CadenceTypes) =>
+    foreach(I in 1..length(PhraseBoundaries))
+        Boundary = PhraseBoundaries[I],
+        CadType = CadenceTypes[I],
+        apply_cadence_at(ChordDegrees, Boundary, CadType)
+    end.
+
+% Apply cadence type at specific position
+apply_cadence_at(ChordDegrees, Position, authentic) =>
+    ChordDegrees[Position-1] #= 5,
+    ChordDegrees[Position] #= 1.
+apply_cadence_at(ChordDegrees, Position, half) =>
+    ChordDegrees[Position] #= 5.
+apply_cadence_at(ChordDegrees, Position, plagal) =>
+    ChordDegrees[Position-1] #= 4,
+    ChordDegrees[Position] #= 1.
+apply_cadence_at(ChordDegrees, Position, deceptive) =>
+    ChordDegrees[Position-1] #= 5,
+    ChordDegrees[Position] #= 6.
+
+% ==============================================================================
+% DISSONANCE TREATMENT CONSTRAINTS
+% ==============================================================================
+% Rule: Dissonance requires preparation & resolution
+
+% Dissonant intervals (in semitones mod 12)
+is_dissonant_interval(1) => true.   % minor 2nd
+is_dissonant_interval(2) => true.   % major 2nd
+is_dissonant_interval(6) => true.   % tritone
+is_dissonant_interval(10) => true.  % minor 7th
+is_dissonant_interval(11) => true.  % major 7th
+is_dissonant_interval(_) => fail.
+
+% Consonant intervals
+is_consonant_interval(0) => true.   % unison
+is_consonant_interval(3) => true.   % minor 3rd
+is_consonant_interval(4) => true.   % major 3rd
+is_consonant_interval(5) => true.   % perfect 4th (context dependent)
+is_consonant_interval(7) => true.   % perfect 5th
+is_consonant_interval(8) => true.   % minor 6th
+is_consonant_interval(9) => true.   % major 6th
+is_consonant_interval(12) => true.  % octave
+
+% Dissonance preparation: dissonant note should be prepared (present in previous chord)
+dissonance_prepared(Voice, ChordTonesList) =>
+    Len = length(Voice),
+    foreach(I in 2..Len)
+        Note = Voice[I],
+        PrevChordTones = ChordTonesList[I-1],
+        CurrChordTones = ChordTonesList[I],
+        NoteClass = Note mod 12,
+        % If note is not a chord tone (dissonant), it should be prepared
+        (not member(NoteClass, CurrChordTones)) #=>
+            member(NoteClass, PrevChordTones)
+    end.
+
+% Dissonance resolution: dissonant note must resolve by step
+dissonance_resolves_by_step(Voice, ChordTonesList) =>
+    Len = length(Voice),
+    foreach(I in 1..Len-1)
+        Note = Voice[I],
+        NextNote = Voice[I+1],
+        CurrChordTones = ChordTonesList[I],
+        NoteClass = Note mod 12,
+        Interval = $abs(NextNote - Note),
+        % If note is not a chord tone (dissonant), must resolve by step
+        (not member(NoteClass, CurrChordTones)) #=>
+            (Interval #=< 2)
+    end.
+
+% Complete dissonance treatment (preparation + resolution)
+proper_dissonance_treatment(Voice, ChordTonesList) =>
+    dissonance_prepared(Voice, ChordTonesList),
+    dissonance_resolves_by_step(Voice, ChordTonesList).
+
+% Suspension: dissonance on strong beat, resolves down on weak beat
+suspension_constraint(Voice, Positions, StrongBeatPositions, ChordTonesList) =>
+    Len = length(Voice),
+    foreach(I in 1..Len-1)
+        Note = Voice[I],
+        NextNote = Voice[I+1],
+        CurrChordTones = ChordTonesList[I],
+        NoteClass = Note mod 12,
+        IsStrongBeat = member(Positions[I], StrongBeatPositions),
+        % Suspension: non-chord tone on strong beat resolves down
+        (IsStrongBeat, not member(NoteClass, CurrChordTones)) #=>
+            (NextNote #< Note, $abs(NextNote - Note) #=< 2)
+    end.
+
+% Passing tone: dissonance between two chord tones, stepwise
+passing_tone_valid(Note1, PassingNote, Note2, ChordTones) =>
+    PC1 = Note1 mod 12,
+    PC2 = Note2 mod 12,
+    PassingPC = PassingNote mod 12,
+    % Chord tones at start and end
+    member(PC1, ChordTones),
+    member(PC2, ChordTones),
+    % Passing note not a chord tone
+    not member(PassingPC, ChordTones),
+    % Stepwise motion throughout
+    $abs(PassingNote - Note1) #=< 2,
+    $abs(Note2 - PassingNote) #=< 2,
+    % Same direction
+    (PassingNote - Note1) * (Note2 - PassingNote) #> 0.
+
+% Neighbor tone: chord tone → non-chord tone → same chord tone
+neighbor_tone_valid(Note1, NeighborNote, Note2, ChordTones) =>
+    PC1 = Note1 mod 12,
+    NeighborPC = NeighborNote mod 12,
+    % Start and end on same pitch
+    Note1 #= Note2,
+    % That pitch is a chord tone
+    member(PC1, ChordTones),
+    % Neighbor is not a chord tone
+    not member(NeighborPC, ChordTones),
+    % Step away and back
+    $abs(NeighborNote - Note1) #=< 2.
+
+% ==============================================================================
+% DOMINANT RESOLUTION CONSTRAINTS
+% ==============================================================================
+% Rule: Dominant (V) resolves to tonic (I)
+
+% V must resolve to I (strict)
+dominant_resolves_to_tonic(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    foreach(I in 1..Len-1)
+        (ChordDegrees[I] #= 5) #=> (ChordDegrees[I+1] #= 1)
+    end.
+
+% V usually resolves to I (soft - allows deceptive)
+dominant_usually_resolves(ChordDegrees) =>
+    Len = length(ChordDegrees),
+    % Count V → I progressions vs total V chords
+    VtoI #= sum([(ChordDegrees[I] #= 5) #/\ (ChordDegrees[I+1] #= 1) : I in 1..Len-1]),
+    TotalV #= sum([ChordDegrees[I] #= 5 : I in 1..Len-1]),
+    % At least 75% of V chords should resolve to I
+    VtoI * 4 #>= TotalV * 3.
+
+% V7 always resolves to I (seventh adds tension)
+dominant_seventh_resolves(ChordDegrees, ChordQualities) =>
+    Len = length(ChordDegrees),
+    foreach(I in 1..Len-1)
+        ((ChordDegrees[I] #= 5) #/\ (ChordQualities[I] == dominant7)) #=>
+            (ChordDegrees[I+1] #= 1)
+    end.
+
+% ==============================================================================
+% MODULATION CONSTRAINTS
+% ==============================================================================
+% Rule: Key changes via pivot chords or dominant preparation
+
+% Closely related keys (differ by at most 1 accidental)
+closely_related_keys(Key1, Key2) =>
+    % Key1 and Key2 are pitch classes (0-11)
+    Diff = (Key2 - Key1 + 12) mod 12,
+    % Circle of fifths neighbors: +7 (fifth up), +5 (fourth up = fifth down)
+    % Relative major/minor: +3 or +9
+    member(Diff, [0, 2, 5, 7, 9, 10]).  % C's relatives: C, D, F, G, A, Bb
+
+% Pivot chord modulation: chord functions in both old and new keys
+pivot_chord_modulation(ChordDegrees, OldKey, NewKey, PivotPosition) =>
+    % The chord at PivotPosition should be diatonic in both keys
+    PivotDegree = ChordDegrees[PivotPosition],
+    degree_in_key(PivotDegree, OldKey),
+    degree_in_new_key(PivotDegree, OldKey, NewKey).
+
+% Check if degree is valid in key
+degree_in_key(Degree, _Key) =>
+    Degree >= 1, Degree =< 7.
+
+% Map degree from old key to new key
+degree_in_new_key(Degree, OldKey, NewKey) =>
+    % Simplified: just check degree is valid
+    Degree >= 1, Degree =< 7,
+    % Keys should be closely related
+    closely_related_keys(OldKey, NewKey).
+
+% Dominant preparation for modulation: V/V or V of new key
+dominant_preparation_modulation(ChordDegrees, ChordRoots, NewKeyRoot, PrepPosition) =>
+    % Chord before modulation should be V of new key
+    PrepRoot = ChordRoots[PrepPosition],
+    DomOfNewKey = (NewKeyRoot + 7) mod 12,  % Fifth above new tonic
+    PrepRoot #= DomOfNewKey.
+
+% Modulation to closely related key only
+modulation_closely_related(OldKey, NewKey) =>
+    closely_related_keys(OldKey, NewKey).
+
+% Common modulation targets from major key
+common_modulation_targets(major, Tonic) = Targets =>
+    % V (dominant), IV (subdominant), vi (relative minor), ii, iii
+    Targets = [
+        (Tonic + 7) mod 12,   % Dominant key
+        (Tonic + 5) mod 12,   % Subdominant key
+        (Tonic + 9) mod 12,   % Relative minor
+        (Tonic + 2) mod 12,   % Supertonic
+        (Tonic + 4) mod 12    % Mediant
+    ].
+
+% Common modulation targets from minor key
+common_modulation_targets(minor, Tonic) = Targets =>
+    % III (relative major), V, iv, VII
+    Targets = [
+        (Tonic + 3) mod 12,   % Relative major
+        (Tonic + 7) mod 12,   % Dominant (major V)
+        (Tonic + 5) mod 12,   % Subdominant
+        (Tonic + 10) mod 12   % Subtonic
+    ].
+
+% ==============================================================================
+% COMPLETE TONAL HARMONY CONSTRAINT SET
+% ==============================================================================
+
+% Apply all tonal harmony rules for common practice style
+common_practice_harmony(ChordDegrees, Mode, RootPitch) =>
+    % Tonal hierarchy
+    tonic_at_structure(ChordDegrees),
+    tonic_anchoring_harmonic(ChordDegrees, 4),
+    % Functional harmony
+    functional_harmony_constraint(ChordDegrees),
+    % Dominant resolution
+    dominant_usually_resolves(ChordDegrees),
+    % Valid progressions
+    valid_progression(ChordDegrees, Mode).
+
+% Strict common practice (stricter rules)
+strict_common_practice_harmony(ChordDegrees, Mode, RootPitch) =>
+    tonic_at_structure(ChordDegrees),
+    tonic_most_frequent(ChordDegrees),
+    strict_functional_harmony(ChordDegrees),
+    dominant_resolves_to_tonic(ChordDegrees),
+    valid_progression(ChordDegrees, Mode).
