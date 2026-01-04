@@ -101,6 +101,32 @@ $mood(Valence, Arousal)  % Both -1.0 to +1.0
 
 - Picat modules use `module name.` declaration and `import` for dependencies
 - Compiled `.qi` files are cached; delete them when debugging module changes
-- PICATPATH environment variable must include `picat/` directory (run_picat.sh handles this)
 - Constraint programming uses Picat's `cp` module with `#=`, `#<`, `::` domain constraints
 - `solve([ff], Vars)` uses first-fail heuristic for search
+
+### PICATPATH Usage
+
+PICATPATH tells Picat where to find module files. Without it, `import` statements fail with `existence_error(module,X),compile`.
+
+```bash
+# Option 1: Use run_picat.sh (recommended - handles PICATPATH automatically)
+./scripts/run_picat.sh picat/companion.pi demo
+
+# Option 2: Run from picat/ directory with PICATPATH="."
+cd picat && PICATPATH="." picat companion.pi demo
+
+# Option 3: Set PICATPATH to absolute path
+PICATPATH="/home/user/repo/constrained-music/picat" picat /tmp/test.pi
+
+# Option 4: Run directly from project root
+picat picat/companion.pi demo  # Works because companion.pi is in picat/
+```
+
+For test files outside `picat/` directory, you must set PICATPATH:
+```bash
+# This FAILS - module not found:
+picat /tmp/test_soft.pi
+
+# This WORKS:
+cd picat && PICATPATH="." picat /tmp/test_soft.pi
+```
