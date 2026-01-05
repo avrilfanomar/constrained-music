@@ -41,6 +41,37 @@ mode_intervals(chromatic) = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].
 mode_intervals(diminished_whole_half) = [0, 2, 3, 5, 6, 8, 9, 11].
 mode_intervals(diminished_half_whole) = [0, 1, 3, 4, 6, 7, 9, 10].
 
+% Major blues scale (less common variant)
+mode_intervals(blues_major) = [0, 2, 3, 4, 7, 9].
+
+% Bebop scales (jazz - 8 notes for smoother eighth-note lines)
+mode_intervals(bebop_dominant) = [0, 2, 4, 5, 7, 9, 10, 11].  % Dominant + major 7th
+mode_intervals(bebop_major) = [0, 2, 4, 5, 7, 8, 9, 11].     % Major + #5
+mode_intervals(bebop_dorian) = [0, 2, 3, 4, 5, 7, 9, 10].    % Dorian + major 3rd
+
+% Hybrid scale: major with blue notes added (for mixing major/blues sound)
+mode_intervals(major_blues_hybrid) = [0, 2, 3, 4, 5, 6, 7, 9, 10, 11].
+
+% ==============================================================================
+% BLUE NOTES
+% ==============================================================================
+% Blue notes are the characteristic notes of blues that create tension
+
+% The blue notes (relative to major scale): b3, b5, b7
+blue_note_intervals() = [3, 6, 10].  % b3, b5/tritone, b7 in semitones
+
+% Check if a pitch is a blue note relative to a root
+is_blue_note(Pitch, Root) =>
+    Interval = (Pitch - Root) mod 12,
+    member(Interval, blue_note_intervals()).
+
+% Get blue notes in a range
+blue_notes_in_range(Root, LowMidi, HighMidi) = Notes =>
+    BlueIntervals = blue_note_intervals(),
+    RootClass = Root mod 12,
+    Notes = [Midi : Midi in LowMidi..HighMidi,
+             member((Midi - RootClass) mod 12, BlueIntervals)].
+
 % ==============================================================================
 % SCALE NOTE GENERATION
 % ==============================================================================

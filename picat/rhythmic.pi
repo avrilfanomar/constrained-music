@@ -194,6 +194,59 @@ waltz_pattern() = [4, 2, 2].
 tresillo_pattern() = [3, 3, 2].
 
 % ==============================================================================
+% SWING RHYTHM (JAZZ)
+% ==============================================================================
+% Swing converts straight eighth notes into a "long-short" pattern
+% SwingRatio controls the ratio: 0.5 = straight, 0.67 = triplet swing, 0.75 = hard swing
+
+% Apply swing feel to a list of notes (modifies timing)
+% Notes: list of note(Pitch, Duration, time_pos(Bar, Beat, Sub), Voice, Vel)
+% SwingRatio: 0.67 for standard triplet swing
+apply_swing(Notes, SwingRatio) = SwungNotes =>
+    SwungNotes = [apply_swing_to_note(N, SwingRatio) : N in Notes].
+
+% Apply swing to a single note based on its subdivision position
+apply_swing_to_note(Note, SwingRatio) = SwungNote =>
+    Note = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), Voice, Vel),
+    % Swing affects off-beat eighth notes (subdivision 2 in a 4-subdivision beat)
+    if Sub == 2 then
+        % Delay the off-beat note
+        SwingDelay = round((SwingRatio - 0.5) * 4),  % Convert ratio to subdivision units
+        NewSub = min(3, Sub + SwingDelay),
+        SwungNote = $note(Pitch, Duration, $time_pos(Bar, Beat, NewSub), Voice, Vel)
+    else
+        SwungNote = Note
+    end.
+
+% Check if notes have swing feel (for analysis)
+has_swing_feel(Notes) =>
+    % Check for long-short patterns in consecutive eighth notes
+    Durations = [D : $note(_, D, _, _, _) in Notes],
+    count_swing_pairs(Durations) > length(Durations) // 8.
+
+% Count long-short pairs typical of swing
+count_swing_pairs(Durations) = Count =>
+    Len = length(Durations),
+    Count = sum([cond(I < Len, Durations[I] > Durations[I+1], 0) : I in 1..2..Len-1]).
+
+% Swing eighth note durations (for direct rhythmic generation)
+% Returns durations for swing eighths within a beat (4 units = quarter note)
+swing_eighth_durations(SwingRatio) = [Long, Short] =>
+    Total = 4,  % Quarter note = 4 units
+    Long = round(Total * SwingRatio),
+    Short = Total - Long.
+
+% Standard swing ratios
+light_swing_ratio() = 0.58.    % Subtle swing
+triplet_swing_ratio() = 0.67.  % Standard jazz swing (triplet feel)
+hard_swing_ratio() = 0.75.     % Heavy swing
+
+% Generate swing-style rhythm for a bar (4/4)
+swing_bar_rhythm(SwingRatio) = Durations =>
+    [Long, Short] = swing_eighth_durations(SwingRatio),
+    Durations = [Long, Short, Long, Short, Long, Short, Long, Short].
+
+% ==============================================================================
 % UTILITY FUNCTIONS
 % ==============================================================================
 

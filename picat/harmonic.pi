@@ -24,6 +24,27 @@ chord_intervals(minor7) = [0, 3, 7, 10].
 chord_intervals(half_diminished7) = [0, 3, 6, 10].
 chord_intervals(diminished7) = [0, 3, 6, 9].
 
+% Extended chords (jazz)
+% 9th chords - add 9th (major 2nd up an octave = 14 semitones)
+chord_intervals(major9) = [0, 4, 7, 11, 14].
+chord_intervals(dominant9) = [0, 4, 7, 10, 14].
+chord_intervals(minor9) = [0, 3, 7, 10, 14].
+chord_intervals(add9) = [0, 4, 7, 14].  % Triad + 9th (no 7th)
+
+% 11th chords - add 11th (perfect 4th up an octave = 17 semitones)
+chord_intervals(dominant11) = [0, 4, 7, 10, 14, 17].
+chord_intervals(minor11) = [0, 3, 7, 10, 14, 17].
+
+% 13th chords - add 13th (major 6th up an octave = 21 semitones)
+chord_intervals(dominant13) = [0, 4, 7, 10, 14, 21].
+chord_intervals(minor13) = [0, 3, 7, 10, 14, 21].
+
+% Altered dominants (jazz)
+chord_intervals(dominant7sharp9) = [0, 4, 7, 10, 15].   % 7#9 (Hendrix chord)
+chord_intervals(dominant7flat9) = [0, 4, 7, 10, 13].    % 7b9
+chord_intervals(dominant7sharp5) = [0, 4, 8, 10].       % 7#5 (augmented dominant)
+chord_intervals(dominant7flat5) = [0, 4, 6, 10].        % 7b5
+
 % Suspended chords
 chord_intervals(sus2) = [0, 2, 7].
 chord_intervals(sus4) = [0, 5, 7].
@@ -82,6 +103,54 @@ cadence_constraint(ChordRoots, CadenceType) =>
 % Start on tonic
 starts_on_tonic(ChordRoots) =>
     ChordRoots[1] #= 1.
+
+% ==============================================================================
+% JAZZ PROGRESSION CONSTRAINTS
+% ==============================================================================
+
+% ii-V-I progression - the most common jazz progression
+% Enforces that ii-V-I pattern appears at least once in the progression
+ii_v_i_constraint(ChordRoots) =>
+    Len = length(ChordRoots),
+    if Len >= 3 then
+        % At least one ii-V-I must occur
+        HasIIVI :: 0..1,
+        HasIIVI #= 1,
+        % Check all possible positions for ii-V-I
+        sum([cond(ChordRoots[I] #= 2 #/\ ChordRoots[I+1] #= 5 #/\ ChordRoots[I+2] #= 1, 1, 0)
+             : I in 1..Len-2]) #>= HasIIVI
+    end.
+
+% Soft version: count ii-V-I occurrences (for weighted constraints)
+count_ii_v_i(ChordRoots) = Count =>
+    Len = length(ChordRoots),
+    if Len >= 3 then
+        Count = sum([cond(ChordRoots[I] == 2, ChordRoots[I+1] == 5, ChordRoots[I+2] == 1, 1, 0)
+                     : I in 1..Len-2])
+    else
+        Count = 0
+    end.
+
+% ii-V-I with seventh chords (typical jazz voicing)
+% Returns the chord types for a ii-V-I in a given key
+ii_v_i_chord_types(major) = [minor7, dominant7, major7].
+ii_v_i_chord_types(minor) = [half_diminished7, dominant7, minor7].
+
+% Turnaround progression: I-vi-ii-V (common jazz ending leading back to I)
+turnaround_constraint(ChordRoots) =>
+    Len = length(ChordRoots),
+    if Len >= 4 then
+        % Last 4 chords form turnaround
+        ChordRoots[Len-3] #= 1,  % I
+        ChordRoots[Len-2] #= 6,  % vi
+        ChordRoots[Len-1] #= 2,  % ii
+        ChordRoots[Len] #= 5     % V
+    end.
+
+% Tritone substitution: replace V with bII (jazz technique)
+% Returns the tritone substitute pitch class for a given dominant
+tritone_substitute(DominantRoot) = SubRoot =>
+    SubRoot = (DominantRoot + 6) mod 12.
 
 % ==============================================================================
 % HARMONIC RHYTHM CONSTRAINTS

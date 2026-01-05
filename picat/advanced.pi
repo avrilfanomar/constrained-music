@@ -424,6 +424,209 @@ anacrusis_pattern(Notes) =>
     Notes[2] #>= Notes[1].
 
 % ==============================================================================
+% BALANCED PHRASE STRUCTURE (Western Music Rule)
+% ==============================================================================
+% Phrases should be balanced, typically in 2+2 or 4+4 bar groupings
+
+% Enforce balanced phrase lengths (notes grouped into equal phrases)
+% Notes: the melody, NotesPerBar: notes per bar, PhraseLength: bars per phrase (2 or 4)
+balanced_phrase_structure(Notes, NotesPerBar, PhraseLength) =>
+    Len = length(Notes),
+    TotalBars = Len // NotesPerBar,
+    if TotalBars >= PhraseLength * 2 then
+        NumPhrases = TotalBars // PhraseLength,
+        % Each phrase should have similar contour/range
+        foreach(P in 1..NumPhrases-1)
+            StartIdx1 = (P - 1) * PhraseLength * NotesPerBar + 1,
+            EndIdx1 = P * PhraseLength * NotesPerBar,
+            StartIdx2 = P * PhraseLength * NotesPerBar + 1,
+            EndIdx2 = min(Len, (P + 1) * PhraseLength * NotesPerBar),
+            % Phrases should have similar ranges (within an octave)
+            Phrase1 = [Notes[I] : I in StartIdx1..EndIdx1],
+            Phrase2 = [Notes[I] : I in StartIdx2..EndIdx2],
+            Range1 = max(Phrase1) - min(Phrase1),
+            Range2 = max(Phrase2) - min(Phrase2),
+            abs(Range1 - Range2) =< 12  % Within an octave
+        end
+    end.
+
+% Soft version: calculate phrase balance cost
+phrase_balance_cost(Notes, NotesPerBar, PhraseLength) = Cost =>
+    Len = length(Notes),
+    TotalBars = Len // NotesPerBar,
+    if TotalBars >= PhraseLength * 2 then
+        NumPhrases = TotalBars // PhraseLength,
+        Cost = sum([phrase_pair_cost(Notes, P, PhraseLength, NotesPerBar) : P in 1..NumPhrases-1])
+    else
+        Cost = 0
+    end.
+
+% Helper: calculate cost for one phrase pair
+phrase_pair_cost(Notes, P, PhraseLength, NotesPerBar) = Cost =>
+    Len = length(Notes),
+    StartIdx1 = (P - 1) * PhraseLength * NotesPerBar + 1,
+    EndIdx1 = P * PhraseLength * NotesPerBar,
+    StartIdx2 = P * PhraseLength * NotesPerBar + 1,
+    EndIdx2 = min(Len, (P + 1) * PhraseLength * NotesPerBar),
+    if EndIdx2 > StartIdx2 then
+        Phrase1 = [Notes[I] : I in StartIdx1..min(EndIdx1, Len)],
+        Phrase2 = [Notes[I] : I in StartIdx2..EndIdx2],
+        Range1 = max(Phrase1) - min(Phrase1),
+        Range2 = max(Phrase2) - min(Phrase2),
+        % Cost = absolute difference in range
+        Cost = abs(Range1 - Range2)
+    else
+        Cost = 0
+    end.
+
+% ==============================================================================
+% CALL AND RESPONSE PATTERN (Blues/Folk)
+% ==============================================================================
+% Call-response: a musical statement (call) followed by an answering phrase (response)
+
+% Enforce call-response structure
+% The response should mirror or answer the call with similar rhythm but different direction
+call_response_pattern(Notes, CallLen) =>
+    Len = length(Notes),
+    ResponseLen = CallLen,  % Response same length as call
+    if Len >= CallLen + ResponseLen then
+        Call = [Notes[I] : I in 1..CallLen],
+        Response = [Notes[I] : I in CallLen+1..CallLen+ResponseLen],
+        % Response should be in similar range to call
+        CallRange = max(Call) - min(Call),
+        ResponseRange = max(Response) - min(Response),
+        abs(CallRange - ResponseRange) =< 7,  % Within a fifth
+        % Response tends to move in opposite overall direction
+        CallDir = Notes[CallLen] - Notes[1],
+        ResponseDir = Notes[CallLen + ResponseLen] - Notes[CallLen + 1],
+        % Soft constraint: prefer opposite direction
+        CallDir * ResponseDir =< 0
+    end.
+
+% Soft version: calculate call-response similarity cost
+call_response_cost(Notes, CallLen) = Cost =>
+    Len = length(Notes),
+    ResponseLen = CallLen,
+    if Len >= CallLen + ResponseLen then
+        Call = [Notes[I] : I in 1..CallLen],
+        Response = [Notes[I] : I in CallLen+1..CallLen+ResponseLen],
+        % Range difference cost
+        CallRange = max(Call) - min(Call),
+        ResponseRange = max(Response) - min(Response),
+        RangeCost = abs(CallRange - ResponseRange),
+        % Direction cost (0 if opposite, higher if same)
+        CallDir = Notes[CallLen] - Notes[1],
+        ResponseDir = Notes[CallLen + ResponseLen] - Notes[CallLen + 1],
+        DirCost = cond(CallDir * ResponseDir =< 0, 0, abs(CallDir + ResponseDir)),
+        Cost = RangeCost + DirCost
+    else
+        Cost = 0
+    end.
+
+% Check if melody has call-response characteristics
+has_call_response(Notes, CallLen) =>
+    Len = length(Notes),
+    ResponseLen = CallLen,
+    Len >= CallLen + ResponseLen,
+    Call = [Notes[I] : I in 1..CallLen],
+    Response = [Notes[I] : I in CallLen+1..CallLen+ResponseLen],
+    % Similar range
+    abs((max(Call) - min(Call)) - (max(Response) - min(Response))) =< 7.
+
+% ==============================================================================
+% ORNAMENTATION PLACEMENT CONSTRAINTS (Western Music Rule)
+% ==============================================================================
+% Rules for where ornaments are appropriate in a melody
+% Based on historical practice from Baroque through Romantic periods
+
+% Check if a note position is appropriate for ornamentation
+% Ornaments are typically placed on:
+%   - Long notes (duration > quarter note)
+%   - Strong beats (beat 1 or 3 in 4/4)
+%   - Cadential notes (approaching phrase end)
+%   - Notes followed by descending stepwise motion
+
+% Valid positions for ornaments based on note index and context
+valid_ornament_position(Notes, NoteIdx, NotesPerBar) =>
+    Len = length(Notes),
+    NoteIdx >= 1,
+    NoteIdx =< Len,
+    % Position in bar (0-indexed within bar)
+    PosInBar = (NoteIdx - 1) mod NotesPerBar,
+    % Strong beat positions (beat 1 or 3 in 4/4, assuming 4 notes per bar)
+    StrongBeat = (PosInBar == 0 ; PosInBar == NotesPerBar // 2),
+    % Check if followed by descending step (melodic ornament context)
+    (NoteIdx < Len ->
+        Interval = Notes[NoteIdx + 1] - Notes[NoteIdx],
+        HasDescendingStep = (Interval >= -2, Interval < 0)
+    ;
+        HasDescendingStep = false
+    ),
+    (StrongBeat ; HasDescendingStep).
+
+% Count valid ornament positions in a melody
+count_ornament_positions(Notes, NotesPerBar) = Count =>
+    Len = length(Notes),
+    Count = sum([cond(valid_ornament_position_check(Notes, I, NotesPerBar), 1, 0) : I in 1..Len]).
+
+% Helper that returns true/false for counting
+valid_ornament_position_check(Notes, NoteIdx, NotesPerBar) =>
+    Len = length(Notes),
+    PosInBar = (NoteIdx - 1) mod NotesPerBar,
+    StrongBeat = (PosInBar == 0 ; PosInBar == NotesPerBar // 2),
+    (NoteIdx < Len ->
+        Interval = Notes[NoteIdx + 1] - Notes[NoteIdx],
+        HasDescendingStep = (Interval >= -2, Interval < 0)
+    ;
+        HasDescendingStep = false
+    ),
+    (StrongBeat ; HasDescendingStep).
+
+% Period-specific ornament density
+% Returns max ornaments per phrase based on period
+ornament_density(baroque) = high.     % Ornaments on many notes
+ornament_density(classical) = medium. % Ornaments sparingly
+ornament_density(romantic) = low.     % Few ornaments, more rubato
+
+% Max ornaments per bar by period
+max_ornaments_per_bar(baroque) = 2.
+max_ornaments_per_bar(classical) = 1.
+max_ornaments_per_bar(romantic) = 1.
+max_ornaments_per_bar(_) = 0.
+
+% Ornament type suitability by position
+% Trills: on long notes approaching cadence
+% Mordents: on strong beat short notes
+% Turns: on dotted rhythms or held notes
+% Grace notes: anywhere for melodic embellishment
+
+suitable_ornament_type(Notes, NoteIdx, NotesPerBar, trill) =>
+    % Trills on notes approaching phrase end (last quarter of phrase)
+    Len = length(Notes),
+    NoteIdx > Len * 3 // 4.
+
+suitable_ornament_type(Notes, NoteIdx, NotesPerBar, mordent) =>
+    % Mordents on strong beats
+    PosInBar = (NoteIdx - 1) mod NotesPerBar,
+    PosInBar == 0.
+
+suitable_ornament_type(Notes, NoteIdx, NotesPerBar, turn) =>
+    % Turns on held notes (followed by rest or same pitch)
+    Len = length(Notes),
+    NoteIdx < Len,
+    Interval = abs(Notes[NoteIdx + 1] - Notes[NoteIdx]),
+    Interval =< 2.
+
+suitable_ornament_type(_, _, _, grace_note) => true.  % Grace notes anywhere
+
+% Constraint: Don't over-ornament
+% MaxPercent is the maximum percentage of notes that can be ornamented
+limit_ornamentation(OrnamentedFlags, MaxPercent) =>
+    Len = length(OrnamentedFlags),
+    MaxOrnamented = (Len * MaxPercent) // 100,
+    sum(OrnamentedFlags) #=< MaxOrnamented.
+
+% ==============================================================================
 % INTERVAL DISTRIBUTION CONSTRAINTS
 % ==============================================================================
 
@@ -933,4 +1136,120 @@ auto_slur_phrases(PhraseBoundaries, NumNotes) = SlurGroups =>
             SlurGroups := SlurGroups ++ [$slur_group(I, StartIdx, EndIdx)]
         end,
         PrevEnd := Boundary
+    end.
+
+% ==============================================================================
+% TEXTURE CONSTRAINTS (Western Music Rule)
+% ==============================================================================
+% Constraints for different musical textures: monophonic, homophonic, polyphonic
+
+% Monophonic texture: single melodic line
+% Simply validates that we're working with one voice
+monophonic_constraint(Voices) =>
+    length(Voices) == 1.
+
+% Homophonic texture: melody in top voice, other voices move in similar rhythm
+% Voices: list of voice melodies, where Voices[1] is the melody (soprano)
+homophonic_constraint(Voices) =>
+    length(Voices) >= 2,
+    Melody = Voices[1],
+    % Other voices should follow similar rhythmic pattern (vertical alignment)
+    foreach(V in 2..length(Voices))
+        AccompVoice = Voices[V],
+        same_rhythm_alignment(Melody, AccompVoice)
+    end.
+
+% Helper: check same rhythm alignment (simplified)
+same_rhythm_alignment(Voice1, Voice2) =>
+    length(Voice1) == length(Voice2).
+
+% Polyphonic texture: independent melodic lines
+% Each voice should have melodic independence (different contours)
+polyphonic_constraint(Voices, RootPitch) =>
+    length(Voices) >= 2,
+    NumVoices = length(Voices),
+    % Voice independence: avoid too much parallel motion
+    foreach(V1 in 1..NumVoices-1)
+        foreach(V2 in V1+1..NumVoices)
+            voice_independence_pair(Voices[V1], Voices[V2])
+        end
+    end,
+    % No parallel fifths or octaves between any pair
+    foreach(V1 in 1..NumVoices-1)
+        foreach(V2 in V1+1..NumVoices)
+            no_parallel_fifths(Voices[V1], Voices[V2]),
+            no_parallel_octaves(Voices[V1], Voices[V2])
+        end
+    end.
+
+% Voice independence: voices should not move in parallel too often
+voice_independence_pair(Voice1, Voice2) =>
+    Len = min(length(Voice1), length(Voice2)),
+    if Len > 1 then
+        ParallelCount = texture_parallel_count(Voice1, Voice2, Len),
+        % Less than 50% parallel motion
+        ParallelCount < Len // 2
+    end.
+
+% Count parallel motion between two voices (for texture analysis)
+texture_parallel_count(Voice1, Voice2, Len) = Count =>
+    Count = sum([texture_parallel_at(Voice1, Voice2, I) : I in 1..Len-1]).
+
+% Check if motion is parallel at position I (for texture)
+texture_parallel_at(Voice1, Voice2, I) = Result =>
+    Dir1 = texture_sign(Voice1[I+1] - Voice1[I]),
+    Dir2 = texture_sign(Voice2[I+1] - Voice2[I]),
+    Result = cond(Dir1 == Dir2, cond(Dir1 != 0, 1, 0), 0).
+
+% Sign function for texture analysis
+texture_sign(X) = R => R = cond(X > 0, 1, cond(X < 0, -1, 0)).
+
+% Heterophonic texture: same melody with variations
+% Voice2 should be similar to Voice1 but with embellishments
+heterophonic_constraint(Voice1, Voice2, ToleranceSemitones) =>
+    Len = min(length(Voice1), length(Voice2)),
+    foreach(I in 1..Len)
+        abs(Voice1[I] - Voice2[I]) =< ToleranceSemitones
+    end.
+
+% Apply texture-appropriate constraints
+apply_texture_constraints(Voices, RootPitch, TextureType) =>
+    if TextureType == monophonic then
+        monophonic_constraint(Voices)
+    elseif TextureType == homophonic then
+        homophonic_constraint(Voices)
+    elseif TextureType == polyphonic then
+        polyphonic_constraint(Voices, RootPitch)
+    elseif TextureType == heterophonic then
+        length(Voices) >= 2,
+        heterophonic_constraint(Voices[1], Voices[2], 5)
+    end.
+
+% Imitation constraint for polyphonic texture
+% Voice2 should imitate Voice1 at a given interval after a delay
+imitation_constraint(Leader, Follower, IntervalOffset, DelayNotes) =>
+    LeaderLen = length(Leader),
+    FollowerLen = length(Follower),
+    ImitationLen = min(LeaderLen - DelayNotes, FollowerLen),
+    if ImitationLen > 0 then
+        foreach(I in 1..ImitationLen)
+            Follower[I] == Leader[I + DelayNotes] + IntervalOffset
+        end
+    end.
+
+% Canon constraint: strict imitation
+canon_constraint(Leader, Follower, IntervalOffset, DelayNotes) =>
+    imitation_constraint(Leader, Follower, IntervalOffset, DelayNotes).
+
+% Fugue subject entry constraint
+% Subject should appear in different voices at different times
+fugue_subject_constraint(Voices, Subject, Entries) =>
+    SubjectLen = length(Subject),
+    foreach((VoiceIdx, StartIdx, Interval) in Entries)
+        Voice = Voices[VoiceIdx],
+        foreach(I in 1..SubjectLen)
+            if StartIdx + I - 1 =< length(Voice) then
+                Voice[StartIdx + I - 1] == Subject[I] + Interval
+            end
+        end
     end.

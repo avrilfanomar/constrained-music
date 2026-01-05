@@ -16,6 +16,7 @@ import midi_export.
 import util.
 import genre_profiles.
 import constraint_selector.
+import form.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -164,6 +165,264 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
 
 % ==============================================================================
+% FORM-BASED COMPANION
+% ==============================================================================
+% Generate music within a formal structure (binary, ternary, rondo)
+% Mood transitions happen within form section boundaries
+
+% Run companion with form structure
+run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness, FormType) =>
+    run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness, FormType, none, []).
+
+% Run companion with form structure and genre
+run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness, FormType, Genre, Preferences) =>
+    println("=== Music Companion (Form Mode) ==="),
+    nl,
+
+    % Validate moods
+    if not is_valid_mood(StartMood) then
+        throw($error(invalid_start_mood, StartMood))
+    end,
+    if not is_valid_mood(EndMood) then
+        throw($error(invalid_end_mood, EndMood))
+    end,
+
+    % Print session info
+    printf("Generating emotional transition with form structure:%n"),
+    printf("  From: "), print_mood(StartMood),
+    printf("  To:   "), print_mood(EndMood),
+    printf("  Duration: %d seconds (%.1f minutes)%n", DurationSecs, DurationSecs / 60.0),
+    printf("  Form: %s%n", form.form_description(FormType)),
+    printf("  Randomness: %.2f%n", Randomness),
+    if Genre != none then
+        printf("  Genre: %w%n", Genre)
+    end,
+    nl,
+
+    % Calculate approximate number of bars from average tempo
+    AvgMood = mood_lerp(StartMood, EndMood, 0.5),
+    AvgParams = mood_to_params(AvgMood),
+    AvgTempo = get_tempo(AvgParams),
+    SecondsPerBar = 240.0 / AvgTempo,  % 4 beats per bar
+    TotalBars = max(8, round(DurationSecs / SecondsPerBar)),
+
+    % Get key root and mode from initial mood
+    KeyRoot = 60,  % C4
+    InitialParams = mood_to_params(StartMood),
+    InitialMode = get_mode(InitialParams),
+
+    % Get form sections
+    FormSections = form.get_form_sections(FormType, TotalBars, KeyRoot mod 12, InitialMode),
+    println("Form structure:"),
+    form.print_form_structure(FormType, FormSections),
+    nl,
+
+    % Plan transition within form sections
+    println("Planning transition within form sections..."),
+    Segments = plan_transition_within_form(StartMood, EndMood, DurationSecs, ease_in_out, Randomness, FormSections),
+    printf("  Created %d segments across %d sections%n%n", length(Segments), length(FormSections)),
+
+    % Generate melodies with form awareness
+    println("Generating music for each segment..."),
+    AllNotes = generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences),
+    printf("  Generated %d total notes%n%n", length(AllNotes)),
+
+    % Collect tempo changes
+    TempoChanges = collect_tempo_changes(Segments),
+
+    % Export to JSON
+    println("Exporting to JSON..."),
+    export_session_json(AllNotes, TempoChanges, OutputPath),
+    printf("  Saved to: %s%n%n", OutputPath),
+
+    println("Done! Run midi_writer.py to convert to MIDI."),
+    nl.
+
+% Plan transition aligned to form section boundaries
+plan_transition_within_form(StartMood, EndMood, DurationSecs, EasingType, Randomness, FormSections) = AllSegments =>
+    % Calculate total bars from form sections
+    TotalBars = sum([form.section_bars(S) : S in FormSections]),
+
+    % Calculate seconds per bar based on average tempo
+    AvgMood = mood_lerp(StartMood, EndMood, 0.5),
+    AvgParams = mood_to_params(AvgMood),
+    AvgTempo = get_tempo(AvgParams),
+    SecondsPerBar = 240.0 / AvgTempo,
+
+    % Generate segments for each form section
+    AllSegments = generate_form_section_segments(FormSections, StartMood, EndMood,
+                                                  DurationSecs, SecondsPerBar,
+                                                  EasingType, Randomness, TotalBars, 0, 1, []).
+
+% Generate segments for each form section
+generate_form_section_segments([], _, _, _, _, _, _, _, _, _, Acc) = flatten(reverse(Acc)).
+generate_form_section_segments([Section | RestSections], StartMood, EndMood,
+                                TotalDuration, SecondsPerBar, EasingType, Randomness,
+                                TotalBars, CurrentBar, SegIndex, Acc) = Result =>
+    SectionBars = form.section_bars(Section),
+    SectionKey = form.section_key(Section),
+    SectionMode = form.section_mode(Section),
+    SectionLabel = form.section_label(Section),
+
+    % Calculate what fraction of the piece this section represents
+    SectionStartFrac = CurrentBar / TotalBars,
+    SectionEndFrac = (CurrentBar + SectionBars) / TotalBars,
+
+    % Calculate mood at section boundaries
+    SectionStartMood = mood_lerp(StartMood, EndMood, apply_easing(SectionStartFrac, EasingType)),
+    SectionEndMood = mood_lerp(StartMood, EndMood, apply_easing(SectionEndFrac, EasingType)),
+
+    % Calculate section duration
+    SectionDuration = SectionBars * SecondsPerBar,
+
+    % Create segments within this section (aim for ~15-20 second segments)
+    TargetSegmentDuration = 17.0,
+    NumSectionSegments = max(1, round(SectionDuration / TargetSegmentDuration)),
+    SegmentDuration = SectionDuration / NumSectionSegments,
+    BarsPerSegment = max(1, SectionBars // NumSectionSegments),
+
+    % Generate segments for this section
+    SectionSegments = create_section_segments(NumSectionSegments, SegmentDuration, BarsPerSegment,
+                                               SectionStartMood, SectionEndMood,
+                                               SectionKey, SectionMode, SectionLabel,
+                                               Randomness, SegIndex, CurrentBar,
+                                               length(RestSections) == 0),
+
+    NextSegIndex = SegIndex + NumSectionSegments,
+    Result = generate_form_section_segments(RestSections, StartMood, EndMood,
+                                            TotalDuration, SecondsPerBar, EasingType, Randomness,
+                                            TotalBars, CurrentBar + SectionBars, NextSegIndex,
+                                            [SectionSegments | Acc]).
+
+% Create segments within a single form section
+create_section_segments(NumSegments, SegmentDuration, BarsPerSegment,
+                        SectionStartMood, SectionEndMood, SectionKey, SectionMode, SectionLabel,
+                        Randomness, StartIndex, StartBar, IsFinalSection) = Segments =>
+    Segments = [create_form_segment(I, NumSegments, SegmentDuration, BarsPerSegment,
+                                     SectionStartMood, SectionEndMood,
+                                     SectionKey, SectionMode, SectionLabel,
+                                     Randomness, StartIndex, StartBar,
+                                     cond(IsFinalSection, I == NumSegments, false))
+                : I in 1..NumSegments].
+
+% Create a single segment within a form section
+create_form_segment(LocalIndex, NumLocalSegments, SegmentDuration, BarsPerSegment,
+                    SectionStartMood, SectionEndMood, SectionKey, SectionMode, SectionLabel,
+                    Randomness, GlobalStartIndex, SectionStartBar, IsFinalSegment) = Segment =>
+    % Calculate position within section
+    T = (LocalIndex - 0.5) / NumLocalSegments,
+
+    % Interpolate mood within section
+    SegmentMood = mood_lerp(SectionStartMood, SectionEndMood, T),
+
+    % Get base music params and override mode from form section
+    BaseParams = mood_to_params(SegmentMood, Randomness),
+    Params = override_mode(BaseParams, SectionMode),
+
+    % Calculate timing
+    GlobalIndex = GlobalStartIndex + LocalIndex - 1,
+    StartTime = (LocalIndex - 1) * SegmentDuration,
+    StartBar = SectionStartBar + (LocalIndex - 1) * BarsPerSegment,
+
+    % Use form section bars (handle remainder in last segment)
+    NumBars = BarsPerSegment,
+
+    % Create segment with form context
+    Segment = $form_segment(GlobalIndex, StartTime, SegmentDuration, SegmentMood, Params, NumBars,
+                            SectionKey, SectionMode, SectionLabel, IsFinalSegment).
+
+% Override mode in music params
+override_mode(music_params(Tempo, _, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand), NewMode) =
+    $music_params(Tempo, NewMode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand).
+
+% Accessors for form_segment
+get_form_segment_key(form_segment(_, _, _, _, _, _, K, _, _, _)) = K.
+get_form_segment_mode(form_segment(_, _, _, _, _, _, _, M, _, _)) = M.
+get_form_segment_label(form_segment(_, _, _, _, _, _, _, _, L, _)) = L.
+get_form_segment_is_final(form_segment(_, _, _, _, _, _, _, _, _, F)) = F.
+
+% Standard segment accessors work on form_segment too
+get_segment_index(form_segment(I, _, _, _, _, _, _, _, _, _)) = I.
+get_segment_start_time(form_segment(_, T, _, _, _, _, _, _, _, _)) = T.
+get_segment_duration(form_segment(_, _, D, _, _, _, _, _, _, _)) = D.
+get_segment_mood(form_segment(_, _, _, M, _, _, _, _, _, _)) = M.
+get_segment_params(form_segment(_, _, _, _, P, _, _, _, _, _)) = P.
+get_segment_num_bars(form_segment(_, _, _, _, _, N, _, _, _, _)) = N.
+
+% Generate all segments with form awareness
+generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = AllNotes =>
+    AllNotes = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, 1, 0, []).
+
+generate_form_segments_helper([], _, _, _, _, _, _, Acc) = flatten(reverse(Acc)).
+generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc) = Result =>
+    NumBars = get_segment_num_bars(Seg),
+    Params = get_segment_params(Seg),
+
+    % Get form context
+    SectionKey = get_form_segment_key(Seg),
+    SectionMode = get_form_segment_mode(Seg),
+    SectionLabel = get_form_segment_label(Seg),
+    IsFinal = get_form_segment_is_final(Seg),
+
+    % Transpose key root by section key (relative to C)
+    TransposedKeyRoot = KeyRoot + SectionKey,
+
+    % Determine cadence type for segment end
+    CadenceType = cond(IsFinal, authentic, half),
+
+    % Generate melody
+    if Acc == [] then
+        % First segment
+        if Genre != none then
+            once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+        else
+            once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
+        end
+    else
+        % Connect to previous segment
+        PrevMelody = head(Acc),
+        PrevLastPitch = last_pitch(PrevMelody),
+        if Genre != none then
+            if once(melody.generate_connected_segment_with_genre(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody0)) then
+                SegmentMelody = SegmentMelody0
+            else
+                once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+            end
+        else
+            if once(generate_connected_segment_melody(Params, TransposedKeyRoot, NumBars, PrevLastPitch, SegmentMelody0)) then
+                SegmentMelody = SegmentMelody0
+            else
+                once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
+            end
+        end
+    end,
+
+    printf("  Segment %2d [%c]: bars %3d-%3d, tempo=%3d, key=%s %w%n",
+           SegIndex, SectionLabel, CurrentBar + 1, CurrentBar + NumBars,
+           get_tempo(Params), pitch_class_name(SectionKey), SectionMode),
+
+    % Adjust timing
+    TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
+
+    Result = generate_form_segments_helper(Rest, FormSections, KeyRoot, Genre, Preferences,
+                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
+
+% Pitch class to note name (copied from form.pi for local use)
+pitch_class_name(0) = "C".
+pitch_class_name(1) = "C#".
+pitch_class_name(2) = "D".
+pitch_class_name(3) = "Eb".
+pitch_class_name(4) = "E".
+pitch_class_name(5) = "F".
+pitch_class_name(6) = "F#".
+pitch_class_name(7) = "G".
+pitch_class_name(8) = "Ab".
+pitch_class_name(9) = "A".
+pitch_class_name(10) = "Bb".
+pitch_class_name(11) = "B".
+pitch_class_name(N) = pitch_class_name(N mod 12).
+
+% ==============================================================================
 % SEGMENT GENERATION
 % ==============================================================================
 
@@ -300,13 +559,20 @@ main(Args) =>
     end,
     EndMood = cond(ToVA != none, parse_va(ToVA), mood_preset(EndPreset)),
 
-    % Check for genre-based generation
+    % Check for form-based generation
+    FormType = get_arg(ParsedArgs, form, none),
     Genre = get_arg(ParsedArgs, genre, none),
-    if Genre != none then
-        % Build preferences from CLI args
+
+    if FormType != none, FormType != through then
+        % Form-based generation (optionally with genre)
+        Preferences = build_preferences(ParsedArgs),
+        run_companion_with_form(StartMood, EndMood, Duration, Output, Randomness, FormType, Genre, Preferences)
+    elseif Genre != none then
+        % Genre-based generation (no form)
         Preferences = build_preferences(ParsedArgs),
         run_companion_with_genre(StartMood, EndMood, Duration, Output, Randomness, Genre, Preferences)
     else
+        % Standard generation
         run_companion(StartMood, EndMood, Duration, Output, Randomness)
     end.
 
@@ -366,6 +632,8 @@ set_arg(Map, "random", Value) = Map =>
     Map.put(randomness, to_float(Value)).
 set_arg(Map, "genre", Value) = Map =>
     Map.put(genre, to_atom(Value)).
+set_arg(Map, "form", Value) = Map =>
+    Map.put(form, form.parse_form_type(Value)).
 set_arg(Map, "disable", Value) = Map =>
     % Disable a constraint: disable=constraint_id
     Existing = Map.get(disable, []),
@@ -426,6 +694,14 @@ print_usage() =>
     println("  randomness=VAL   Randomness factor 0.0-1.0 (default: 0.0)"),
     println("                   0.0 = deterministic, 1.0 = maximum variation"),
     nl,
+    println("Form Options (for structured composition):"),
+    println("  form=TYPE        Use form structure for composition"),
+    println("                   (binary, ternary, rondo, through)"),
+    println("                   binary:  AB - two contrasting sections"),
+    println("                   ternary: ABA - statement, contrast, return"),
+    println("                   rondo:   ABACA - recurring refrain with episodes"),
+    println("                   through: no repetition (free form)"),
+    nl,
     println("Genre Options (for weighted constraint optimization):"),
     println("  genre=GENRE      Use genre-based constraint selection"),
     println("                   (classical_period, baroque, romantic, traditional_jazz,"),
@@ -440,6 +716,11 @@ print_usage() =>
     println("  picat companion.pi from=sad_depressed to=energized duration=300"),
     println("  picat companion.pi from_va=-0.7,-0.3 to_va=0.5,0.8 duration=600"),
     println("  picat companion.pi from=calm_peaceful to=energized randomness=0.5"),
+    nl,
+    println("Form examples:"),
+    println("  picat companion.pi from=calm_peaceful to=energized form=ternary"),
+    println("  picat companion.pi from=sad_depressed to=happy form=rondo duration=600"),
+    println("  picat companion.pi form=binary genre=baroque randomness=0.3"),
     nl,
     println("Genre examples:"),
     println("  picat companion.pi genre=classical_period randomness=0.3"),

@@ -124,6 +124,123 @@ in_voice_range(Midi, voice(_, _, _, range(Low, High))) =>
     Midi >= Low, Midi =< High.
 
 % ==============================================================================
+% ORNAMENTATION (Western Music Rule)
+% ==============================================================================
+% Ornaments are decorative musical figures that embellish notes
+% Structure: ornament(Type, Direction, Speed)
+%   Type: trill, mordent, turn, grace_note, appoggiatura, acciaccatura
+%   Direction: upper (default), lower
+%   Speed: fast, moderate, slow
+
+% Ornament type definitions
+ornament_type(trill).        % Rapid alternation with adjacent note
+ornament_type(mordent).      % Single alternation (inverted = lower mordent)
+ornament_type(turn).         % 4-note figure: upper-main-lower-main
+ornament_type(grace_note).   % Generic grace note
+ornament_type(appoggiatura). % "Leaning" note, takes time from main note
+ornament_type(acciaccatura). % "Crushed" note, very short before main note
+ornament_type(grupetto).     % Same as turn
+ornament_type(nachschlag).   % Grace note at end of main note
+
+% Create ornament structure
+ornament(Type) = $ornament(Type, upper, moderate).
+ornament(Type, Dir) = $ornament(Type, Dir, moderate).
+
+% Accessors
+get_ornament_type(ornament(T, _, _)) = T.
+get_ornament_direction(ornament(_, D, _)) = D.
+get_ornament_speed(ornament(_, _, S)) = S.
+
+% Expand ornament to note sequence (for MIDI export)
+% Returns list of (PitchOffset, DurationFraction) pairs
+expand_ornament(ornament(trill, upper, fast), NumRepetitions) = Seq =>
+    Seq = flatten([[0, 2] : _ in 1..NumRepetitions]).
+expand_ornament(ornament(trill, lower, fast), NumRepetitions) = Seq =>
+    Seq = flatten([[0, -1] : _ in 1..NumRepetitions]).
+expand_ornament(ornament(mordent, upper, _), _) = [0, 2, 0].
+expand_ornament(ornament(mordent, lower, _), _) = [0, -1, 0].
+expand_ornament(ornament(turn, upper, _), _) = [2, 0, -1, 0].
+expand_ornament(ornament(turn, lower, _), _) = [-1, 0, 2, 0].
+expand_ornament(ornament(grace_note, upper, _), _) = [2, 0].
+expand_ornament(ornament(grace_note, lower, _), _) = [-1, 0].
+expand_ornament(ornament(appoggiatura, upper, _), _) = [2, 0].
+expand_ornament(ornament(appoggiatura, lower, _), _) = [-1, 0].
+expand_ornament(ornament(acciaccatura, _, _), _) = [-1, 0].
+expand_ornament(_, _) = [0].  % Default: no change
+
+% Period-appropriate ornaments
+baroque_ornaments() = [trill, mordent, turn, appoggiatura].
+classical_ornaments() = [trill, turn, grace_note, acciaccatura].
+romantic_ornaments() = [trill, turn, grace_note].
+
+% Check if ornament is appropriate for period
+ornament_for_period(baroque, Orn) => member(Orn, baroque_ornaments()).
+ornament_for_period(classical, Orn) => member(Orn, classical_ornaments()).
+ornament_for_period(romantic, Orn) => member(Orn, romantic_ornaments()).
+ornament_for_period(_, _) => true.  % Modern: anything goes
+
+% Ornamented note structure: note with optional ornament
+% ornamental_note(BasePitch, Duration, TimePos, VoiceId, Velocity, Ornament)
+% where Ornament is none or $ornament(Type, Direction, Speed)
+
+% ==============================================================================
+% TEXTURE CLASSIFICATION (Western Music Rule)
+% ==============================================================================
+% Texture describes the relationship between simultaneous voices/parts
+% Structure: texture(Type, VoiceCount)
+
+% Texture type definitions
+texture_type(monophonic).   % Single melodic line, no harmony
+texture_type(homophonic).   % Melody + chordal accompaniment (voices move together)
+texture_type(polyphonic).   % Multiple independent melodic lines (counterpoint)
+texture_type(heterophonic). % Same melody with simultaneous variations
+
+% Create texture structure
+texture(Type) = $texture(Type, 1).
+texture(Type, Voices) = $texture(Type, Voices).
+
+% Texture accessors
+get_texture_type(texture(T, _)) = T.
+get_texture_voices(texture(_, V)) = V.
+
+% Typical voice counts for each texture
+typical_voice_count(monophonic) = 1.
+typical_voice_count(homophonic) = 4.  % Melody + 3-voice chords
+typical_voice_count(polyphonic) = 4.  % SATB or similar
+typical_voice_count(heterophonic) = 2.
+
+% Check if texture is valid
+valid_texture(texture(Type, Voices)) =>
+    texture_type(Type),
+    Voices >= 1,
+    (Type == monophonic -> Voices == 1 ; true).
+
+% Texture characteristics
+requires_voice_independence(polyphonic).
+requires_voice_independence(heterophonic).
+
+allows_parallel_motion(homophonic).
+allows_parallel_motion(monophonic).
+
+requires_contrary_motion(polyphonic).
+
+% Get appropriate constraints for a texture type
+texture_constraints(monophonic) = [single_voice].
+texture_constraints(homophonic) = [melody_in_soprano, chord_tones_aligned].
+texture_constraints(polyphonic) = [voice_independence, no_parallel_fifths, imitation_allowed].
+texture_constraints(heterophonic) = [related_contours, varied_rhythm].
+
+% Genre-texture mapping (typical textures for genres)
+genre_texture(baroque) = polyphonic.
+genre_texture(classical_period) = homophonic.
+genre_texture(romantic) = homophonic.
+genre_texture(folk_traditional) = monophonic.
+genre_texture(sacred_chant) = monophonic.
+genre_texture(traditional_jazz) = homophonic.
+genre_texture(contemporary) = polyphonic.
+genre_texture(_) = homophonic.  % Default
+
+% ==============================================================================
 % CHORD ABSTRACTION
 % ==============================================================================
 % Structure: chord(Root, Quality, Inversion, Extensions)
