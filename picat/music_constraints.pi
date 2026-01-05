@@ -5,10 +5,13 @@
 module music_constraints.
 
 import cp.
+import intervals.
 
 % ==============================================================================
 % INTERVAL CONSTRAINTS
 % ==============================================================================
+% All interval predicates now support dynamic context-based definitions.
+% Use the _ctx variants for context-aware interval constraints.
 
 % Constrain interval between two notes
 interval_constraint(Note1, Note2, MinInterval, MaxInterval) =>
@@ -16,25 +19,67 @@ interval_constraint(Note1, Note2, MinInterval, MaxInterval) =>
     Diff #>= MinInterval,
     Diff #=< MaxInterval.
 
-% Constrain to stepwise motion (0-2 semitones)
+% ==============================================================================
+% CONTEXT-AWARE INTERVAL PREDICATES
+% ==============================================================================
+% These use the intervals module to get dynamic thresholds
+
+% Constrain to stepwise motion with context
+stepwise_ctx(Note1, Note2, Context) =>
+    (Min, Max) = intervals.interval_range(stepwise, Context),
+    interval_constraint(Note1, Note2, Min, Max).
+
+% Constrain to small interval with context
+small_interval_ctx(Note1, Note2, Context) =>
+    (Min, Max) = intervals.interval_range(small, Context),
+    interval_constraint(Note1, Note2, Min, Max).
+
+% Constrain to skip with context
+skip_ctx(Note1, Note2, Context) =>
+    (Min, Max) = intervals.interval_range(skip, Context),
+    interval_constraint(Note1, Note2, Min, Max).
+
+% Constrain to leap with context
+leap_ctx(Note1, Note2, Context) =>
+    (Min, Max) = intervals.interval_range(leap, Context),
+    interval_constraint(Note1, Note2, Min, Max).
+
+% Constrain to large leap with context
+large_leap_ctx(Note1, Note2, Context) =>
+    (Min, Max) = intervals.interval_range(large_leap, Context),
+    interval_constraint(Note1, Note2, Min, Max).
+
+% Forbid intervals based on context (e.g., tritone for classical)
+forbid_context_intervals(Note1, Note2, Context) =>
+    Forbidden = intervals.forbidden_intervals(Context),
+    foreach(Int in Forbidden)
+        forbid_interval(Note1, Note2, Int)
+    end.
+
+% ==============================================================================
+% BACKWARD-COMPATIBLE PREDICATES (use default context)
+% ==============================================================================
+% These provide the same interface as before but use dynamic defaults
+
+% Constrain to stepwise motion (0-2 semitones by default)
 stepwise(Note1, Note2) =>
-    interval_constraint(Note1, Note2, 0, 2).
+    stepwise_ctx(Note1, Note2, intervals.default_context()).
 
-% Constrain to small interval (0-4 semitones, includes thirds)
+% Constrain to small interval (0-4 semitones by default)
 small_interval(Note1, Note2) =>
-    interval_constraint(Note1, Note2, 0, 4).
+    small_interval_ctx(Note1, Note2, intervals.default_context()).
 
-% Constrain to skip (3-4 semitones, thirds)
+% Constrain to skip (3-4 semitones by default)
 skip(Note1, Note2) =>
-    interval_constraint(Note1, Note2, 3, 4).
+    skip_ctx(Note1, Note2, intervals.default_context()).
 
-% Constrain to leap (5-7 semitones, fourth to fifth)
+% Constrain to leap (5-7 semitones by default)
 leap(Note1, Note2) =>
-    interval_constraint(Note1, Note2, 5, 7).
+    leap_ctx(Note1, Note2, intervals.default_context()).
 
-% Constrain to large leap (8+ semitones)
+% Constrain to large leap (8+ semitones by default)
 large_leap(Note1, Note2) =>
-    $abs(Note2 - Note1) #>= 8.
+    large_leap_ctx(Note1, Note2, intervals.default_context()).
 
 % Forbid specific interval
 forbid_interval(Note1, Note2, ForbiddenInterval) =>
@@ -43,6 +88,22 @@ forbid_interval(Note1, Note2, ForbiddenInterval) =>
 % Forbid tritone (6 semitones)
 no_tritone(Note1, Note2) =>
     forbid_interval(Note1, Note2, 6).
+
+% ==============================================================================
+% DYNAMIC INTERVAL HELPERS
+% ==============================================================================
+
+% Get max melodic interval for context
+get_melodic_max(Context) = Max =>
+    Max = intervals.melodic_max_interval(Context).
+
+% Get leap threshold for context
+get_leap_threshold(Context) = Threshold =>
+    Threshold = intervals.leap_threshold(Context).
+
+% Get stepwise max for context
+get_stepwise_max(Context) = Max =>
+    Max = intervals.stepwise_max(Context).
 
 % ==============================================================================
 % RANGE CONSTRAINTS
@@ -216,19 +277,34 @@ all_in_scale(Notes, Root, ScaleIntervals) =>
 % MOTION TYPE CONSTRAINTS
 % ==============================================================================
 
-% Prefer stepwise motion (soft constraint via reification)
+% Prefer stepwise motion (soft constraint via reification) - with default context
 count_stepwise_motions(Notes, Count) =>
-    Len = length(Notes),
-    Count #= sum([$abs(Notes[I+1] - Notes[I]) #=< 2 : I in 1..Len-1]).
+    count_stepwise_motions_ctx(Notes, Count, intervals.default_context()).
 
-% Count leaps
+% Prefer stepwise motion with context
+count_stepwise_motions_ctx(Notes, Count, Context) =>
+    Len = length(Notes),
+    StepMax = intervals.stepwise_max(Context),
+    Count #= sum([$abs(Notes[I+1] - Notes[I]) #=< StepMax : I in 1..Len-1]).
+
+% Count leaps - with default context
 count_leaps(Notes, Count) =>
-    Len = length(Notes),
-    Count #= sum([$abs(Notes[I+1] - Notes[I]) #>= 5 : I in 1..Len-1]).
+    count_leaps_ctx(Notes, Count, intervals.default_context()).
 
-% Limit number of leaps
+% Count leaps with context
+count_leaps_ctx(Notes, Count, Context) =>
+    Len = length(Notes),
+    LeapThreshold = intervals.leap_threshold(Context),
+    Count #= sum([$abs(Notes[I+1] - Notes[I]) #>= LeapThreshold : I in 1..Len-1]).
+
+% Limit number of leaps - with default context
 max_leaps(Notes, MaxLeaps) =>
     count_leaps(Notes, Count),
+    Count #=< MaxLeaps.
+
+% Limit number of leaps with context
+max_leaps_ctx(Notes, MaxLeaps, Context) =>
+    count_leaps_ctx(Notes, Count, Context),
     Count #=< MaxLeaps.
 
 % ==============================================================================

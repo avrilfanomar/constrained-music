@@ -8,6 +8,7 @@ import music_types.
 import temporal.
 import scale_utils.
 import music_constraints.
+import intervals.
 import advanced.
 import harmonic.
 import rhythmic.
@@ -63,14 +64,24 @@ generate_melody(Config, Melody) =>
 % CONSTRAINT APPLICATION
 % ==============================================================================
 
-apply_melodic_constraints(Pitches, Root, _Mode, ScaleNotes) =>
+% Apply melodic constraints with default context
+apply_melodic_constraints(Pitches, Root, Mode, ScaleNotes) =>
+    Context = intervals.default_context(),
+    apply_melodic_constraints_ctx(Pitches, Root, Mode, ScaleNotes, Context).
+
+% Apply melodic constraints with explicit context
+apply_melodic_constraints_ctx(Pitches, Root, _Mode, ScaleNotes, Context) =>
     Len = length(Pitches),
     RootClass = Root mod 12,
 
-    % Constraint 1: Maximum interval between consecutive notes (5 semitones)
+    % Get dynamic interval thresholds from context
+    MaxInterval = intervals.melodic_max_interval(Context),
+    LeapThreshold = intervals.leap_threshold(Context),
+
+    % Constraint 1: Maximum interval between consecutive notes (dynamic)
     % Encourages stepwise motion and small skips
     foreach(I in 1..Len-1)
-        $abs(Pitches[I+1] - Pitches[I]) #=< 5
+        $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
     end,
 
     % Constraint 2: Start on tonic, 3rd, or 5th (stable tones)
@@ -84,10 +95,10 @@ apply_melodic_constraints(Pitches, Root, _Mode, ScaleNotes) =>
     ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
     Pitches[Len] :: ValidEndNotes,
 
-    % Constraint 4: After a leap (>= 4 semitones), prefer contrary motion
+    % Constraint 4: After a leap (dynamic threshold), prefer contrary motion
     foreach(I in 1..Len-2)
         % Use constraint expressions directly (not intermediate variables)
-        ($abs(Pitches[I+1] - Pitches[I]) #>= 4) #=>
+        ($abs(Pitches[I+1] - Pitches[I]) #>= LeapThreshold) #=>
             ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
     end,
 
@@ -195,12 +206,16 @@ apply_constraints_by_level(Pitches, Root, Mode, strict, ScaleNotes) =>
 
 % Relaxed constraints - allow more freedom
 apply_relaxed_constraints(Pitches, Root, _Mode, ScaleNotes) =>
+    % Use a relaxed context with wider intervals
+    Context = new_map([style=romantic]),  % Romantic allows wider intervals
+    MaxInterval = intervals.max_interval(leap, Context),  % Up to leap range
+
     Len = length(Pitches),
     RootClass = Root mod 12,
 
-    % Only max interval constraint
+    % Only max interval constraint (dynamic)
     foreach(I in 1..Len-1)
-        $abs(Pitches[I+1] - Pitches[I]) #=< 7  % Up to perfect fifth
+        $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
     end,
 
     % End on tonic - pre-compute valid ending notes
@@ -209,12 +224,18 @@ apply_relaxed_constraints(Pitches, Root, _Mode, ScaleNotes) =>
 
 % Strict constraints - more musical rules
 apply_strict_constraints(Pitches, Root, _Mode, ScaleNotes) =>
+    % Use strict context for tighter intervals
+    Context = new_map([style=classical]),
+    SmallMax = intervals.max_interval(small, Context),  % Major third max
+    StepMax = intervals.max_interval(stepwise, Context),
+    SkipMin = intervals.min_interval(skip, Context),  % Skip threshold
+
     Len = length(Pitches),
     RootClass = Root mod 12,
 
-    % Constraint 1: Maximum interval of 4 semitones (major third)
+    % Constraint 1: Maximum interval (dynamic - small category)
     foreach(I in 1..Len-1)
-        $abs(Pitches[I+1] - Pitches[I]) #=< 4
+        $abs(Pitches[I+1] - Pitches[I]) #=< SmallMax
     end,
 
     % Constraint 2: Start and end on tonic - pre-compute valid notes
@@ -229,11 +250,11 @@ apply_strict_constraints(Pitches, Root, _Mode, ScaleNotes) =>
         Pitches[Len-1] :: ValidPenultimateNotes
     end,
 
-    % Constraint 4: After any leap, move stepwise in opposite direction
+    % Constraint 4: After any skip, move stepwise in opposite direction (dynamic thresholds)
     foreach(I in 1..Len-2)
         % Use constraint expressions directly (not intermediate variables)
-        ($abs(Pitches[I+1] - Pitches[I]) #>= 3) #=>
-            ($abs(Pitches[I+2] - Pitches[I+1]) #=< 2 #/\
+        ($abs(Pitches[I+1] - Pitches[I]) #>= SkipMin) #=>
+            ($abs(Pitches[I+2] - Pitches[I+1]) #=< StepMax #/\
              (Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #< 0)
     end,
 
@@ -363,11 +384,17 @@ generate_segment_melody(MusicParams, KeyRoot, NumBars, Melody) =>
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
 % Apply constraints based on mood parameters
+% MaxInterval is now the user-specified or mood-derived max interval
 apply_mood_constraints(Pitches, Root, _Mode, MaxInterval, ScaleNotes) =>
+    % Create context from the mood-derived MaxInterval
+    % The MaxInterval already incorporates mood considerations from mood_mapping
+    Context = intervals.default_context(),
+    LeapThreshold = intervals.leap_threshold(Context),
+
     Len = length(Pitches),
     RootClass = Root mod 12,
 
-    % Constraint 1: Maximum interval based on mood
+    % Constraint 1: Maximum interval based on mood (passed as parameter)
     foreach(I in 1..Len-1)
         $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
     end,
@@ -381,9 +408,9 @@ apply_mood_constraints(Pitches, Root, _Mode, MaxInterval, ScaleNotes) =>
     ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
     Pitches[Len] :: ValidEndNotes,
 
-    % Constraint 4: After a leap, prefer contrary motion
+    % Constraint 4: After a leap, prefer contrary motion (dynamic threshold)
     foreach(I in 1..Len-2)
-        ($abs(Pitches[I+1] - Pitches[I]) #>= 4) #=>
+        ($abs(Pitches[I+1] - Pitches[I]) #>= LeapThreshold) #=>
             ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
     end,
 
@@ -393,6 +420,53 @@ apply_mood_constraints(Pitches, Root, _Mode, MaxInterval, ScaleNotes) =>
     end,
 
     % Constraint 6: Ensure variety
+    nvalue(N, Pitches),
+    N #>= min(3, Len // 2).
+
+% Apply mood constraints with explicit context
+apply_mood_constraints_ctx(Pitches, Root, Mode, MaxInterval, ScaleNotes, Context) =>
+    % Derive interval thresholds from context
+    LeapThreshold = intervals.leap_threshold(Context),
+
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Constraint 1: Maximum interval (use smaller of passed MaxInterval and context-derived)
+    ContextMax = intervals.melodic_max_interval(Context),
+    EffectiveMax = min(MaxInterval, ContextMax + 2),
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< EffectiveMax
+    end,
+
+    % Constraint 2: Start on stable tones
+    StablePitchClasses = [RootClass, (RootClass + 4) mod 12, (RootClass + 7) mod 12],
+    ValidStartNotes = [N : N in ScaleNotes, member(N mod 12, StablePitchClasses)],
+    Pitches[1] :: ValidStartNotes,
+
+    % Constraint 3: End on tonic
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes,
+
+    % Constraint 4: After a leap, prefer contrary motion
+    foreach(I in 1..Len-2)
+        ($abs(Pitches[I+1] - Pitches[I]) #>= LeapThreshold) #=>
+            ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
+    end,
+
+    % Constraint 5: Forbid context-specific intervals (e.g., tritone)
+    Forbidden = intervals.forbidden_intervals(Context),
+    foreach(I in 1..Len-1)
+        foreach(FInt in Forbidden)
+            $abs(Pitches[I+1] - Pitches[I]) #!= FInt
+        end
+    end,
+
+    % Constraint 6: No more than 2 consecutive repeated notes
+    foreach(I in 1..Len-2)
+        #~(Pitches[I] #= Pitches[I+1] #/\ Pitches[I+1] #= Pitches[I+2])
+    end,
+
+    % Constraint 7: Ensure variety
     nvalue(N, Pitches),
     N #>= min(3, Len // 2).
 
@@ -673,12 +747,24 @@ generate_styled_segment_melody(MusicParams, KeyRoot, NumBars, Style, Melody) =>
 
 % Apply both mood-based and style-based constraints
 apply_combined_constraints(Pitches, Root, _Mode, MaxInterval, Style, ScaleNotes) =>
+    % Create context from style for dynamic interval calculations
+    Context = intervals.style_context(Style),
+    LeapThreshold = intervals.leap_threshold(Context),
+    Forbidden = intervals.forbidden_intervals(Context),
+
     Len = length(Pitches),
     RootClass = Root mod 12,
 
-    % Mood constraints (from MaxInterval)
+    % Mood constraints (from MaxInterval - already incorporates mood)
     foreach(I in 1..Len-1)
         $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
+    end,
+
+    % Forbid style-specific intervals
+    foreach(I in 1..Len-1)
+        foreach(FInt in Forbidden)
+            $abs(Pitches[I+1] - Pitches[I]) #!= FInt
+        end
     end,
 
     % Start on stable tones
@@ -695,7 +781,14 @@ apply_combined_constraints(Pitches, Root, _Mode, MaxInterval, Style, ScaleNotes)
         Pitches[I] #!= Pitches[I+1]
     end,
 
+    % Leap recovery based on dynamic threshold
+    foreach(I in 1..Len-2)
+        ($abs(Pitches[I+1] - Pitches[I]) #>= LeapThreshold) #=>
+            ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
+    end,
+
     % Apply style-specific constraints (light version to combine with mood)
+    % Range constraints now use style-derived values where applicable
     if Style == classical then
         advanced.leading_tone_resolution(Pitches, Root),
         advanced.mostly_stepwise(Pitches, 60),

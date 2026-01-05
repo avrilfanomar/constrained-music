@@ -1,0 +1,461 @@
+% intervals.pi - Dynamic interval definitions based on music theory rules
+% Provides context-aware interval thresholds calculated at runtime
+
+module intervals.
+
+import cp.
+
+% ==============================================================================
+% INTERVAL CATEGORY DEFINITIONS
+% ==============================================================================
+% These define the musical meaning of each interval category.
+% Rules can modify these based on context (style, mood, instrument, etc.)
+
+% Base interval category structure:
+% interval_category(Name, MinSemitones, MaxSemitones, Description)
+
+% Get interval category definition with optional context
+% Context is a map with keys: style, mood, instrument, tempo, etc.
+get_interval_category(Category, Context) = Def =>
+    BaseDef = base_interval_category(Category),
+    Def = apply_context_rules(Category, BaseDef, Context).
+
+% Base definitions without context modifications
+base_interval_category(unison) = $interval(0, 0, "Same pitch").
+base_interval_category(step) = $interval(1, 2, "Half or whole step").
+base_interval_category(stepwise) = $interval(0, 2, "Unison to whole step").
+base_interval_category(small) = $interval(0, 4, "Up to major third").
+base_interval_category(skip) = $interval(3, 4, "Minor/major third").
+base_interval_category(leap) = $interval(5, 7, "Perfect fourth to fifth").
+base_interval_category(large_leap) = $interval(8, 11, "Sixth to major seventh").
+base_interval_category(octave) = $interval(12, 12, "Octave").
+base_interval_category(compound) = $interval(13, 24, "Beyond octave").
+
+% Forbidden intervals by default
+base_interval_category(tritone) = $interval(6, 6, "Augmented fourth/diminished fifth").
+base_interval_category(augmented_second) = $interval(3, 3, "Augmented second").
+
+% ==============================================================================
+% CONTEXT-BASED INTERVAL RULES
+% ==============================================================================
+% Rules that modify interval thresholds based on musical context
+
+% Apply all relevant context rules
+apply_context_rules(Category, BaseDef, Context) = ModifiedDef =>
+    BaseDef = $interval(Min, Max, Desc),
+
+    % Apply style rules
+    (MinS, MaxS) = apply_style_rule(Category, Min, Max, Context),
+
+    % Apply mood rules
+    (MinM, MaxM) = apply_mood_rule(Category, MinS, MaxS, Context),
+
+    % Apply instrument rules
+    (MinI, MaxI) = apply_instrument_rule(Category, MinM, MaxM, Context),
+
+    % Apply tempo rules
+    (MinT, MaxT) = apply_tempo_rule(Category, MinI, MaxI, Context),
+
+    ModifiedDef = $interval(MinT, MaxT, Desc).
+
+% ==============================================================================
+% STYLE-BASED INTERVAL RULES
+% ==============================================================================
+
+apply_style_rule(Category, Min, Max, Context) = (NewMin, NewMax) =>
+    Style = Context.get(style, default),
+    (NewMin, NewMax) = get_style_interval(Style, Category, Min, Max).
+
+% Get style-specific interval adjustments
+% Each style can modify the base interval ranges for specific categories
+get_style_interval(Style, Category, Min, Max) = Result =>
+    if Style == baroque then
+        Result = baroque_interval(Category, Min, Max)
+    elseif Style == classical then
+        Result = (Min, Max)  % Classical uses base values
+    elseif Style == romantic then
+        Result = romantic_interval(Category, Min, Max)
+    elseif Style == minimalist then
+        Result = minimalist_interval(Category, Min, Max)
+    elseif Style == chant then
+        Result = chant_interval(Category, Min, Max)
+    elseif Style == folk then
+        Result = folk_interval(Category, Min, Max)
+    elseif Style == jazz then
+        Result = jazz_interval(Category, Min, Max)
+    elseif Style == blues then
+        Result = blues_interval(Category, Min, Max)
+    elseif Style == children then
+        Result = children_interval(Category, Min, Max)
+    elseif Style == contemporary then
+        Result = contemporary_interval(Category, Min, Max)
+    else
+        Result = (Min, Max)  % Default: no change
+    end.
+
+% Baroque: ornamental, allows small intervals freely
+baroque_interval(stepwise, Min, _Max) = (Min, 3).
+baroque_interval(_, Min, Max) = (Min, Max).
+
+% Romantic: expressive, wider leaps allowed
+romantic_interval(Category, Min, Max) = Result =>
+    if Category == small then Result = (0, 5)
+    elseif Category == leap then Result = (4, 9)
+    elseif Category == large_leap then Result = (8, 14)
+    else Result = (Min, Max)
+    end.
+
+% Minimalist: restrict to small intervals
+minimalist_interval(Category, Min, _Max) = Result =>
+    if Category == stepwise then Result = (Min, 2)
+    elseif Category == small then Result = (0, 3)
+    elseif Category == leap then Result = (5, 5)
+    elseif Category == large_leap then Result = (0, 0)
+    else Result = (Min, _Max)
+    end.
+
+% Chant/modal: stepwise motion dominates
+chant_interval(Category, _Min, _Max) = Result =>
+    if Category == stepwise then Result = (0, 2)
+    elseif Category == small then Result = (0, 3)
+    elseif Category == leap then Result = (5, 5)
+    elseif Category == large_leap then Result = (0, 0)
+    else Result = (_Min, _Max)
+    end.
+
+% Folk: pentatonic-friendly, moderate intervals
+folk_interval(Category, Min, Max) = Result =>
+    if Category == small then Result = (0, 4)
+    elseif Category == leap then Result = (5, 7)
+    else Result = (Min, Max)
+    end.
+
+% Jazz: chromatic freedom, allow more
+jazz_interval(Category, _Min, _Max) = Result =>
+    if Category == stepwise then Result = (0, 3)
+    elseif Category == small then Result = (0, 5)
+    elseif Category == leap then Result = (4, 9)
+    elseif Category == large_leap then Result = (8, 14)
+    else Result = (_Min, _Max)
+    end.
+
+% Blues: expressive bends, thirds are common
+blues_interval(Category, _Min, _Max) = Result =>
+    if Category == stepwise then Result = (0, 3)
+    elseif Category == small then Result = (0, 5)
+    elseif Category == leap then Result = (4, 8)
+    else Result = (_Min, _Max)
+    end.
+
+% Children's songs: limited range
+children_interval(Category, _Min, _Max) = Result =>
+    if Category == stepwise then Result = (0, 2)
+    elseif Category == small then Result = (0, 4)
+    elseif Category == leap then Result = (5, 7)
+    elseif Category == large_leap then Result = (0, 0)
+    else Result = (_Min, _Max)
+    end.
+
+% Contemporary: anything goes
+contemporary_interval(Category, Min, _Max) = Result =>
+    if Category == stepwise then Result = (Min, 3)
+    elseif Category == small then Result = (0, 6)
+    elseif Category == leap then Result = (4, 12)
+    elseif Category == large_leap then Result = (8, 24)
+    else Result = (Min, _Max)
+    end.
+
+% ==============================================================================
+% MOOD-BASED INTERVAL RULES
+% ==============================================================================
+% Mood is represented as (Valence, Arousal) where each is -1.0 to 1.0
+
+apply_mood_rule(Category, Min, Max, Context) = (NewMin, NewMax) =>
+    Mood = Context.get(mood, none),
+    if Mood == none then
+        (NewMin, NewMax) = (Min, Max)
+    else
+        Mood = $mood(Valence, Arousal),
+        (NewMin, NewMax) = mood_interval_adjustment(Category, Min, Max, Valence, Arousal)
+    end.
+
+% High arousal: allow larger intervals (energetic)
+% Low arousal: prefer smaller intervals (calm)
+% High valence: balanced intervals (happy)
+% Low valence: more tension, allow dissonant leaps (sad)
+
+mood_interval_adjustment(stepwise, Min, Max, _Valence, Arousal) = (NewMin, NewMax) =>
+    if Arousal > 0.5 then
+        % High energy: allow slightly larger steps
+        NewMax = min(Max + 1, 3)
+    elseif Arousal < -0.5 then
+        % Low energy: pure stepwise
+        NewMax = 2
+    else
+        NewMax = Max
+    end,
+    NewMin = Min.
+
+mood_interval_adjustment(small, Min, Max, Valence, Arousal) = (NewMin, NewMax) =>
+    BaseMax = Max,
+    % Arousal modifies range
+    ArousalMod = cond(Arousal > 0.5, 1, cond(Arousal < -0.5, -1, 0)),
+    % Valence modifies slightly (sad allows more minor thirds)
+    ValenceMod = cond(Valence < -0.3, 1, 0),
+    NewMax = max(Min, min(7, BaseMax + ArousalMod + ValenceMod)),
+    NewMin = Min.
+
+mood_interval_adjustment(leap, Min, Max, Valence, Arousal) = (NewMin, NewMax) =>
+    BaseMax = Max,
+    % High arousal: wider leaps
+    if Arousal > 0.5 then
+        NewMax = min(BaseMax + 2, 12)
+    elseif Arousal < -0.5 then
+        % Low arousal: limit leaps
+        NewMax = min(BaseMax - 1, 6)
+    else
+        NewMax = BaseMax
+    end,
+    % Low valence: allow more dramatic intervals
+    FinalMax = cond(Valence < -0.5, min(NewMax + 1, 12), NewMax),
+    NewMin = Min.
+
+mood_interval_adjustment(large_leap, Min, Max, Valence, Arousal) = (NewMin, NewMax) =>
+    if Arousal < 0 then
+        % Calm moods: no large leaps
+        NewMax = 0,
+        NewMin = 0
+    elseif Arousal > 0.7, Valence < -0.3 then
+        % Intense/dramatic: allow larger
+        NewMax = min(Max + 2, 14),
+        NewMin = Min
+    else
+        NewMax = Max,
+        NewMin = Min
+    end.
+
+% Default: no mood adjustment
+mood_interval_adjustment(_, Min, Max, _, _) = (Min, Max).
+
+% ==============================================================================
+% INSTRUMENT-BASED INTERVAL RULES
+% ==============================================================================
+
+apply_instrument_rule(Category, Min, Max, Context) = (NewMin, NewMax) =>
+    Instrument = Context.get(instrument, default),
+    (NewMin, NewMax) = instrument_interval_adjustment(Instrument, Category, Min, Max).
+
+% Violin: string crossings favor certain intervals
+instrument_interval_adjustment(violin, leap, Min, Max) = (Min, min(Max, 7)).
+instrument_interval_adjustment(violin, large_leap, _, _) = (8, 12).  % Limit to octave
+
+% Voice: limited by breath and tessitura
+instrument_interval_adjustment(voice, stepwise, Min, _Max) = (Min, 2).
+instrument_interval_adjustment(voice, leap, 5, _Max) = (5, 7).
+instrument_interval_adjustment(voice, large_leap, 8, _Max) = (8, 10).  % Max major sixth
+
+% Piano: full range available
+instrument_interval_adjustment(piano, _, Min, Max) = (Min, Max).
+
+% Guitar: fret positions favor certain intervals
+instrument_interval_adjustment(guitar, leap, Min, Max) = (Min, Max).
+instrument_interval_adjustment(guitar, large_leap, 8, _Max) = (8, 12).
+
+% Default: no change
+instrument_interval_adjustment(_, _, Min, Max) = (Min, Max).
+
+% ==============================================================================
+% TEMPO-BASED INTERVAL RULES
+% ==============================================================================
+
+apply_tempo_rule(Category, Min, Max, Context) = (NewMin, NewMax) =>
+    Tempo = Context.get(tempo, 0),
+    if Tempo == 0 then
+        (NewMin, NewMax) = (Min, Max)
+    else
+        (NewMin, NewMax) = tempo_interval_adjustment(Category, Min, Max, Tempo)
+    end.
+
+% Fast tempo: favor smaller intervals (easier to execute)
+% Slow tempo: can accommodate larger intervals
+
+tempo_interval_adjustment(leap, Min, Max, Tempo) = (NewMin, NewMax) =>
+    if Tempo > 160 then
+        % Very fast: limit leaps
+        NewMax = min(Max, 5)
+    elseif Tempo > 120 then
+        % Fast: slightly limit
+        NewMax = min(Max, 6)
+    elseif Tempo < 60 then
+        % Very slow: allow more
+        NewMax = min(Max + 2, 12)
+    else
+        NewMax = Max
+    end,
+    NewMin = Min.
+
+tempo_interval_adjustment(large_leap, Min, Max, Tempo) = (NewMin, NewMax) =>
+    if Tempo > 140 then
+        % Fast: no large leaps
+        NewMax = 0,
+        NewMin = 0
+    elseif Tempo < 60 then
+        % Slow: allow larger
+        NewMax = min(Max + 2, 16),
+        NewMin = Min
+    else
+        NewMax = Max,
+        NewMin = Min
+    end.
+
+tempo_interval_adjustment(_, Min, Max, _) = (Min, Max).
+
+% ==============================================================================
+% CONVENIENCE FUNCTIONS
+% ==============================================================================
+
+% Get max interval for a category (most common use case)
+max_interval(Category, Context) = Max =>
+    Def = get_interval_category(Category, Context),
+    Def = $interval(_, Max, _).
+
+% Get min interval for a category
+min_interval(Category, Context) = Min =>
+    Def = get_interval_category(Category, Context),
+    Def = $interval(Min, _, _).
+
+% Get interval range as tuple
+interval_range(Category, Context) = (Min, Max) =>
+    Def = get_interval_category(Category, Context),
+    Def = $interval(Min, Max, _).
+
+% Check if an interval (in semitones) belongs to a category
+is_in_category(Semitones, Category, Context) =>
+    (Min, Max) = interval_range(Category, Context),
+    Semitones >= Min,
+    Semitones =< Max.
+
+% Get the category for a given interval
+categorize_interval(Semitones, Context) = Category =>
+    AbsSemi = abs(Semitones),
+    if AbsSemi == 0 then Category = unison
+    elseif AbsSemi =< max_interval(stepwise, Context) then Category = step
+    elseif AbsSemi =< max_interval(small, Context) then Category = small
+    elseif AbsSemi =< max_interval(leap, Context) then Category = leap
+    elseif AbsSemi =< max_interval(large_leap, Context) then Category = large_leap
+    elseif AbsSemi == 12 then Category = octave
+    else Category = compound
+    end.
+
+% ==============================================================================
+% CONSTRAINT HELPERS
+% ==============================================================================
+% These return the appropriate CP constraint values
+
+% Max melodic interval based on context
+melodic_max_interval(Context) = Max =>
+    % Default to "small" category for melodic movement
+    DefaultMax = max_interval(small, Context),
+    % Check if context specifies a max
+    ContextMax = Context.get(max_interval, DefaultMax),
+    Max = min(DefaultMax + 2, ContextMax).  % Allow slightly more than "small"
+
+% Max leap interval based on context
+leap_threshold(Context) = Threshold =>
+    (Min, _) = interval_range(leap, Context),
+    Threshold = Min.
+
+% Check if interval qualifies as a leap
+is_leap_threshold(Context) = Threshold =>
+    Threshold = leap_threshold(Context).
+
+% Stepwise max based on context
+stepwise_max(Context) = Max =>
+    Max = max_interval(stepwise, Context).
+
+% ==============================================================================
+% FORBIDDEN INTERVALS
+% ==============================================================================
+
+% Get list of forbidden intervals for context
+forbidden_intervals(Context) = Forbidden =>
+    Style = Context.get(style, classical),
+    Forbidden = get_style_forbidden(Style).
+
+% Get forbidden intervals for a style
+get_style_forbidden(Style) = Result =>
+    if Style == classical then Result = [6]
+    elseif Style == baroque then Result = [6]
+    elseif Style == romantic then Result = []
+    elseif Style == jazz then Result = []
+    elseif Style == blues then Result = []
+    elseif Style == chant then Result = [6, 3]
+    elseif Style == folk then Result = [6]
+    elseif Style == children then Result = [6]
+    elseif Style == contemporary then Result = []
+    elseif Style == minimalist then Result = [6]
+    else Result = [6]  % Default: forbid tritone
+    end.
+
+% Check if interval is forbidden
+is_forbidden(Semitones, Context) =>
+    Forbidden = forbidden_intervals(Context),
+    member(abs(Semitones), Forbidden).
+
+% ==============================================================================
+% DEFAULT CONTEXT
+% ==============================================================================
+
+% Create a default context
+default_context() = Context =>
+    Context = new_map().
+
+% Create context from common parameters
+make_context(Style, Mood, Instrument, Tempo) = Context =>
+    Context = new_map([
+        style=Style,
+        mood=Mood,
+        instrument=Instrument,
+        tempo=Tempo
+    ]).
+
+% Quick context with just style
+style_context(Style) = Context =>
+    Context = new_map([style=Style]).
+
+% Quick context with style and mood
+style_mood_context(Style, Mood) = Context =>
+    Context = new_map([style=Style, mood=Mood]).
+
+% ==============================================================================
+% DEBUGGING/INSPECTION
+% ==============================================================================
+
+% Print all interval categories for a context
+print_intervals(Context) =>
+    Categories = [unison, step, stepwise, small, skip, leap, large_leap, octave],
+    println("Interval categories for context:"),
+    foreach(Cat in Categories)
+        Def = get_interval_category(Cat, Context),
+        Def = $interval(Min, Max, Desc),
+        printf("  %w: %d-%d semitones (%s)%n", Cat, Min, Max, Desc)
+    end,
+    printf("  Forbidden: %w%n", forbidden_intervals(Context)).
+
+% Compare intervals across styles
+compare_intervals_by_style() =>
+    Styles = [classical, baroque, romantic, jazz, minimalist, chant],
+    Categories = [stepwise, small, leap, large_leap],
+    println("Interval comparison by style:"),
+    printf("%-12s", "Category"),
+    foreach(S in Styles) printf(" %-10w", S) end,
+    nl,
+    foreach(Cat in Categories)
+        printf("%-12w", Cat),
+        foreach(S in Styles)
+            Ctx = style_context(S),
+            (Min, Max) = interval_range(Cat, Ctx),
+            printf(" %2d-%-7d", Min, Max)
+        end,
+        nl
+    end.

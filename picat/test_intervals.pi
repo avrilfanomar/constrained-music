@@ -1,0 +1,112 @@
+% test_intervals.pi - Test dynamic interval calculations
+% Run with: cd picat && PICATPATH="." picat test_intervals.pi
+
+import intervals.
+
+main =>
+    println("Testing dynamic interval system..."),
+    nl,
+
+    % Test 1: Default context
+    println("=== Test 1: Default Context ==="),
+    DefaultCtx = default_context(),
+    print_intervals(DefaultCtx),
+    nl,
+
+    % Test 2: Classical style context
+    println("=== Test 2: Classical Style ==="),
+    ClassicalCtx = style_context(classical),
+    print_intervals(ClassicalCtx),
+    nl,
+
+    % Test 3: Jazz style context
+    println("=== Test 3: Jazz Style ==="),
+    JazzCtx = style_context(jazz),
+    print_intervals(JazzCtx),
+    nl,
+
+    % Test 4: Minimalist style context
+    println("=== Test 4: Minimalist Style ==="),
+    MinimalistCtx = style_context(minimalist),
+    print_intervals(MinimalistCtx),
+    nl,
+
+    % Test 5: Romantic style context
+    println("=== Test 5: Romantic Style ==="),
+    RomanticCtx = style_context(romantic),
+    print_intervals(RomanticCtx),
+    nl,
+
+    % Test 6: Chant style context
+    println("=== Test 6: Chant Style ==="),
+    ChantCtx = style_context(chant),
+    print_intervals(ChantCtx),
+    nl,
+
+    % Test 7: Compare all styles
+    println("=== Test 7: Style Comparison ==="),
+    compare_intervals_by_style(),
+    nl,
+
+    % Test 8: Mood-based context
+    println("=== Test 8: Mood-based Intervals ==="),
+    % High energy, positive mood
+    HighEnergyMood = $mood(0.7, 0.8),
+    HighEnergyCtx = style_mood_context(classical, HighEnergyMood),
+    println("High energy positive mood (classical base):"),
+    print_intervals(HighEnergyCtx),
+    nl,
+
+    % Low energy, negative mood
+    LowEnergyMood = $mood(-0.5, -0.6),
+    LowEnergyCtx = style_mood_context(classical, LowEnergyMood),
+    println("Low energy negative mood (classical base):"),
+    print_intervals(LowEnergyCtx),
+    nl,
+
+    % Test 9: Full context with tempo
+    println("=== Test 9: Full Context with Tempo ==="),
+    SlowCtx = make_context(classical, HighEnergyMood, piano, 60),
+    println("Slow tempo (60 BPM):"),
+    print_intervals(SlowCtx),
+
+    FastCtx = make_context(classical, HighEnergyMood, piano, 180),
+    println("Fast tempo (180 BPM):"),
+    print_intervals(FastCtx),
+    nl,
+
+    % Test 10: Instrument-specific intervals
+    println("=== Test 10: Instrument-based Intervals ==="),
+    ViolinCtx = make_context(classical, $mood(0, 0), violin, 100),
+    println("Violin context:"),
+    print_intervals(ViolinCtx),
+
+    VoiceCtx = make_context(classical, $mood(0, 0), voice, 100),
+    println("Voice context:"),
+    print_intervals(VoiceCtx),
+    nl,
+
+    % Test 11: Convenience functions
+    println("=== Test 11: Convenience Functions ==="),
+    TestCtx = style_context(classical),
+    printf("melodic_max_interval(classical) = %d%n", melodic_max_interval(TestCtx)),
+    printf("leap_threshold(classical) = %d%n", leap_threshold(TestCtx)),
+    printf("stepwise_max(classical) = %d%n", stepwise_max(TestCtx)),
+    printf("forbidden_intervals(classical) = %w%n", forbidden_intervals(TestCtx)),
+    nl,
+
+    JazzTestCtx = style_context(jazz),
+    printf("melodic_max_interval(jazz) = %d%n", melodic_max_interval(JazzTestCtx)),
+    printf("leap_threshold(jazz) = %d%n", leap_threshold(JazzTestCtx)),
+    printf("forbidden_intervals(jazz) = %w%n", forbidden_intervals(JazzTestCtx)),
+    nl,
+
+    % Test 12: Interval categorization
+    println("=== Test 12: Interval Categorization ==="),
+    foreach(I in [0, 1, 2, 3, 4, 5, 6, 7, 8, 12])
+        Cat = categorize_interval(I, TestCtx),
+        printf("  %2d semitones -> %w%n", I, Cat)
+    end,
+    nl,
+
+    println("All tests passed!").
