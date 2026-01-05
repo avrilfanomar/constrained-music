@@ -273,18 +273,31 @@ main(Args) =>
     % Parse key=value arguments
     ParsedArgs = parse_args(Args),
 
-    % Extract options with defaults
-    StartPreset = get_arg(ParsedArgs, from, sad_depressed),
-    EndPreset = get_arg(ParsedArgs, to, energized),
+    % Extract options
     Duration = get_arg(ParsedArgs, duration, 300),
     Output = get_arg(ParsedArgs, output, "session.json"),
     Randomness = get_arg(ParsedArgs, randomness, 0.0),
 
-    % Handle VA coordinates if provided
+    % Handle VA coordinates or presets - at least one of from/from_va and to/to_va required
     FromVA = get_arg(ParsedArgs, from_va, none),
+    ToVA = get_arg(ParsedArgs, to_va, none),
+    StartPreset = get_arg(ParsedArgs, from, none),
+    EndPreset = get_arg(ParsedArgs, to, none),
+
+    % Validate: require either preset or VA coordinates for start mood
+    if FromVA == none, StartPreset == none then
+        println("Error: Missing start mood. Provide 'from=PRESET' or 'from_va=V,A'"),
+        println("Run 'picat companion.pi moods' to see available presets."),
+        halt
+    end,
     StartMood = cond(FromVA != none, parse_va(FromVA), mood_preset(StartPreset)),
 
-    ToVA = get_arg(ParsedArgs, to_va, none),
+    % Validate: require either preset or VA coordinates for end mood
+    if ToVA == none, EndPreset == none then
+        println("Error: Missing end mood. Provide 'to=PRESET' or 'to_va=V,A'"),
+        println("Run 'picat companion.pi moods' to see available presets."),
+        halt
+    end,
     EndMood = cond(ToVA != none, parse_va(ToVA), mood_preset(EndPreset)),
 
     % Check for genre-based generation
@@ -404,8 +417,8 @@ print_usage() =>
     println("  help, -h     Show this help message"),
     nl,
     println("Options (key=value format):"),
-    println("  from=PRESET      Start mood preset (default: sad_depressed)"),
-    println("  to=PRESET        End mood preset (default: energized)"),
+    println("  from=PRESET      Start mood preset (required)"),
+    println("  to=PRESET        End mood preset (required)"),
     println("  from_va=V,A      Start mood as valence,arousal (e.g., -0.7,-0.3)"),
     println("  to_va=V,A        End mood as valence,arousal (e.g., 0.5,0.8)"),
     println("  duration=SECS    Duration in seconds (default: 300)"),
