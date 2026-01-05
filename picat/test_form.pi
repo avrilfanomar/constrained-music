@@ -1,0 +1,82 @@
+% Test file for form.pi module
+
+import form.
+
+main =>
+    println("=== Testing form.pi ==="),
+    println(""),
+
+    % Test binary form
+    println("Binary form (16 bars, C major):"),
+    B = binary_form(16, 0, major),
+    foreach(S in B)
+        println("  " ++ section_description(S))
+    end,
+    println(""),
+
+    % Test ternary form
+    println("Ternary form (24 bars, C major):"),
+    T = ternary_form(24, 0, major),
+    foreach(S in T)
+        println("  " ++ section_description(S))
+    end,
+    println(""),
+
+    % Test rondo form
+    println("Rondo form (25 bars, C major):"),
+    R = rondo_form(25, 0, major),
+    foreach(S in R)
+        println("  " ++ section_description(S))
+    end,
+    println(""),
+
+    % Test minor key
+    println("Ternary form (24 bars, A minor):"),
+    Tm = ternary_form(24, 9, minor),
+    foreach(S in Tm)
+        println("  " ++ section_description(S))
+    end,
+    println(""),
+
+    % Test through form
+    println("Through-composed (32 bars, G major):"),
+    Th = through_form(32, 7, major),
+    foreach(S in Th)
+        println("  " ++ section_description(S))
+    end,
+    println(""),
+
+    % Test form parsing
+    println("Testing parse_form_type:"),
+    println("  'binary' -> " ++ to_string(parse_form_type("binary"))),
+    println("  'ternary' -> " ++ to_string(parse_form_type("ternary"))),
+    println("  'rondo' -> " ++ to_string(parse_form_type("rondo"))),
+    println("  'through' -> " ++ to_string(parse_form_type("through"))),
+    println("  'unknown' -> " ++ to_string(parse_form_type("unknown"))),
+    println(""),
+
+    % Test get_form_sections
+    println("Testing get_form_sections:"),
+    Sections = get_form_sections(ternary, 12, 0, major),
+    foreach(S in Sections)
+        println("  " ++ section_description(S))
+    end,
+    println(""),
+
+    % Test section_at_bar
+    println("Testing section_at_bar with ternary form (12 bars):"),
+    println("  Bar 2 is in: " ++ section_description(section_at_bar(Sections, 2))),
+    println("  Bar 6 is in: " ++ section_description(section_at_bar(Sections, 6))),
+    println("  Bar 10 is in: " ++ section_description(section_at_bar(Sections, 10))),
+    println(""),
+
+    % Test validation
+    println("Testing sections_fill_duration:"),
+    (sections_fill_duration(Sections, 12) ->
+        println("  Sections fill 12 bars: PASS")
+    ;
+        println("  Sections fill 12 bars: FAIL")
+    ),
+    println(""),
+
+    println("=== All tests completed ===").

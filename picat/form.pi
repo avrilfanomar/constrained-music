@@ -29,11 +29,11 @@ form_type(through).      % No repetition (free form / through-composed)
 %   Mode: major, minor, dorian, phrygian, lydian, mixolydian, aeolian, locrian
 
 % Accessor functions
-section_label($section(Label, _, _, _, _)) = Label.
-section_start($section(_, Start, _, _, _)) = Start.
-section_bars($section(_, _, Bars, _, _)) = Bars.
-section_key($section(_, _, _, Key, _)) = Key.
-section_mode($section(_, _, _, _, Mode)) = Mode.
+section_label(section(Label, _, _, _, _)) = Label.
+section_start(section(_, Start, _, _, _)) = Start.
+section_bars(section(_, _, Bars, _, _)) = Bars.
+section_key(section(_, _, _, Key, _)) = Key.
+section_mode(section(_, _, _, _, Mode)) = Mode.
 
 % -----------------------------------------------------------------------------
 % Binary Form (AB)
@@ -49,9 +49,10 @@ binary_form(TotalBars, KeyRoot, Mode) = Sections =>
     SectionA = $section(a, 1, HalfPoint, KeyRoot, Mode),
 
     % Section B: contrasting key
+    BStart = HalfPoint + 1,
     ContrastKey = contrast_key(KeyRoot, Mode),
     ContrastMode = contrast_mode(Mode),
-    SectionB = $section(b, HalfPoint + 1, RemainderBars, ContrastKey, ContrastMode),
+    SectionB = $section(b, BStart, RemainderBars, ContrastKey, ContrastMode),
 
     Sections = [SectionA, SectionB].
 
@@ -66,15 +67,17 @@ ternary_form(TotalBars, KeyRoot, Mode) = Sections =>
     Remainder = TotalBars - 2 * ThirdLen,
 
     % Section A1: tonic key
-    SectionA1 = section(a, 1, ThirdLen, KeyRoot, Mode),
+    SectionA1 = $section(a, 1, ThirdLen, KeyRoot, Mode),
 
     % Section B: contrasting key
+    BStart = ThirdLen + 1,
     ContrastKey = contrast_key(KeyRoot, Mode),
     ContrastMode = contrast_mode(Mode),
-    SectionB = section(b, ThirdLen + 1, ThirdLen, ContrastKey, ContrastMode),
+    SectionB = $section(b, BStart, ThirdLen, ContrastKey, ContrastMode),
 
     % Section A2: return to tonic (may be varied)
-    SectionA2 = section(a, 2 * ThirdLen + 1, Remainder, KeyRoot, Mode),
+    A2Start = 2 * ThirdLen + 1,
+    SectionA2 = $section(a, A2Start, Remainder, KeyRoot, Mode),
 
     Sections = [SectionA1, SectionB, SectionA2].
 
@@ -112,14 +115,14 @@ build_rondo_list(SectionNum, TotalSections, KeyRoot, Mode, CurrentBar, SectionLe
     % Odd sections are A (refrain), even sections are episodes
     (SectionNum mod 2 == 1 ->
         % A section (refrain) - tonic key
-        Section = section(a, StartBar, Bars, KeyRoot, Mode)
+        Section = $section(a, StartBar, Bars, KeyRoot, Mode)
     ;
         % Episode - contrasting key
         EpisodeIdx = SectionNum // 2,
         EpisodeLabel = EpisodeLabels[EpisodeIdx],
         ContrastKey = episode_key(KeyRoot, Mode, EpisodeIdx),
         ContrastMode = contrast_mode(Mode),
-        Section = section(EpisodeLabel, StartBar, Bars, ContrastKey, ContrastMode)
+        Section = $section(EpisodeLabel, StartBar, Bars, ContrastKey, ContrastMode)
     ),
     Rest = build_rondo_list(SectionNum + 1, TotalSections, KeyRoot, Mode, CurrentBar + Bars, SectionLen, ExtraBars, EpisodeLabels),
     Result = [Section | Rest].
@@ -130,7 +133,7 @@ build_rondo_list(SectionNum, TotalSections, KeyRoot, Mode, CurrentBar, SectionLe
 % Single section spanning entire piece - no structural repetition
 
 through_form(TotalBars, KeyRoot, Mode) = Sections =>
-    Sections = [section(a, 1, TotalBars, KeyRoot, Mode)].
+    Sections = [$section(a, 1, TotalBars, KeyRoot, Mode)].
 
 % -----------------------------------------------------------------------------
 % Key Contrast Functions

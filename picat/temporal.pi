@@ -209,7 +209,7 @@ form_rondo(ALen, BLen, CLen) = Sections =>
 
 % Get total bars in a form
 form_total_bars(Sections) = Total =>
-    Total = sum([Len * Rep : section(_, _, Len, Rep) in Sections]).
+    Total = sum([Len * Rep : $section(_, _, Len, Rep) in Sections]).
 
 % ==============================================================================
 % GENERATION BOUNDS
