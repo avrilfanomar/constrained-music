@@ -102,10 +102,8 @@ apply_melodic_constraints_ctx(Pitches, Root, _Mode, ScaleNotes, Context) =>
             ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
     end,
 
-    % Constraint 5: No consecutive repeated notes
-    foreach(I in 1..Len-1)
-        #~(Pitches[I] #= Pitches[I+1])
-    end,
+    % Constraint 5: No more than 2 consecutive repeated notes
+    max_consecutive_repeats(Pitches, 2),
 
     % Constraint 6: Ensure some variety - at least 3 different pitches
     nvalue(N, Pitches),
@@ -776,10 +774,8 @@ apply_combined_constraints(Pitches, Root, _Mode, MaxInterval, Style, ScaleNotes)
     ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
     Pitches[Len] :: ValidEndNotes,
 
-    % No consecutive repeated notes
-    foreach(I in 1..Len-1)
-        Pitches[I] #!= Pitches[I+1]
-    end,
+    % No more than 2 consecutive repeated notes
+    max_consecutive_repeats(Pitches, 2),
 
     % Leap recovery based on dynamic threshold
     foreach(I in 1..Len-2)
@@ -966,6 +962,9 @@ apply_base_melodic_constraints(Pitches, Root, MaxInterval, ScaleNotes) =>
     % End on tonic
     ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
     Pitches[Len] :: ValidEndNotes,
+
+    % No more than 2 consecutive repeated notes
+    max_consecutive_repeats(Pitches, 2),
 
     % Minimum variety
     nvalue(N, Pitches),
