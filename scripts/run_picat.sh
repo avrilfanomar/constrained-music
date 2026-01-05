@@ -145,8 +145,6 @@ if [ -n "$OUTPUT_NAME" ]; then
     JSON_FILE="${OUTPUT_NAME}.json"
 elif [ -f "session.json" ]; then
     JSON_FILE="session.json"
-elif [ -f "violin_session.json" ]; then
-    JSON_FILE="violin_session.json"
 fi
 
 # Convert to MIDI if requested
@@ -195,6 +193,6 @@ if [ "$CONVERT_MIDI" = true ] || [ "$CONVERT_LILYPOND" = true ] || [ "$CONVERT_S
     if [ -z "$JSON_FILE" ] || [ ! -f "$JSON_FILE" ]; then
         echo ""
         echo "Warning: No JSON output file found for conversion"
-        echo "Expected: session.json or violin_session.json"
+        echo "Expected: session.json or session.json"
     fi
 fi

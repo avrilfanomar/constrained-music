@@ -488,11 +488,11 @@ print_all_genres() =>
 
 % Quick demo with short duration
 demo() =>
-    run_companion_presets(sad_depressed, energized, 60, "demo.json").
+    run_companion_presets(sad_depressed, energized, 60, "session.json").
 
 % Quick demo with randomness
 demo_with_randomness(Randomness) =>
-    run_companion_presets(sad_depressed, energized, 60, "demo.json", Randomness).
+    run_companion_presets(sad_depressed, energized, 60, "session.json", Randomness).
 
 % Demo showing transition path only (no generation)
 demo_path() =>
@@ -668,7 +668,7 @@ run_violin_companion(Opts) =>
     StartPreset = get_arg(Opts, from, calm_peaceful),
     EndPreset = get_arg(Opts, to, energized),
     Duration = get_arg(Opts, duration, 300),
-    Output = get_arg(Opts, output, "violin_session.json"),
+    Output = get_arg(Opts, output, "session.json"),
     Randomness = get_arg(Opts, randomness, 0.0),
 
     StartMood = mood_preset(StartPreset),
