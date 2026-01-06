@@ -341,13 +341,26 @@ get_form_segment_mode(form_segment(_, _, _, _, _, _, _, M, _, _)) = M.
 get_form_segment_label(form_segment(_, _, _, _, _, _, _, _, L, _)) = L.
 get_form_segment_is_final(form_segment(_, _, _, _, _, _, _, _, _, F)) = F.
 
-% Standard segment accessors work on form_segment too
+% Segment accessors - handle both form_segment (10 args) and regular segment (6 args)
+% Note: In Picat, all clauses of a function must be contiguous
+
 get_segment_index(form_segment(I, _, _, _, _, _, _, _, _, _)) = I.
+get_segment_index(segment(I, _, _, _, _, _)) = I.
+
 get_segment_start_time(form_segment(_, T, _, _, _, _, _, _, _, _)) = T.
+get_segment_start_time(segment(_, T, _, _, _, _)) = T.
+
 get_segment_duration(form_segment(_, _, D, _, _, _, _, _, _, _)) = D.
+get_segment_duration(segment(_, _, D, _, _, _)) = D.
+
 get_segment_mood(form_segment(_, _, _, M, _, _, _, _, _, _)) = M.
+get_segment_mood(segment(_, _, _, M, _, _)) = M.
+
 get_segment_params(form_segment(_, _, _, _, P, _, _, _, _, _)) = P.
+get_segment_params(segment(_, _, _, _, P, _)) = P.
+
 get_segment_num_bars(form_segment(_, _, _, _, _, N, _, _, _, _)) = N.
+get_segment_num_bars(segment(_, _, _, _, _, N)) = N.
 
 % Generate all segments with form awareness
 generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = AllNotes =>

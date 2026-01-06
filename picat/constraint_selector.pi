@@ -113,11 +113,12 @@ randomize_weights(SoftList, Randomness) = Result =>
     end.
 
 % Perturb a single weight based on randomness
+% Uses random2() for consistent auto-seeded randomization
 perturb_weight(Weight, Randomness) = NewWeight =>
     % Scale: randomness 0->0%, 0.5->20%, 1.0->40% variation
     MaxPerturbPercent = 40 * Randomness,
-    % Random value between -1 and 1
-    RandFactor = (random() mod 2001 - 1000) / 1000.0,
+    % Random value between -1 and 1 (using random2 for auto-seeding)
+    RandFactor = (random2() mod 2001 - 1000) / 1000.0,
     % Calculate perturbation
     Perturbation = Weight * MaxPerturbPercent * RandFactor / 100,
     % Apply and clamp

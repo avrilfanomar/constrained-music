@@ -484,18 +484,16 @@ build_mood_melody_with_randomness(Pitches, _NumBars, NotesPerBar, VoiceId, VelBa
 
 % Determine solve options based on randomness level
 % Randomness 0.0: deterministic first-fail
-% Randomness 0.5: mix of strategies
-% Randomness 1.0: random value selection (ff still needed for efficiency)
+% Randomness 0.1-0.3: probabilistic random value selection
+% Randomness 0.4+: always use random value selection
 solve_options_for_randomness(Randomness) = Opts =>
-    if Randomness >= 0.7 then
-        % High randomness: first-fail for variable selection (required for efficiency),
-        % random value selection for variety
-        Opts = [ff, rand_val]
-    elseif Randomness >= 0.4 then
-        % Medium randomness: first-fail with random value selection
+    if Randomness >= 0.4 then
+        % Medium/high randomness: first-fail with random value selection
+        % (ff still needed for efficiency, rand_val adds variety)
         Opts = [ff, rand_val]
     elseif Randomness >= 0.1 then
-        % Low randomness: sometimes use random value selection
+        % Low randomness: probabilistically use random value selection
+        % Chance scales with randomness level (10% at 0.1, 30% at 0.3)
         Opts = cond(rand01() < Randomness, [ff, rand_val], [ff])
     else
         % No randomness: deterministic first-fail
