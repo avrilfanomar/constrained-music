@@ -1,0 +1,242 @@
+% pieces_folk.pi - Traditional folk melodies for constraint validation
+% These melodies test simplicity constraints: mostly_stepwise, max_range, ends_on_tonic
+
+module pieces_folk.
+
+import piece_utils.
+
+% ==============================================================================
+% TWINKLE TWINKLE LITTLE STAR
+% French melody "Ah! vous dirai-je, Maman" (1761)
+% Tests: max_range (octave), ends_on_tonic, mostly_stepwise, arch_contour
+% ==============================================================================
+%
+% C C G G | A A G - | F F E E | D D C - |
+% G G F F | E E D - | G G F F | E E D - |
+% C C G G | A A G - | F F E E | D D C - |
+
+twinkle_twinkle() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        twinkle_twinkle,
+        % First phrase (AABA structure - just first A)
+        [60, 60, 67, 67, 69, 69, 67,    % C C G G A A G
+         65, 65, 64, 64, 62, 62, 60],   % F F E E D D C
+        60,   % C major
+        major,
+        folk_traditional
+    ).
+
+% Full melody with B section
+twinkle_twinkle_full() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        twinkle_twinkle_full,
+        % A section
+        [60, 60, 67, 67, 69, 69, 67,    % C C G G A A G
+         65, 65, 64, 64, 62, 62, 60,    % F F E E D D C
+        % B section
+         67, 67, 65, 65, 64, 64, 62,    % G G F F E E D
+         67, 67, 65, 65, 64, 64, 62,    % G G F F E E D
+        % A section (repeat)
+         60, 60, 67, 67, 69, 69, 67,    % C C G G A A G
+         65, 65, 64, 64, 62, 62, 60],   % F F E E D D C
+        60,
+        major,
+        folk_traditional
+    ).
+
+% ==============================================================================
+% AMAZING GRACE
+% American hymn by John Newton (1772)
+% Tests: arch_contour, phrase_ends_stable, leap_recovery
+% ==============================================================================
+%
+% G3 | C4 E4 C4 E4 | D4 C4 A3 | G3 G3 C4 E4 | G4 - |
+% E4 G4 E4 C4 | D4 C4 A3 | G3 G3 C4 | (D C)
+%
+% Simplified first verse melody
+
+amazing_grace() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        amazing_grace,
+        % "Amazing grace, how sweet the sound"
+        [55,                            % Pickup: G3
+         60, 64, 60, 64, 62, 60, 57,    % C4 E4 C4 E4 D4 C4 A3
+         55, 55, 60, 64,                % G3 G3 C4 E4
+         67,                            % G4 (climax)
+        % "That saved a wretch like me"
+         64, 67, 64, 60, 62, 60, 57,    % E4 G4 E4 C4 D4 C4 A3
+         55, 55, 60, 62, 60],           % G3 G3 C4 D4 C4
+        60,   % C major
+        major,
+        folk_traditional
+    ).
+
+% ==============================================================================
+% GREENSLEEVES
+% English folk song (16th century)
+% Tests: no_tritone_outline (Dorian mode), leap_recovery, phrase_ends_stable
+% ==============================================================================
+%
+% A minor / Dorian mode melody
+% A3 | C4 D4 | E4 F4 E4 | D4 B3 | G3 A3 B3 | C4 A3 | A3 G#3 A3 | B3 G#3 | E3
+%
+% Simplified version in natural minor
+
+greensleeves() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        greensleeves,
+        % "Alas, my love, you do me wrong"
+        [57,                            % A3 (pickup)
+         60, 62,                        % C4 D4
+         64, 65, 64,                    % E4 F4 E4
+         62, 59,                        % D4 B3
+         55, 57, 59,                    % G3 A3 B3
+         60, 57,                        % C4 A3
+         57, 56, 57,                    % A3 G#3 A3 (leading tone)
+         59, 56,                        % B3 G#3
+         52],                           % E3 (dominant)
+        57,   % A minor (root = A = 57)
+        natural_minor,
+        folk_traditional
+    ).
+
+% ==============================================================================
+% SCARBOROUGH FAIR
+% English traditional ballad
+% Tests: no_leading_tone_emphasis (modal - Dorian), stepwise motion
+% ==============================================================================
+%
+% In Dorian mode - avoids strong leading tone resolution
+% D E F G A | D D C B A | G A B C D | A
+
+scarborough_fair() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        scarborough_fair,
+        % "Are you going to Scarborough Fair?"
+        [62, 64, 65, 67, 69,            % D4 E4 F4 G4 A4
+         74, 74, 72, 71, 69,            % D5 D5 C5 B4 A4
+         67, 69, 71, 72, 74,            % G4 A4 B4 C5 D5
+         69,                            % A4 (ends on 5th)
+        % "Parsley, sage, rosemary and thyme"
+         74, 72, 71, 69,                % D5 C5 B4 A4
+         67, 69, 71, 69, 67,            % G4 A4 B4 A4 G4
+         65, 67, 69, 62],               % F4 G4 A4 D4 (back to tonic)
+        62,   % D Dorian
+        dorian,
+        folk_traditional
+    ).
+
+% ==============================================================================
+% MARY HAD A LITTLE LAMB
+% American nursery rhyme (1830)
+% Tests: max_range (5 semitones!), mostly_stepwise, simple structure
+% ==============================================================================
+%
+% E D C D | E E E - | D D D - | E G G - |
+% E D C D | E E E E | D D E D | C - - - |
+
+mary_had_a_little_lamb() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        mary_had_a_little_lamb,
+        [64, 62, 60, 62,                % E D C D
+         64, 64, 64,                    % E E E
+         62, 62, 62,                    % D D D
+         64, 67, 67,                    % E G G
+         64, 62, 60, 62,                % E D C D
+         64, 64, 64, 64,                % E E E E
+         62, 62, 64, 62,                % D D E D
+         60],                           % C
+        60,   % C major
+        major,
+        folk_traditional
+    ).
+
+% ==============================================================================
+% AULD LANG SYNE
+% Scottish folk song
+% Tests: phrase_ends_stable, arch_contour, leap_recovery
+% ==============================================================================
+%
+% Simplified first phrase in F major
+
+auld_lang_syne() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        auld_lang_syne,
+        % "Should auld acquaintance be forgot"
+        [60,                            % C4 (pickup)
+         65, 65, 65, 69,                % F4 F4 F4 A4
+         67, 67, 69, 72,                % G4 G4 A4 C5
+         69, 69, 72, 69,                % A4 A4 C5 A4
+         67, 65,                        % G4 F4
+        % "And never brought to mind"
+         65, 65, 65, 69,                % F4 F4 F4 A4
+         67, 67, 69, 72,                % G4 G4 A4 C5 (climax)
+         74, 72, 69, 67,                % D5 C5 A4 G4
+         65],                           % F4 (tonic)
+        65,   % F major
+        major,
+        folk_traditional
+    ).
+
+% ==============================================================================
+% FRERE JACQUES (Are You Sleeping)
+% French children's song
+% Tests: simple range, ends_on_tonic, repetitive patterns
+% ==============================================================================
+
+frere_jacques() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        frere_jacques,
+        % "Frère Jacques, Frère Jacques"
+        [60, 62, 64, 60,                % C D E C
+         60, 62, 64, 60,                % C D E C
+        % "Dormez-vous, Dormez-vous"
+         64, 65, 67,                    % E F G
+         64, 65, 67,                    % E F G
+        % "Sonnez les matines"
+         67, 69, 67, 65, 64, 60,        % G A G F E C
+         67, 69, 67, 65, 64, 60,        % G A G F E C
+        % "Din din don"
+         60, 55, 60,                    % C G C
+         60, 55, 60],                   % C G C
+        60,   % C major
+        major,
+        folk_traditional
+    ).
+
+% ==============================================================================
+% REGISTRY OF ALL FOLK PIECES
+% ==============================================================================
+
+all_folk_pieces() = Pieces =>
+    Pieces = [
+        twinkle_twinkle(),
+        twinkle_twinkle_full(),
+        amazing_grace(),
+        greensleeves(),
+        scarborough_fair(),
+        mary_had_a_little_lamb(),
+        auld_lang_syne(),
+        frere_jacques()
+    ].
+
+folk_piece_ids() = [
+    twinkle_twinkle,
+    twinkle_twinkle_full,
+    amazing_grace,
+    greensleeves,
+    scarborough_fair,
+    mary_had_a_little_lamb,
+    auld_lang_syne,
+    frere_jacques
+].
+
+% Get a piece by ID
+get_folk_piece(twinkle_twinkle) = twinkle_twinkle().
+get_folk_piece(twinkle_twinkle_full) = twinkle_twinkle_full().
+get_folk_piece(amazing_grace) = amazing_grace().
+get_folk_piece(greensleeves) = greensleeves().
+get_folk_piece(scarborough_fair) = scarborough_fair().
+get_folk_piece(mary_had_a_little_lamb) = mary_had_a_little_lamb().
+get_folk_piece(auld_lang_syne) = auld_lang_syne().
+get_folk_piece(frere_jacques) = frere_jacques().

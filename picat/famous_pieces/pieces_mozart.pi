@@ -1,0 +1,175 @@
+% pieces_mozart.pi - Mozart compositions for constraint validation
+% Piano sonata themes test phrase structure constraints
+
+module pieces_mozart.
+
+import piece_utils.
+
+% ==============================================================================
+% PIANO SONATA NO. 16 IN C MAJOR, K. 545 "FACILE"
+% First movement, main theme
+% Tests: single_climax, antecedent_consequent, phrase_ends_stable
+% ==============================================================================
+%
+% The famous "easy" sonata opening
+% C E G C5 | E5 G4 G4 | A4 G4 F4 E4 | D4 C4 - -
+
+k545_theme() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        mozart_k545_theme,
+        % First phrase (antecedent)
+        [60, 64, 67, 72,                % C4 E4 G4 C5 (ascending)
+         76, 67, 67,                    % E5 G4 G4 (climax then return)
+         69, 67, 65, 64,                % A4 G4 F4 E4 (stepwise descent)
+         62, 60,                        % D4 C4 (ends on tonic)
+        % Second phrase (consequent)
+         60, 64, 67, 72,                % C4 E4 G4 C5
+         76, 67, 67,                    % E5 G4 G4
+         69, 67, 65, 64,                % A4 G4 F4 E4
+         62, 60],                       % D4 C4 (full cadence)
+        60,   % C major
+        major,
+        classical_period
+    ).
+
+% Just the first phrase
+k545_first_phrase() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        mozart_k545_first_phrase,
+        [60, 64, 67, 72,                % C4 E4 G4 C5
+         76, 67, 67,                    % E5 G4 G4
+         69, 67, 65, 64,                % A4 G4 F4 E4
+         62, 60],                       % D4 C4
+        60,
+        major,
+        classical_period
+    ).
+
+% ==============================================================================
+% PIANO SONATA NO. 11 IN A MAJOR, K. 331 "ALLA TURCA"
+% Theme from the first movement (Andante grazioso)
+% Tests: max_range, balanced_motion, arch_contour
+% ==============================================================================
+%
+% Theme with variations movement opening
+% A major, very balanced melodic contour
+
+k331_theme() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        mozart_k331_theme,
+        % First period
+        [73, 71, 69, 71,                % C#5 B4 A4 B4
+         73, 76, 73, 71,                % C#5 E5 C#5 B4 (climax in middle)
+         69, 71, 73, 71,                % A4 B4 C#5 B4
+         69, 68, 69,                    % A4 G#4 A4 (ends on tonic)
+        % Second phrase
+         73, 71, 69, 71,                % C#5 B4 A4 B4
+         73, 76, 73, 71,                % C#5 E5 C#5 B4
+         69, 71, 73, 71,                % A4 B4 C#5 B4
+         69, 66, 69],                   % A4 F#4 A4
+        69,   % A major
+        major,
+        classical_period
+    ).
+
+% ==============================================================================
+% PIANO SONATA NO. 13 IN B-FLAT MAJOR, K. 333
+% First movement theme
+% Tests: leave_climax_contrary, strong_beat_stability
+% ==============================================================================
+
+k333_theme() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        mozart_k333_theme,
+        % Opening theme
+        [70, 69, 70, 72,                % Bb4 A4 Bb4 C5
+         74, 72, 70, 69,                % D5 C5 Bb4 A4
+         70, 72, 74, 77,                % Bb4 C5 D5 F5 (climax)
+         74, 72, 70,                    % D5 C5 Bb4 (descent from climax)
+        % Second phrase
+         69, 70, 72, 74,                % A4 Bb4 C5 D5
+         72, 70, 69, 67,                % C5 Bb4 A4 G4
+         65, 67, 69, 70],               % F4 G4 A4 Bb4 (back to tonic)
+        70,   % Bb major
+        major,
+        classical_period
+    ).
+
+% ==============================================================================
+% EINE KLEINE NACHTMUSIK, K. 525
+% First movement, main theme
+% Tests: balanced_motion, single_climax, phrase structure
+% ==============================================================================
+%
+% G major, famous opening
+
+eine_kleine_theme() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        mozart_eine_kleine_theme,
+        % Opening gesture and first theme
+        [67,                            % G4 (anacrusis)
+         62, 55,                        % D4 G3 (famous descending fourth)
+         55, 59, 62, 67,                % G3 B3 D4 G4 (ascending arpeggio)
+         71,                            % B4
+         67, 62,                        % G4 D4
+         62, 66, 71, 74,                % D4 F#4 B4 D5 (climax)
+         71, 67, 62, 55],               % B4 G4 D4 G3 (descent)
+        67,   % G major
+        major,
+        classical_period
+    ).
+
+% ==============================================================================
+% SYMPHONY NO. 40 IN G MINOR, K. 550
+% First movement, main theme
+% Tests: minor mode handling, phrase_ends_stable
+% ==============================================================================
+%
+% Famous G minor theme
+
+symphony40_theme() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        mozart_symphony40_theme,
+        % Opening theme (simplified)
+        [62, 62, 63,                    % D4 D4 Eb4 (upbeat + first beat)
+         62, 62, 63,                    % D4 D4 Eb4
+         62, 65, 67,                    % D4 F4 G4
+         70, 70, 69,                    % Bb4 Bb4 A4
+         67, 67, 65,                    % G4 G4 F4
+         62, 62, 60,                    % D4 D4 C4
+         58, 58, 62],                   % Bb3 Bb3 D4 (back to dominant)
+        67,   % G minor (root = G = 67)
+        natural_minor,
+        classical_period
+    ).
+
+% ==============================================================================
+% REGISTRY OF ALL MOZART PIECES
+% ==============================================================================
+
+all_mozart_pieces() = Pieces =>
+    Pieces = [
+        k545_theme(),
+        k545_first_phrase(),
+        k331_theme(),
+        k333_theme(),
+        eine_kleine_theme(),
+        symphony40_theme()
+    ].
+
+mozart_piece_ids() = [
+    mozart_k545_theme,
+    mozart_k545_first_phrase,
+    mozart_k331_theme,
+    mozart_k333_theme,
+    mozart_eine_kleine_theme,
+    mozart_symphony40_theme
+].
+
+% Get a piece by ID
+get_mozart_piece(mozart_k545_theme) = k545_theme().
+get_mozart_piece(mozart_k545_first_phrase) = k545_first_phrase().
+get_mozart_piece(mozart_k331_theme) = k331_theme().
+get_mozart_piece(mozart_k333_theme) = k333_theme().
+get_mozart_piece(mozart_eine_kleine_theme) = eine_kleine_theme().
+get_mozart_piece(mozart_symphony40_theme) = symphony40_theme().

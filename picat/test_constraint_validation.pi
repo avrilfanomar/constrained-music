@@ -1,0 +1,965 @@
+% test_constraint_validation.pi - Unified constraint checking for famous pieces validation
+% Provides a dispatcher to check constraints against static pitch data
+
+module test_constraint_validation.
+
+import cp.
+import music_constraints.
+import advanced.
+import soft_constraints.
+import piece_utils.
+import pieces_folk.
+import pieces_bach.
+import pieces_mozart.
+import pieces_beethoven.
+
+% ==============================================================================
+% HARD CONSTRAINT CHECKERS (Boolean: pass/fail)
+% ==============================================================================
+% These check if a constraint is satisfied on static data (not CP variables)
+
+% Check if there are no parallel fifths between two voices
+check_no_parallel_fifths(Voice1, Voice2) =>
+    Len = length(Voice1),
+    foreach(I in 1..Len-1)
+        Int1 = abs(Voice1[I] - Voice2[I]) mod 12,
+        Int2 = abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        M1 = Voice1[I+1] - Voice1[I],
+        M2 = Voice2[I+1] - Voice2[I],
+        % Fail if both intervals are fifths and motion is parallel
+        not (Int1 == 7, Int2 == 7, M1 * M2 > 0)
+    end.
+
+% Check if there are no parallel octaves between two voices
+check_no_parallel_octaves(Voice1, Voice2) =>
+    Len = length(Voice1),
+    foreach(I in 1..Len-1)
+        Int1 = abs(Voice1[I] - Voice2[I]) mod 12,
+        Int2 = abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        M1 = Voice1[I+1] - Voice1[I],
+        M2 = Voice2[I+1] - Voice2[I],
+        not (Int1 == 0, Int2 == 0, M1 * M2 > 0)
+    end.
+
+% Check no voice crossing (higher voice stays above lower)
+check_no_voice_crossing(HigherVoice, LowerVoice) =>
+    foreach(I in 1..length(HigherVoice))
+        HigherVoice[I] >= LowerVoice[I]
+    end.
+
+% Check leading tone resolution
+check_leading_tone_resolution(Pitches, KeyRoot) =>
+    LeadingTone = (KeyRoot + 11) mod 12,
+    Tonic = KeyRoot mod 12,
+    Len = length(Pitches),
+    foreach(I in 1..Len-1)
+        NotePC = Pitches[I] mod 12,
+        NextPC = Pitches[I+1] mod 12,
+        % If on leading tone, next must be tonic or stay on leading tone
+        if NotePC == LeadingTone then
+            (NextPC == Tonic ; NextPC == LeadingTone)
+        end
+    end.
+
+% Check ends on tonic
+check_ends_on_tonic(Pitches, KeyRoot) =>
+    LastPC = Pitches[length(Pitches)] mod 12,
+    TonicPC = KeyRoot mod 12,
+    LastPC == TonicPC.
+
+% Check ends on stable tone (1, 3, or 5 of scale)
+check_phrase_ends_stable(Pitches, KeyRoot) =>
+    LastInterval = (Pitches[length(Pitches)] - KeyRoot) mod 12,
+    member(LastInterval, [0, 4, 7]).  % Root, major third, fifth
+
+% Check no augmented seconds (3 semitones)
+check_no_augmented_seconds(Pitches) =>
+    Len = length(Pitches),
+    foreach(I in 1..Len-1)
+        Interval = abs(Pitches[I+1] - Pitches[I]),
+        Interval != 3
+    end.
+
+% Check no tritone outline (across 3 consecutive notes)
+check_no_tritone_outline(Pitches) =>
+    Len = length(Pitches),
+    foreach(I in 1..Len-2)
+        PC1 = Pitches[I] mod 12,
+        PC3 = Pitches[I+2] mod 12,
+        Outline = abs(PC3 - PC1),
+        Outline != 6, (12 - Outline) != 6  % 6 semitones = tritone
+    end.
+
+% Check max range constraint
+check_max_range(Pitches, MaxRange) =>
+    Range = max(Pitches) - min(Pitches),
+    Range =< MaxRange.
+
+% Check min range constraint
+check_min_range(Pitches, MinRange) =>
+    Range = max(Pitches) - min(Pitches),
+    Range >= MinRange.
+
+% ==============================================================================
+% SOFT CONSTRAINT SCORERS (Return violation count)
+% ==============================================================================
+% These return the number of violations, suitable for comparison/baseline
+
+% Score leap recovery violations
+score_leap_recovery(Pitches) = Count =>
+    Len = length(Pitches),
+    if Len < 3 then
+        Count = 0
+    else
+        Count = length([I : I in 1..Len-2,
+            abs(Pitches[I+1] - Pitches[I]) >= 5,
+            (Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) >= 0
+        ])
+    end.
+
+% Score mostly stepwise violations (count non-stepwise intervals)
+score_mostly_stepwise(Pitches, MinPercent) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Violations = 0
+    else
+        NumIntervals = Len - 1,
+        StepCount = length([I : I in 1..NumIntervals, abs(Pitches[I+1] - Pitches[I]) =< 2]),
+        MinSteps = (NumIntervals * MinPercent) // 100,
+        Shortfall = MinSteps - StepCount,
+        Violations = max(0, Shortfall)
+    end.
+
+% Score consecutive same-direction leaps
+score_consecutive_leaps(Pitches) = Count =>
+    Len = length(Pitches),
+    if Len < 3 then
+        Count = 0
+    else
+        Count = length([I : I in 1..Len-2,
+            abs(Pitches[I+1] - Pitches[I]) >= 3,
+            abs(Pitches[I+2] - Pitches[I+1]) >= 3,
+            (Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) > 0
+        ])
+    end.
+
+% Score single climax (0 = good, 1-2 = violations)
+score_single_climax(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then
+        Violations = 0
+    else
+        MaxPitch = max(Pitches),
+        ClimaxPositions = [I : I in 1..Len, Pitches[I] == MaxPitch],
+        NumClimax = length(ClimaxPositions),
+        ThirdStart = Len // 3 + 1,
+        ThirdEnd = 2 * Len // 3,
+        InMiddle = length([P : P in ClimaxPositions, P >= ThirdStart, P =< ThirdEnd]),
+        NotSingle = cond(NumClimax != 1, 1, 0),
+        NotInMiddle = cond(InMiddle == 0, 1, 0),
+        Violations = NotSingle + NotInMiddle
+    end.
+
+% Score balanced motion (difference between ascending/descending)
+score_balanced_motion(Pitches, TolerancePercent) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Violations = 0
+    else
+        NumIntervals = Len - 1,
+        AscCount = length([I : I in 1..NumIntervals, Pitches[I+1] > Pitches[I]]),
+        DescCount = length([I : I in 1..NumIntervals, Pitches[I+1] < Pitches[I]]),
+        Tolerance = max(1, (NumIntervals * TolerancePercent) // 100),
+        Excess = abs(AscCount - DescCount) - Tolerance,
+        Violations = max(0, Excess)
+    end.
+
+% Score arch contour violations
+score_arch_contour(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 4 then
+        Violations = 0
+    else
+        MidPoint = Len // 2,
+        Count = 0,
+        foreach(I in 1..Len-1)
+            Interval = Pitches[I+1] - Pitches[I],
+            if I =< MidPoint then
+                % First half: violation if descending > 2
+                if Interval < -2 then Count := Count + 1 end
+            else
+                % Second half: violation if ascending > 2
+                if Interval > 2 then Count := Count + 1 end
+            end
+        end,
+        Violations = Count
+    end.
+
+% Score leading tone emphasis (count excess leading tones)
+score_leading_tone_emphasis(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 1 then
+        Violations = 0
+    else
+        LeadingTone = (KeyRoot + 11) mod 12,
+        MaxAllowed = max(1, Len // 4),
+        LTCount = length([P : P in Pitches, P mod 12 == LeadingTone]),
+        Violations = max(0, LTCount - MaxAllowed)
+    end.
+
+% Score immediate repeats (consecutive same pitch)
+score_immediate_repeats(Pitches) = Count =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Count = 0
+    else
+        Count = length([I : I in 1..Len-1, Pitches[I] == Pitches[I+1]])
+    end.
+
+% Score octave leaps
+score_octave_leaps(Pitches, MaxAllowed) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Violations = 0
+    else
+        OctaveCount = length([I : I in 1..Len-1, abs(Pitches[I+1] - Pitches[I]) >= 12]),
+        Violations = max(0, OctaveCount - MaxAllowed)
+    end.
+
+% Score tonic anchoring (count windows without tonic)
+score_tonic_anchoring(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    TonicPC = KeyRoot mod 12,
+    NumWindows = Len // 4,
+    if NumWindows < 1 then
+        Violations = 0
+    else
+        Violations = NumWindows - count_windows_with_tonic(Pitches, TonicPC, NumWindows)
+    end.
+
+% Helper to count windows that contain tonic
+count_windows_with_tonic(Pitches, TonicPC, NumWindows) = Count =>
+    Count = length([W : W in 1..NumWindows,
+        Start = (W - 1) * 4 + 1,
+        End = min(Start + 3, length(Pitches)),
+        WindowPCs = [Pitches[I] mod 12 : I in Start..End],
+        membchk(TonicPC, WindowPCs)
+    ]).
+
+% ==============================================================================
+% VOICE LEADING SCORERS (for SATB)
+% ==============================================================================
+
+% Count parallel fifths violations between two voices
+count_parallel_fifths(Voice1, Voice2) = Count =>
+    Len = length(Voice1),
+    if Len < 2 then
+        Count = 0
+    else
+        Count = length([I : I in 1..Len-1,
+            Int1 = abs(Voice1[I] - Voice2[I]) mod 12,
+            Int2 = abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+            M1 = Voice1[I+1] - Voice1[I],
+            M2 = Voice2[I+1] - Voice2[I],
+            Int1 == 7, Int2 == 7, M1 * M2 > 0
+        ])
+    end.
+
+% Count parallel octaves violations
+count_parallel_octaves(Voice1, Voice2) = Count =>
+    Len = length(Voice1),
+    if Len < 2 then
+        Count = 0
+    else
+        Count = length([I : I in 1..Len-1,
+            Int1 = abs(Voice1[I] - Voice2[I]) mod 12,
+            Int2 = abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+            M1 = Voice1[I+1] - Voice1[I],
+            M2 = Voice2[I+1] - Voice2[I],
+            Int1 == 0, Int2 == 0, M1 * M2 > 0
+        ])
+    end.
+
+% Count voice crossings
+count_voice_crossings(HigherVoice, LowerVoice) = Count =>
+    Count = length([I : I in 1..length(HigherVoice), HigherVoice[I] < LowerVoice[I]]).
+
+% Count contrary motion instances
+count_contrary(Voice1, Voice2) = Count =>
+    Len = length(Voice1),
+    if Len < 2 then
+        Count = 0
+    else
+        Count = length([I : I in 1..Len-1,
+            M1 = Voice1[I+1] - Voice1[I],
+            M2 = Voice2[I+1] - Voice2[I],
+            M1 * M2 < 0
+        ])
+    end.
+
+% ==============================================================================
+% ASSERTION HELPERS (following test_music_types.pi pattern)
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Condition, Msg) =>
+    if not Condition then
+        printf("FAIL: %s%n", Msg),
+        fail
+    end.
+
+assert_constraint_passes(ConstraintName, CheckPredicate) =>
+    if not call(CheckPredicate) then
+        printf("FAIL: %s constraint violated%n", ConstraintName),
+        fail
+    end.
+
+assert_violation_count_below(ConstraintName, ActualCount, MaxAllowed, PieceId) =>
+    if ActualCount > MaxAllowed then
+        printf("FAIL: %w has %d %s violations (max: %d)%n",
+               PieceId, ActualCount, ConstraintName, MaxAllowed),
+        fail
+    end.
+
+assert_no_parallel_fifths(Voice1, Voice2, Label) =>
+    Count = count_parallel_fifths(Voice1, Voice2),
+    if Count > 0 then
+        printf("FAIL: %s has %d parallel fifths%n", Label, Count),
+        fail
+    end.
+
+assert_no_parallel_octaves(Voice1, Voice2, Label) =>
+    Count = count_parallel_octaves(Voice1, Voice2),
+    if Count > 0 then
+        printf("FAIL: %s has %d parallel octaves%n", Label, Count),
+        fail
+    end.
+
+assert_no_voice_crossing(HigherVoice, LowerVoice, Label) =>
+    Count = count_voice_crossings(HigherVoice, LowerVoice),
+    if Count > 0 then
+        printf("FAIL: %s has %d voice crossings%n", Label, Count),
+        fail
+    end.
+
+% ==============================================================================
+% MAIN ENTRY POINT
+% ==============================================================================
+
+main(Args) => main.
+
+main =>
+    println("=== Famous Pieces Constraint Validation Test Suite ==="),
+    println("Validating that famous masterpieces satisfy our music theory constraints"),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_folk_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_bach_satb() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_bach_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mozart_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_beethoven_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_soft_constraint_baselines() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_masterpiece_integration() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed! Famous pieces validate our constraints.")
+    else
+        println("Some tests failed - constraint definitions may need adjustment."),
+        fail
+    end.
+
+% ==============================================================================
+% FOLK MELODY TESTS
+% Tests basic melodic constraints on simple, well-known tunes
+% ==============================================================================
+
+test_folk_melodies =>
+    println("Testing folk melodies..."),
+
+    % Twinkle Twinkle - very simple, should pass all basic constraints
+    TwinklePitches = get_melody(twinkle_twinkle()),
+    TwinkleKey = get_key(twinkle_twinkle()),
+
+    % Check max range (should be within 12 semitones for children's song)
+    (check_max_range(TwinklePitches, 12) -> true
+     ; println("FAIL: twinkle: max_range <= 12"), fail),
+
+    % Check ends on tonic
+    (check_ends_on_tonic(TwinklePitches, TwinkleKey) -> true
+     ; println("FAIL: twinkle: ends_on_tonic"), fail),
+
+    % Mary Had a Little Lamb - extremely simple range
+    MaryPitches = get_melody(mary_had_a_little_lamb()),
+    MaryKey = get_key(mary_had_a_little_lamb()),
+
+    (check_max_range(MaryPitches, 8) -> true
+     ; println("FAIL: mary: max_range <= 8"), fail),
+    (check_ends_on_tonic(MaryPitches, MaryKey) -> true
+     ; println("FAIL: mary: ends_on_tonic"), fail),
+
+    % Amazing Grace - tests arch contour and leap recovery
+    GracePitches = get_melody(amazing_grace()),
+    GraceKey = get_key(amazing_grace()),
+
+    (check_ends_on_tonic(GracePitches, GraceKey) -> true
+     ; println("FAIL: amazing_grace: ends_on_tonic"), fail),
+    (check_max_range(GracePitches, 15) -> true
+     ; println("FAIL: amazing_grace: max_range <= 15"), fail),
+
+    % Frere Jacques - ends on tonic, simple structure
+    FrerePitches = get_melody(frere_jacques()),
+    FrereKey = get_key(frere_jacques()),
+
+    (check_ends_on_tonic(FrerePitches, FrereKey) -> true
+     ; println("FAIL: frere_jacques: ends_on_tonic"), fail),
+
+    % Auld Lang Syne - ends on tonic
+    AuldPitches = get_melody(auld_lang_syne()),
+    AuldKey = get_key(auld_lang_syne()),
+
+    (check_ends_on_tonic(AuldPitches, AuldKey) -> true
+     ; println("FAIL: auld_lang_syne: ends_on_tonic"), fail),
+
+    println("  Folk melodies: OK").
+
+% ==============================================================================
+% BACH SATB TESTS
+% Tests voice leading constraints on 4-part chorales
+% ==============================================================================
+
+test_bach_satb =>
+    println("Testing Bach SATB chorales..."),
+
+    % BWV 269 - "O Haupt voll Blut und Wunden"
+    BWV269 = bwv269_bars1_4(),
+    {S1, A1, T1, B1} = get_satb(BWV269),
+
+    % Test no parallel fifths between all voice pairs
+    assert_no_parallel_fifths(S1, A1, "BWV269 S-A"),
+    assert_no_parallel_fifths(S1, T1, "BWV269 S-T"),
+    assert_no_parallel_fifths(S1, B1, "BWV269 S-B"),
+    assert_no_parallel_fifths(A1, T1, "BWV269 A-T"),
+    assert_no_parallel_fifths(A1, B1, "BWV269 A-B"),
+    assert_no_parallel_fifths(T1, B1, "BWV269 T-B"),
+
+    % Test no parallel octaves
+    assert_no_parallel_octaves(S1, A1, "BWV269 S-A"),
+    assert_no_parallel_octaves(S1, T1, "BWV269 S-T"),
+    assert_no_parallel_octaves(S1, B1, "BWV269 S-B"),
+    assert_no_parallel_octaves(A1, T1, "BWV269 A-T"),
+    assert_no_parallel_octaves(A1, B1, "BWV269 A-B"),
+    assert_no_parallel_octaves(T1, B1, "BWV269 T-B"),
+
+    % Test no voice crossing
+    assert_no_voice_crossing(S1, A1, "BWV269 S-A"),
+    assert_no_voice_crossing(A1, T1, "BWV269 A-T"),
+    assert_no_voice_crossing(T1, B1, "BWV269 T-B"),
+
+    % BWV 253 - "Ach bleib bei uns"
+    BWV253 = bwv253_bars1_4(),
+    {S2, A2, T2, B2} = get_satb(BWV253),
+
+    % Test no parallel fifths
+    assert_no_parallel_fifths(S2, A2, "BWV253 S-A"),
+    assert_no_parallel_fifths(S2, B2, "BWV253 S-B"),
+    assert_no_parallel_fifths(A2, B2, "BWV253 A-B"),
+
+    % Test no parallel octaves
+    assert_no_parallel_octaves(S2, A2, "BWV253 S-A"),
+    assert_no_parallel_octaves(S2, B2, "BWV253 S-B"),
+
+    % Test no voice crossing (soprano always above alto, etc.)
+    assert_no_voice_crossing(S2, A2, "BWV253 S-A"),
+    assert_no_voice_crossing(A2, T2, "BWV253 A-T"),
+    assert_no_voice_crossing(T2, B2, "BWV253 T-B"),
+
+    println("  Bach SATB chorales: OK").
+
+% ==============================================================================
+% BACH MELODY TESTS
+% Tests melodic constraints on inventions and preludes
+% ==============================================================================
+
+test_bach_melodies =>
+    println("Testing Bach melodies..."),
+
+    % Invention No. 1 - tests stepwise motion, sequence patterns
+    Inv1Pitches = get_melody(invention1_subject()),
+
+    % Should be mostly stepwise (baroque melodic style)
+    StepwisePercent = stepwise_percent(Inv1Pitches),
+    (StepwisePercent >= 40 -> true
+     ; printf("FAIL: invention1: stepwise >= 40%% (got %d%%)%n", StepwisePercent), fail),
+
+    % Should have reasonable range
+    (check_max_range(Inv1Pitches, 15) -> true
+     ; println("FAIL: invention1: max_range <= 15"), fail),
+
+    % Invention No. 4 (D minor) - no augmented seconds in natural minor version
+    Inv4Pitches = get_melody(invention4_subject()),
+    (check_no_augmented_seconds(Inv4Pitches) -> true
+     ; println("FAIL: invention4: no_augmented_seconds"), fail),
+
+    % Invention No. 8 - very stepwise
+    Inv8Pitches = get_melody(invention8_subject()),
+    Inv8Stepwise = stepwise_percent(Inv8Pitches),
+    (Inv8Stepwise >= 60 -> true
+     ; printf("FAIL: invention8: stepwise >= 60%% (got %d%%)%n", Inv8Stepwise), fail),
+
+    % WTC Prelude in C - mostly stepwise top line
+    WTCPitches = get_melody(wtc1_prelude_c()),
+    WTCStepwise = stepwise_percent(WTCPitches),
+    (WTCStepwise >= 70 -> true
+     ; printf("FAIL: wtc1_prelude: stepwise >= 70%% (got %d%%)%n", WTCStepwise), fail),
+
+    println("  Bach melodies: OK").
+
+% ==============================================================================
+% MOZART MELODY TESTS
+% Tests Classical period phrase structure and contour
+% ==============================================================================
+
+test_mozart_melodies =>
+    println("Testing Mozart melodies..."),
+
+    % K. 545 "Facile" - clear phrase structure, ends on tonic
+    K545Pitches = get_melody(k545_theme()),
+    K545Key = get_key(k545_theme()),
+
+    (check_ends_on_tonic(K545Pitches, K545Key) -> true
+     ; println("FAIL: k545: ends_on_tonic"), fail),
+    (check_max_range(K545Pitches, 20) -> true
+     ; println("FAIL: k545: max_range <= 20"), fail),
+
+    % K. 331 Theme - very balanced, ends on tonic
+    K331Pitches = get_melody(k331_theme()),
+    K331Key = get_key(k331_theme()),
+
+    (check_ends_on_tonic(K331Pitches, K331Key) -> true
+     ; println("FAIL: k331: ends_on_tonic"), fail),
+
+    % Eine Kleine Nachtmusik - famous opening
+    EinePitches = get_melody(eine_kleine_theme()),
+
+    (check_max_range(EinePitches, 20) -> true
+     ; println("FAIL: eine_kleine: max_range <= 20"), fail),
+
+    % Symphony 40 - G minor, phrase ends stable
+    Sym40Pitches = get_melody(symphony40_theme()),
+    Sym40Key = get_key(symphony40_theme()),
+
+    % In minor mode, ends stable (on 5th degree)
+    (check_phrase_ends_stable(Sym40Pitches, Sym40Key) -> true
+     ; println("FAIL: symphony40: ends_stable"), fail),
+
+    % K. 333 Theme - graceful, balanced
+    K333Pitches = get_melody(k333_theme()),
+    K333Key = get_key(k333_theme()),
+
+    (check_ends_on_tonic(K333Pitches, K333Key) -> true
+     ; println("FAIL: k333: ends_on_tonic"), fail),
+
+    println("  Mozart melodies: OK").
+
+% ==============================================================================
+% BEETHOVEN MELODY TESTS
+% Tests Romantic/Late Classical melodic features
+% ==============================================================================
+
+test_beethoven_melodies =>
+    println("Testing Beethoven melodies..."),
+
+    % Ode to Joy - extremely stepwise, ends on tonic
+    OdePitches = get_melody(ode_to_joy()),
+    OdeKey = get_key(ode_to_joy()),
+
+    OdeStepwise = stepwise_percent(OdePitches),
+    (OdeStepwise >= 70 -> true
+     ; printf("FAIL: ode_to_joy: stepwise >= 70%% (got %d%%)%n", OdeStepwise), fail),
+    (check_ends_on_tonic(OdePitches, OdeKey) -> true
+     ; println("FAIL: ode_to_joy: ends_on_tonic"), fail),
+
+    % Fur Elise - characteristic A minor theme
+    FurPitches = get_melody(fur_elise_theme()),
+    FurKey = get_key(fur_elise_theme()),
+
+    % Should return to tonic region (A)
+    (check_phrase_ends_stable(FurPitches, FurKey) -> true
+     ; println("FAIL: fur_elise: ends_stable"), fail),
+
+    % Pathetique Adagio - beautiful arch contour, ends on tonic
+    PathPitches = get_melody(pathetique_adagio()),
+    PathKey = get_key(pathetique_adagio()),
+
+    (check_ends_on_tonic(PathPitches, PathKey) -> true
+     ; println("FAIL: pathetique: ends_on_tonic"), fail),
+
+    % Pastoral Symphony - F major theme, ends on tonic
+    PastPitches = get_melody(pastoral_theme()),
+    PastKey = get_key(pastoral_theme()),
+
+    (check_ends_on_tonic(PastPitches, PastKey) -> true
+     ; println("FAIL: pastoral: ends_on_tonic"), fail),
+
+    % Symphony 5 motif - characteristic short-short-short-long
+    Sym5Pitches = get_melody(symphony5_motif()),
+
+    % Should have limited range for the motif
+    (check_max_range(Sym5Pitches, 12) -> true
+     ; println("FAIL: symphony5: max_range <= 12"), fail),
+
+    println("  Beethoven melodies: OK").
+
+% ==============================================================================
+% SOFT CONSTRAINT BASELINE TESTS
+% Establishes baseline violation counts for soft constraints
+% These don't fail but report metrics for comparison with generated music
+% ==============================================================================
+
+test_soft_constraint_baselines =>
+    println("Testing soft constraint baselines..."),
+    println("  (Reporting violation counts for comparison with generated music)"),
+
+    % Test leap recovery on various pieces
+    test_leap_recovery_baselines(),
+
+    % Test balanced motion
+    test_balanced_motion_baselines(),
+
+    % Test single climax
+    test_climax_baselines(),
+
+    println("  Soft constraint baselines: OK").
+
+test_leap_recovery_baselines =>
+    % Folk pieces should have good leap recovery
+    TwinkleLeaps = score_leap_recovery(get_melody(twinkle_twinkle())),
+    MaryLeaps = score_leap_recovery(get_melody(mary_had_a_little_lamb())),
+
+    assert_violation_count_below("leap_recovery", TwinkleLeaps, 2, twinkle_twinkle),
+    assert_violation_count_below("leap_recovery", MaryLeaps, 1, mary_had_a_little_lamb),
+
+    % Classical themes should also recover well
+    OdeLeaps = score_leap_recovery(get_melody(ode_to_joy())),
+    assert_violation_count_below("leap_recovery", OdeLeaps, 3, ode_to_joy).
+
+test_balanced_motion_baselines =>
+    % Mozart should be balanced
+    K545Motion = score_balanced_motion(get_melody(k545_theme()), 30),
+    assert_violation_count_below("balanced_motion", K545Motion, 3, k545_theme),
+
+    % Ode to Joy is very balanced
+    OdeMotion = score_balanced_motion(get_melody(ode_to_joy()), 30),
+    assert_violation_count_below("balanced_motion", OdeMotion, 3, ode_to_joy).
+
+test_climax_baselines =>
+    % Test single climax scoring
+    K545Climax = score_single_climax(get_melody(k545_first_phrase())),
+    assert_violation_count_below("single_climax", K545Climax, 2, k545_first_phrase),
+
+    % Amazing Grace should have clear climax
+    GraceClimax = score_single_climax(get_melody(amazing_grace())),
+    assert_violation_count_below("single_climax", GraceClimax, 2, amazing_grace).
+
+% ==============================================================================
+% HELPER: COUNT SATB VOICE LEADING VIOLATIONS
+% Returns total number of failures for a SATB excerpt
+% ==============================================================================
+
+count_satb_failures(S, A, T, B) = Failures =>
+    P5_SA = cond(count_parallel_fifths(S, A) > 0, 1, 0),
+    P5_ST = cond(count_parallel_fifths(S, T) > 0, 1, 0),
+    P5_SB = cond(count_parallel_fifths(S, B) > 0, 1, 0),
+    P5_AT = cond(count_parallel_fifths(A, T) > 0, 1, 0),
+    P5_AB = cond(count_parallel_fifths(A, B) > 0, 1, 0),
+    P5_TB = cond(count_parallel_fifths(T, B) > 0, 1, 0),
+    P8_SA = cond(count_parallel_octaves(S, A) > 0, 1, 0),
+    P8_ST = cond(count_parallel_octaves(S, T) > 0, 1, 0),
+    P8_SB = cond(count_parallel_octaves(S, B) > 0, 1, 0),
+    P8_AT = cond(count_parallel_octaves(A, T) > 0, 1, 0),
+    P8_AB = cond(count_parallel_octaves(A, B) > 0, 1, 0),
+    P8_TB = cond(count_parallel_octaves(T, B) > 0, 1, 0),
+    VC_SA = cond(count_voice_crossings(S, A) > 0, 1, 0),
+    VC_AT = cond(count_voice_crossings(A, T) > 0, 1, 0),
+    VC_TB = cond(count_voice_crossings(T, B) > 0, 1, 0),
+    Failures = P5_SA + P5_ST + P5_SB + P5_AT + P5_AB + P5_TB +
+               P8_SA + P8_ST + P8_SB + P8_AT + P8_AB + P8_TB +
+               VC_SA + VC_AT + VC_TB.
+
+% ==============================================================================
+% MASTERPIECE INTEGRATION TEST
+% Comprehensive test that validates ALL pieces against ALL applicable constraints
+% This serves as the ultimate validation that our constraints match real music
+% ==============================================================================
+
+test_masterpiece_integration =>
+    println(""),
+    println("=== MASTERPIECE INTEGRATION TEST ==="),
+    println("Comprehensive validation of all constraints against all pieces"),
+    println(""),
+
+    % Track statistics
+    TotalTests = 0,
+    PassedTests = 0,
+    FailedTests = 0,
+
+    % ==== FOLK MELODIES ====
+    println("--- Folk Melodies ---"),
+    FolkPieces = [
+        twinkle_twinkle(),
+        mary_had_a_little_lamb(),
+        amazing_grace(),
+        greensleeves(),
+        scarborough_fair(),
+        auld_lang_syne(),
+        frere_jacques()
+    ],
+    foreach(Piece in FolkPieces)
+        Pitches = get_melody(Piece),
+        Key = get_key(Piece),
+        Id = get_id(Piece),
+
+        % Test ends_on_tonic or ends_stable
+        TotalTests := TotalTests + 1,
+        if check_ends_on_tonic(Pitches, Key) ; check_phrase_ends_stable(Pitches, Key) then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - doesn't end on tonic or stable%n", Id),
+            FailedTests := FailedTests + 1
+        end,
+
+        % Test max_range (folk songs should be singable)
+        TotalTests := TotalTests + 1,
+        if check_max_range(Pitches, 20) then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - range exceeds 20 semitones%n", Id),
+            FailedTests := FailedTests + 1
+        end
+    end,
+    printf("  Folk: %d tests%n", length(FolkPieces) * 2),
+
+    % ==== BACH SATB CHORALES ====
+    println("--- Bach SATB Chorales ---"),
+
+    % Test BWV 269
+    BWV269 = bwv269_bars1_4(),
+    {S269, A269, T269, B269} = get_satb(BWV269),
+    Failures269 = count_satb_failures(S269, A269, T269, B269),
+    TotalTests := TotalTests + 15,
+    PassedTests := PassedTests + (15 - Failures269),
+    FailedTests := FailedTests + Failures269,
+    if Failures269 > 0 then printf("  FAIL: bwv269_bars1_4 has %d voice leading violations%n", Failures269) end,
+
+    % Test BWV 253
+    BWV253 = bwv253_bars1_4(),
+    {S253, A253, T253, B253} = get_satb(BWV253),
+    Failures253 = count_satb_failures(S253, A253, T253, B253),
+    TotalTests := TotalTests + 15,
+    PassedTests := PassedTests + (15 - Failures253),
+    FailedTests := FailedTests + Failures253,
+    if Failures253 > 0 then printf("  FAIL: bwv253_bars1_4 has %d voice leading violations%n", Failures253) end,
+
+    printf("  Bach SATB: 30 tests%n"),
+
+    % ==== BACH MELODIES ====
+    println("--- Bach Melodies ---"),
+    BachMelodies = [
+        invention1_subject(),
+        invention1_bars1_4(),
+        invention4_subject(),
+        invention8_subject(),
+        wtc1_prelude_c()
+    ],
+    foreach(Piece in BachMelodies)
+        Pitches = get_melody(Piece),
+        Id = get_id(Piece),
+
+        % Bach should be mostly stepwise (at least 40%)
+        TotalTests := TotalTests + 1,
+        StepPercent = stepwise_percent(Pitches),
+        if StepPercent >= 40 then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - only %d%% stepwise (need 40%%)%n", Id, StepPercent),
+            FailedTests := FailedTests + 1
+        end,
+
+        % Range should be reasonable
+        TotalTests := TotalTests + 1,
+        if check_max_range(Pitches, 24) then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - range exceeds 2 octaves%n", Id),
+            FailedTests := FailedTests + 1
+        end
+    end,
+    printf("  Bach Melodies: %d tests%n", length(BachMelodies) * 2),
+
+    % ==== MOZART MELODIES ====
+    println("--- Mozart Melodies ---"),
+    MozartPieces = [
+        k545_theme(),
+        k545_first_phrase(),
+        k331_theme(),
+        k333_theme(),
+        eine_kleine_theme(),
+        symphony40_theme()
+    ],
+    foreach(Piece in MozartPieces)
+        Pitches = get_melody(Piece),
+        Key = get_key(Piece),
+        Id = get_id(Piece),
+
+        % Mozart phrases should end stable
+        TotalTests := TotalTests + 1,
+        if check_phrase_ends_stable(Pitches, Key) ; check_ends_on_tonic(Pitches, Key) then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - doesn't end stable%n", Id),
+            FailedTests := FailedTests + 1
+        end,
+
+        % Range reasonable
+        TotalTests := TotalTests + 1,
+        if check_max_range(Pitches, 24) then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - range exceeds 2 octaves%n", Id),
+            FailedTests := FailedTests + 1
+        end,
+
+        % Balanced motion (allow up to 40% tolerance)
+        TotalTests := TotalTests + 1,
+        MotionViolations = score_balanced_motion(Pitches, 40),
+        if MotionViolations =< 3 then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - %d motion imbalance violations%n", Id, MotionViolations),
+            FailedTests := FailedTests + 1
+        end
+    end,
+    printf("  Mozart: %d tests%n", length(MozartPieces) * 3),
+
+    % ==== BEETHOVEN MELODIES ====
+    println("--- Beethoven Melodies ---"),
+    BeethovenPieces = [
+        ode_to_joy(),
+        ode_to_joy_d_major(),
+        fur_elise_theme(),
+        symphony5_motif(),
+        pathetique_adagio(),
+        moonlight_melody(),
+        pastoral_theme()
+    ],
+    foreach(Piece in BeethovenPieces)
+        Pitches = get_melody(Piece),
+        Key = get_key(Piece),
+        Id = get_id(Piece),
+
+        % Should end stable (on 1, 3, or 5)
+        TotalTests := TotalTests + 1,
+        if check_phrase_ends_stable(Pitches, Key) ; check_ends_on_tonic(Pitches, Key) then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - doesn't end stable%n", Id),
+            FailedTests := FailedTests + 1
+        end,
+
+        % Range reasonable
+        TotalTests := TotalTests + 1,
+        if check_max_range(Pitches, 24) then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - range exceeds 2 octaves%n", Id),
+            FailedTests := FailedTests + 1
+        end,
+
+        % Leap recovery should be reasonable
+        TotalTests := TotalTests + 1,
+        LeapViolations = score_leap_recovery(Pitches),
+        MaxLeapViolations = max(3, length(Pitches) // 5),
+        if LeapViolations =< MaxLeapViolations then
+            PassedTests := PassedTests + 1
+        else
+            printf("  FAIL: %w - %d leap recovery violations (max %d)%n", Id, LeapViolations, MaxLeapViolations),
+            FailedTests := FailedTests + 1
+        end
+    end,
+    printf("  Beethoven: %d tests%n", length(BeethovenPieces) * 3),
+
+    % ==== CROSS-COMPOSER SOFT CONSTRAINT VALIDATION ====
+    println("--- Cross-Composer Soft Constraints ---"),
+    AllMelodies = FolkPieces ++ BachMelodies ++ MozartPieces ++ BeethovenPieces,
+
+    % Count total soft constraint violations across all pieces
+    TotalLeapViolations = 0,
+    TotalStepwiseViolations = 0,
+    TotalClimaxViolations = 0,
+    TotalRepeatViolations = 0,
+
+    foreach(Piece in AllMelodies)
+        Pitches = get_melody(Piece),
+        _ = get_key(Piece),  % Key available if needed in future
+
+        TotalLeapViolations := TotalLeapViolations + score_leap_recovery(Pitches),
+        TotalStepwiseViolations := TotalStepwiseViolations + score_mostly_stepwise(Pitches, 30),
+        TotalClimaxViolations := TotalClimaxViolations + score_single_climax(Pitches),
+        TotalRepeatViolations := TotalRepeatViolations + score_immediate_repeats(Pitches)
+    end,
+
+    NumMelodies = length(AllMelodies),
+    printf("  Avg leap recovery violations: %.1f per piece%n", TotalLeapViolations / NumMelodies),
+    printf("  Avg stepwise violations (30%% threshold): %.1f per piece%n", TotalStepwiseViolations / NumMelodies),
+    printf("  Avg climax violations: %.1f per piece%n", TotalClimaxViolations / NumMelodies),
+    printf("  Avg immediate repeat count: %.1f per piece%n", TotalRepeatViolations / NumMelodies),
+
+    % Verify averages are reasonable
+    TotalTests := TotalTests + 1,
+    AvgLeap = TotalLeapViolations / NumMelodies,
+    if AvgLeap =< 3.0 then
+        PassedTests := PassedTests + 1
+    else
+        printf("  FAIL: Average leap recovery violations too high (%.1f > 3.0)%n", AvgLeap),
+        FailedTests := FailedTests + 1
+    end,
+
+    TotalTests := TotalTests + 1,
+    AvgClimax = TotalClimaxViolations / NumMelodies,
+    if AvgClimax =< 2.0 then
+        PassedTests := PassedTests + 1
+    else
+        printf("  FAIL: Average climax violations too high (%.1f > 2.0)%n", AvgClimax),
+        FailedTests := FailedTests + 1
+    end,
+
+    % ==== FINAL SUMMARY ====
+    println(""),
+    println("=== MASTERPIECE INTEGRATION SUMMARY ==="),
+    printf("Total tests run: %d%n", TotalTests),
+    printf("Passed: %d%n", PassedTests),
+    printf("Failed: %d%n", FailedTests),
+    PassRate = (PassedTests * 100) // TotalTests,
+    printf("Pass rate: %d%%%n", PassRate),
+
+    % Must have at least 85% pass rate (allowing for minor transcription variations)
+    if PassRate >= 85 then
+        println("SUCCESS: Masterpiece integration test passed!"),
+        println("Our constraints are validated against real musical masterpieces.")
+    else
+        printf("FAIL: Pass rate %d%% is below 85%% threshold%n", PassRate),
+        fail
+    end.

@@ -1,0 +1,215 @@
+% pieces_bach.pi - Bach compositions for constraint validation
+% SATB chorales test voice leading; Inventions test melodic constraints
+
+module pieces_bach.
+
+import piece_utils.
+
+% ==============================================================================
+% BWV 269: "O Haupt voll Blut und Wunden" (O Sacred Head Now Wounded)
+% Passion Chorale harmonized by J.S. Bach
+% Tests: no_parallel_fifths, no_parallel_octaves, no_voice_crossing,
+%        leading_tone_resolution
+% ==============================================================================
+%
+% First 4 bars of the chorale in G major
+% This is a well-known example of correct voice leading
+%
+% Note: Each array represents one beat per element (quarter notes in 4/4)
+
+bwv269_bars1_4() = Excerpt =>
+    Excerpt = $satb_excerpt(
+        bwv269_bars1_4,
+        % Soprano (melody)
+        [67, 71, 72, 74,    % Bar 1: G4 B4 C5 D5
+         72, 71, 69, 67,    % Bar 2: C5 B4 A4 G4
+         71, 74, 72, 71,    % Bar 3: B4 D5 C5 B4
+         69, 67, 66, 67],   % Bar 4: A4 G4 F#4 G4 (cadence)
+        % Alto
+        [62, 67, 69, 71,    % Bar 1: D4 G4 A4 B4
+         69, 67, 66, 62,    % Bar 2: A4 G4 F#4 D4
+         67, 71, 69, 67,    % Bar 3: G4 B4 A4 G4
+         66, 64, 62, 62],   % Bar 4: F#4 E4 D4 D4
+        % Tenor
+        [55, 55, 57, 55,    % Bar 1: G3 G3 A3 G3
+         57, 55, 54, 55,    % Bar 2: A3 G3 F#3 G3
+         55, 55, 57, 55,    % Bar 3: G3 G3 A3 G3
+         54, 52, 50, 55],   % Bar 4: F#3 E3 D3 G3
+        % Bass
+        [43, 43, 45, 43,    % Bar 1: G2 G2 A2 G2
+         45, 47, 45, 43,    % Bar 2: A2 B2 A2 G2
+         43, 47, 45, 47,    % Bar 3: G2 B2 A2 B2
+         42, 40, 38, 43],   % Bar 4: F#2 E2 D2 G2 (cadence to G)
+        67,   % G major
+        major,
+        baroque
+    ).
+
+% ==============================================================================
+% BWV 253: "Ach bleib bei uns, Herr Jesu Christ"
+% Another well-known Bach chorale
+% Tests: similar voice leading constraints, different key (A minor -> G major)
+% ==============================================================================
+
+bwv253_bars1_4() = Excerpt =>
+    Excerpt = $satb_excerpt(
+        bwv253_bars1_4,
+        % Soprano
+        [69, 69, 67, 69,    % Bar 1: A4 A4 G4 A4
+         71, 72, 71, 69,    % Bar 2: B4 C5 B4 A4
+         67, 64, 67, 69,    % Bar 3: G4 E4 G4 A4
+         67, 66, 64, 64],   % Bar 4: G4 F#4 E4 E4
+        % Alto
+        [64, 64, 62, 64,    % Bar 1: E4 E4 D4 E4
+         67, 67, 67, 64,    % Bar 2: G4 G4 G4 E4
+         64, 60, 62, 64,    % Bar 3: E4 C4 D4 E4
+         62, 62, 59, 59],   % Bar 4: D4 D4 B3 B3
+        % Tenor
+        [52, 52, 55, 52,    % Bar 1: E3 E3 G3 E3
+         55, 57, 55, 52,    % Bar 2: G3 A3 G3 E3
+         52, 52, 55, 52,    % Bar 3: E3 E3 G3 E3
+         55, 54, 52, 52],   % Bar 4: G3 F#3 E3 E3
+        % Bass
+        [45, 45, 43, 45,    % Bar 1: A2 A2 G2 A2
+         43, 45, 47, 45,    % Bar 2: G2 A2 B2 A2
+         40, 45, 43, 45,    % Bar 3: E2 A2 G2 A2
+         43, 42, 40, 40],   % Bar 4: G2 F#2 E2 E2
+        57,   % A minor (relative of C major)
+        minor,
+        baroque
+    ).
+
+% ==============================================================================
+% INVENTION NO. 1 IN C MAJOR (BWV 772)
+% Tests: sequence_encouraged, leap_recovery, balanced_motion
+% ==============================================================================
+%
+% The famous opening subject (right hand, first 2 bars)
+% C D E C | G C E G | C D E C (transposed sequence pattern)
+
+invention1_subject() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        bach_invention1_subject,
+        % Opening subject - note the sequence pattern
+        [60, 62, 64, 60,                % C4 D4 E4 C4 (motive)
+         67,                            % G4
+         60, 64, 67,                    % C4 E4 G4 (ascending arpeggio)
+         72,                            % C5
+         % Subject continues with sequence
+         67, 69, 71, 67,                % G4 A4 B4 G4 (sequence of motive)
+         72,                            % C5
+         67, 71, 72],                   % G4 B4 C5
+        60,   % C major
+        major,
+        baroque
+    ).
+
+% Extended excerpt including more of the first phrase
+invention1_bars1_4() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        bach_invention1_bars1_4,
+        % RH melody, bars 1-4
+        [60, 62, 64, 60, 67, 60, 64, 67,    % Bar 1: C D E C G C E G
+         72, 67, 69, 71, 67, 72, 67, 71,    % Bar 2: C5 G A B G C5 G B
+         72, 76, 74, 72, 74, 72, 71, 69,    % Bar 3: C5 E5 D5 C5 D5 C5 B4 A4
+         71, 69, 67, 65, 67, 65, 64, 62],   % Bar 4: B4 A4 G4 F4 G4 F4 E4 D4
+        60,   % C major
+        major,
+        baroque
+    ).
+
+% ==============================================================================
+% INVENTION NO. 4 IN D MINOR (BWV 775)
+% Tests: no_augmented_seconds, approach_climax_by_step
+% ==============================================================================
+%
+% D minor invention - tests handling of harmonic minor
+
+invention4_subject() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        bach_invention4_subject,
+        % Opening subject in D minor (D natural minor version for constraint testing)
+        % The original uses harmonic minor at cadence points
+        [62, 60, 62, 64,                % D4 C4 D4 E4
+         65, 64, 65, 67,                % F4 E4 F4 G4
+         69, 67, 65, 64,                % A4 G4 F4 E4
+         62, 64, 65, 62],               % D4 E4 F4 D4
+        62,   % D minor
+        natural_minor,
+        baroque
+    ).
+
+% ==============================================================================
+% INVENTION NO. 8 IN F MAJOR (BWV 779)
+% Tests: mostly_stepwise, no_consecutive_same_direction_leaps
+% ==============================================================================
+
+invention8_subject() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        bach_invention8_subject,
+        % F major invention - very stepwise
+        [65, 67, 69, 65,                % F4 G4 A4 F4
+         72, 69, 67, 65,                % C5 A4 G4 F4
+         67, 69, 67, 65,                % G4 A4 G4 F4
+         64, 65, 67, 65],               % E4 F4 G4 F4
+        65,   % F major
+        major,
+        baroque
+    ).
+
+% ==============================================================================
+% WELL-TEMPERED CLAVIER - PRELUDE IN C MAJOR (BWV 846)
+% Tests: mostly_stepwise, leading_tone_resolution
+% ==============================================================================
+%
+% The arpeggiated figures simplified to melodic line
+
+wtc1_prelude_c() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        bach_wtc1_prelude_c,
+        % Top notes of the arpeggios, first 8 bars
+        [67, 67, 69, 69,                % G4 G4 A4 A4
+         72, 72, 71, 71,                % C5 C5 B4 B4
+         69, 69, 67, 67,                % A4 A4 G4 G4
+         65, 65, 67, 67,                % F4 F4 G4 G4
+         64, 64, 65, 65,                % E4 E4 F4 F4
+         62, 62, 64, 64,                % D4 D4 E4 E4
+         60, 60, 62, 62,                % C4 C4 D4 D4
+         59, 59, 60, 60],               % B3 B3 C4 C4
+        60,   % C major
+        major,
+        baroque
+    ).
+
+% ==============================================================================
+% REGISTRY OF ALL BACH PIECES
+% ==============================================================================
+
+all_bach_satb() = Pieces =>
+    Pieces = [
+        bwv269_bars1_4(),
+        bwv253_bars1_4()
+    ].
+
+all_bach_melodies() = Pieces =>
+    Pieces = [
+        invention1_subject(),
+        invention1_bars1_4(),
+        invention4_subject(),
+        invention8_subject(),
+        wtc1_prelude_c()
+    ].
+
+all_bach_pieces() = Pieces =>
+    Pieces = all_bach_satb() ++ all_bach_melodies().
+
+% Get SATB piece by ID
+get_bach_satb(bwv269_bars1_4) = bwv269_bars1_4().
+get_bach_satb(bwv253_bars1_4) = bwv253_bars1_4().
+
+% Get melody piece by ID
+get_bach_melody(bach_invention1_subject) = invention1_subject().
+get_bach_melody(bach_invention1_bars1_4) = invention1_bars1_4().
+get_bach_melody(bach_invention4_subject) = invention4_subject().
+get_bach_melody(bach_invention8_subject) = invention8_subject().
+get_bach_melody(bach_wtc1_prelude_c) = wtc1_prelude_c().

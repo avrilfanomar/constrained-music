@@ -1,0 +1,230 @@
+% piece_utils.pi - Utilities for famous pieces data extraction
+% Provides data structures and accessor functions for test pieces
+
+module piece_utils.
+
+% ==============================================================================
+% DATA STRUCTURES
+% ==============================================================================
+%
+% Melody excerpt (single voice):
+%   melody_excerpt(Id, Pitches, KeyRoot, Mode, Genre)
+%   - Id: atom identifier (e.g., twinkle_twinkle)
+%   - Pitches: list of MIDI pitch numbers
+%   - KeyRoot: MIDI pitch of key root (60 = C)
+%   - Mode: major, minor, dorian, etc.
+%   - Genre: baroque, classical_period, folk_traditional, etc.
+%
+% SATB excerpt (4 voices):
+%   satb_excerpt(Id, Soprano, Alto, Tenor, Bass, KeyRoot, Mode, Genre)
+%   - Id: atom identifier
+%   - Soprano/Alto/Tenor/Bass: lists of MIDI pitches (same length)
+%   - KeyRoot, Mode, Genre: as above
+
+% ==============================================================================
+% EXTRACTORS FOR MELODY EXCERPTS
+% ==============================================================================
+
+% Get melody pitches from a melody excerpt
+get_melody(Excerpt) = Pitches =>
+    Excerpt = $melody_excerpt(_, Pitches, _, _, _).
+
+% Get key root from melody excerpt
+get_key(Excerpt) = KeyRoot =>
+    Excerpt = $melody_excerpt(_, _, KeyRoot, _, _).
+
+% Get mode from melody excerpt
+get_mode(Excerpt) = Mode =>
+    Excerpt = $melody_excerpt(_, _, _, Mode, _).
+
+% Get genre from melody excerpt
+get_genre(Excerpt) = Genre =>
+    Excerpt = $melody_excerpt(_, _, _, _, Genre).
+
+% Get excerpt ID
+get_id(Excerpt) = Id =>
+    (Excerpt = $melody_excerpt(Id, _, _, _, _) ; Excerpt = $satb_excerpt(Id, _, _, _, _, _, _, _)).
+
+% ==============================================================================
+% EXTRACTORS FOR SATB EXCERPTS
+% ==============================================================================
+
+% Get SATB voices as a 4-tuple
+get_satb(Excerpt) = {Soprano, Alto, Tenor, Bass} =>
+    Excerpt = $satb_excerpt(_, Soprano, Alto, Tenor, Bass, _, _, _).
+
+% Get individual voices
+get_soprano(Excerpt) = Voice => Excerpt = $satb_excerpt(_, Voice, _, _, _, _, _, _).
+get_alto(Excerpt) = Voice => Excerpt = $satb_excerpt(_, _, Voice, _, _, _, _, _).
+get_tenor(Excerpt) = Voice => Excerpt = $satb_excerpt(_, _, _, Voice, _, _, _, _).
+get_bass(Excerpt) = Voice => Excerpt = $satb_excerpt(_, _, _, _, Voice, _, _, _).
+
+% Get key root from SATB excerpt
+get_satb_key(Excerpt) = KeyRoot =>
+    Excerpt = $satb_excerpt(_, _, _, _, _, KeyRoot, _, _).
+
+% Get mode from SATB excerpt
+get_satb_mode(Excerpt) = Mode =>
+    Excerpt = $satb_excerpt(_, _, _, _, _, _, Mode, _).
+
+% Get genre from SATB excerpt
+get_satb_genre(Excerpt) = Genre =>
+    Excerpt = $satb_excerpt(_, _, _, _, _, _, _, Genre).
+
+% ==============================================================================
+% UTILITY FUNCTIONS
+% ==============================================================================
+
+% Get all voice pairs for testing parallel motion (6 pairs for SATB)
+get_voice_pairs(Excerpt) = Pairs =>
+    {S, A, T, B} = get_satb(Excerpt),
+    Pairs = [(S,A), (S,T), (S,B), (A,T), (A,B), (T,B)].
+
+% Get all adjacent voice pairs (soprano-alto, alto-tenor, tenor-bass)
+get_adjacent_pairs(Excerpt) = Pairs =>
+    {S, A, T, B} = get_satb(Excerpt),
+    Pairs = [(S,A), (A,T), (T,B)].
+
+% Calculate melodic intervals from pitch list
+get_intervals(Pitches) = Intervals =>
+    Len = length(Pitches),
+    Intervals = [Pitches[I+1] - Pitches[I] : I in 1..Len-1].
+
+% Calculate absolute intervals (unsigned)
+get_abs_intervals(Pitches) = Intervals =>
+    Len = length(Pitches),
+    Intervals = [abs(Pitches[I+1] - Pitches[I]) : I in 1..Len-1].
+
+% Count stepwise motion (intervals <= 2)
+count_stepwise(Pitches) = Count =>
+    Intervals = get_abs_intervals(Pitches),
+    Count = length([I : I in Intervals, I =< 2]).
+
+% Calculate stepwise percentage
+stepwise_percent(Pitches) = Percent =>
+    Len = length(Pitches),
+    if Len >= 2 then
+        NumIntervals = Len - 1,
+        Steps = count_stepwise(Pitches),
+        Percent = (Steps * 100) // NumIntervals
+    else
+        Percent = 100
+    end.
+
+% Get pitch range (max - min)
+get_range(Pitches) = Range =>
+    Range = max(Pitches) - min(Pitches).
+
+% Get unique pitches
+get_unique_pitches(Pitches) = Unique =>
+    Unique = remove_dups(Pitches).
+
+% Check if pitch is in scale
+in_scale_simple(Pitch, KeyRoot, Mode) =>
+    Intervals = mode_intervals_local(Mode),
+    PC = (Pitch - KeyRoot) mod 12,
+    member(PC, Intervals).
+
+% Local mode interval definitions (copied to avoid import issues)
+mode_intervals_local(major) = [0, 2, 4, 5, 7, 9, 11].
+mode_intervals_local(minor) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals_local(natural_minor) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals_local(harmonic_minor) = [0, 2, 3, 5, 7, 8, 11].
+mode_intervals_local(dorian) = [0, 2, 3, 5, 7, 9, 10].
+mode_intervals_local(phrygian) = [0, 1, 3, 5, 7, 8, 10].
+mode_intervals_local(lydian) = [0, 2, 4, 6, 7, 9, 11].
+mode_intervals_local(mixolydian) = [0, 2, 4, 5, 7, 9, 10].
+mode_intervals_local(locrian) = [0, 1, 3, 5, 6, 8, 10].
+mode_intervals_local(aeolian) = [0, 2, 3, 5, 7, 8, 10].
+mode_intervals_local(_) = [0, 2, 4, 5, 7, 9, 11].  % Default: major
+
+% ==============================================================================
+% ANALYSIS FUNCTIONS
+% ==============================================================================
+
+% Find climax (highest pitch) position (1-indexed)
+find_climax_position(Pitches) = Pos =>
+    MaxPitch = max(Pitches),
+    Pos = first([I : I in 1..length(Pitches), Pitches[I] == MaxPitch]).
+
+% Helper to get first element
+first([H|_]) = H.
+
+% Check if climax is in middle third
+climax_in_middle_third(Pitches) =>
+    Len = length(Pitches),
+    Pos = find_climax_position(Pitches),
+    ThirdStart = Len // 3 + 1,
+    ThirdEnd = 2 * Len // 3,
+    Pos >= ThirdStart, Pos =< ThirdEnd.
+
+% Count how many times the highest pitch occurs
+count_climax_occurrences(Pitches) = Count =>
+    MaxPitch = max(Pitches),
+    Count = length([P : P in Pitches, P == MaxPitch]).
+
+% Check if melody ends on tonic
+ends_on_tonic(Pitches, KeyRoot) =>
+    LastPC = Pitches[length(Pitches)] mod 12,
+    TonicPC = KeyRoot mod 12,
+    LastPC == TonicPC.
+
+% Check if melody ends on stable tone (1, 3, or 5)
+ends_stable(Pitches, KeyRoot) =>
+    LastPC = (Pitches[length(Pitches)] - KeyRoot) mod 12,
+    member(LastPC, [0, 4, 7]).  % Root, major 3rd, 5th
+
+% ==============================================================================
+% PARALLEL MOTION DETECTION (for validation, not CP)
+% ==============================================================================
+
+% Check for parallel fifths between two voices (returns list of positions)
+find_parallel_fifths(Voice1, Voice2) = Positions =>
+    Len = length(Voice1),
+    Positions = [I : I in 1..Len-1,
+        Interval1 = abs(Voice1[I] - Voice2[I]) mod 12,
+        Interval2 = abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        Interval1 == 7, Interval2 == 7,
+        Motion1 * Motion2 > 0  % Same direction
+    ].
+
+% Check for parallel octaves between two voices
+find_parallel_octaves(Voice1, Voice2) = Positions =>
+    Len = length(Voice1),
+    Positions = [I : I in 1..Len-1,
+        Interval1 = abs(Voice1[I] - Voice2[I]) mod 12,
+        Interval2 = abs(Voice1[I+1] - Voice2[I+1]) mod 12,
+        Motion1 = Voice1[I+1] - Voice1[I],
+        Motion2 = Voice2[I+1] - Voice2[I],
+        Interval1 == 0, Interval2 == 0,
+        Motion1 * Motion2 > 0
+    ].
+
+% Check for voice crossings
+find_voice_crossings(HigherVoice, LowerVoice) = Positions =>
+    Len = length(HigherVoice),
+    Positions = [I : I in 1..Len, HigherVoice[I] < LowerVoice[I]].
+
+% ==============================================================================
+% DISPLAY HELPERS
+% ==============================================================================
+
+% Print melody info
+print_excerpt_info(Excerpt) =>
+    if Excerpt = $melody_excerpt(Id, Pitches, Key, Mode, Genre) then
+        printf("Melody: %w%n", Id),
+        printf("  Key: %d (%w)%n", Key, Mode),
+        printf("  Genre: %w%n", Genre),
+        printf("  Length: %d notes%n", length(Pitches)),
+        printf("  Range: %d semitones%n", get_range(Pitches)),
+        printf("  Stepwise: %d%%%n", stepwise_percent(Pitches))
+    elseif Excerpt = $satb_excerpt(Id, S, A, T, B, Key, Mode, Genre) then
+        printf("SATB: %w%n", Id),
+        printf("  Key: %d (%w)%n", Key, Mode),
+        printf("  Genre: %w%n", Genre),
+        printf("  Length: %d beats%n", length(S)),
+        printf("  Voices: S(%d-%d) A(%d-%d) T(%d-%d) B(%d-%d)%n",
+            min(S), max(S), min(A), max(A), min(T), max(T), min(B), max(B))
+    end.

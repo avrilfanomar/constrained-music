@@ -1,0 +1,195 @@
+% pieces_beethoven.pi - Beethoven compositions for constraint validation
+% Themes from symphonies and piano works
+
+module pieces_beethoven.
+
+import piece_utils.
+
+% ==============================================================================
+% SYMPHONY NO. 9 IN D MINOR, OP. 125 - "ODE TO JOY"
+% Fourth movement theme
+% Tests: ends_on_tonic, mostly_stepwise, max_octave_leaps
+% ==============================================================================
+%
+% The famous melody in D major
+% E E F G | G F E D | C C D E | E D D
+
+ode_to_joy() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        beethoven_ode_to_joy,
+        % First phrase
+        [64, 64, 65, 67,                % E4 E4 F4 G4
+         67, 65, 64, 62,                % G4 F4 E4 D4
+         60, 60, 62, 64,                % C4 C4 D4 E4
+         64, 62, 62,                    % E4 D4 D4
+        % Second phrase (repeat with variation)
+         64, 64, 65, 67,                % E4 E4 F4 G4
+         67, 65, 64, 62,                % G4 F4 E4 D4
+         60, 60, 62, 64,                % C4 C4 D4 E4
+         62, 60, 60],                   % D4 C4 C4 (ends on tonic C)
+        60,   % C major (transposed for simplicity)
+        major,
+        classical_period
+    ).
+
+% Original key (D major) version
+ode_to_joy_d_major() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        beethoven_ode_to_joy_d,
+        [66, 66, 67, 69,                % F#4 F#4 G4 A4
+         69, 67, 66, 64,                % A4 G4 F#4 E4
+         62, 62, 64, 66,                % D4 D4 E4 F#4
+         66, 64, 64,                    % F#4 E4 E4
+         66, 66, 67, 69,                % F#4 F#4 G4 A4
+         69, 67, 66, 64,                % A4 G4 F#4 E4
+         62, 62, 64, 66,                % D4 D4 E4 F#4
+         64, 62, 62],                   % E4 D4 D4 (ends on tonic D)
+        62,   % D major
+        major,
+        classical_period
+    ).
+
+% ==============================================================================
+% FUR ELISE, WoO 59
+% Main theme (A section)
+% Tests: arch_contour, tonic_anchoring, min_unique_pitches
+% ==============================================================================
+%
+% A minor theme with characteristic contour
+
+fur_elise_theme() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        beethoven_fur_elise,
+        % A section opening
+        [76, 75, 76, 75,                % E5 D#5 E5 D#5
+         76, 71, 74, 72,                % E5 B4 D5 C5
+         69, 60, 64, 69,                % A4 C4 E4 A4
+         71, 64, 68, 71,                % B4 E4 G#4 B4
+         72, 64, 76, 75,                % C5 E4 E5 D#5
+         76, 75, 76, 71,                % E5 D#5 E5 B4
+         74, 72, 69],                   % D5 C5 A4 (back to tonic region)
+        69,   % A minor
+        natural_minor,
+        romantic
+    ).
+
+% ==============================================================================
+% SYMPHONY NO. 5 IN C MINOR, OP. 67
+% Opening motif (famous "fate" motif)
+% Tests: max_consecutive_repeats, sequence_pattern
+% ==============================================================================
+%
+% The iconic short-short-short-long pattern
+
+symphony5_motif() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        beethoven_symphony5_motif,
+        % Opening statement
+        [67, 67, 67, 63,                % G4 G4 G4 Eb4 (fate motif)
+         65, 65, 65, 62,                % F4 F4 F4 D4 (sequence down)
+        % Development of motif
+         67, 67, 67, 63,                % G4 G4 G4 Eb4
+         67, 67, 67, 72,                % G4 G4 G4 C5
+         70, 70, 70, 67],               % Bb4 Bb4 Bb4 G4
+        60,   % C minor
+        natural_minor,
+        classical_period
+    ).
+
+% ==============================================================================
+% PIANO SONATA NO. 8 IN C MINOR, OP. 13 "PATHETIQUE"
+% Second movement theme (Adagio cantabile)
+% Tests: arch_contour, phrase_ends_stable, balanced_motion
+% ==============================================================================
+
+pathetique_adagio() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        beethoven_pathetique_adagio,
+        % Famous lyrical theme in Ab major
+        [68, 70, 72, 73,                % Ab4 Bb4 C5 Db5
+         72, 70, 68, 67,                % C5 Bb4 Ab4 G4
+         68, 70, 72, 75,                % Ab4 Bb4 C5 Eb5 (climax)
+         73, 72, 70, 68,                % Db5 C5 Bb4 Ab4
+         67, 68, 70, 68,                % G4 Ab4 Bb4 Ab4
+         65, 67, 68],                   % F4 G4 Ab4 (ends on tonic)
+        68,   % Ab major
+        major,
+        romantic
+    ).
+
+% ==============================================================================
+% PIANO SONATA NO. 14 IN C# MINOR, OP. 27 NO. 2 "MOONLIGHT"
+% First movement melody (simplified top notes)
+% Tests: mostly_stepwise, tonic_anchoring
+% ==============================================================================
+
+moonlight_melody() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        beethoven_moonlight,
+        % Top notes of the arpeggios
+        [73, 73, 73, 73,                % C#5 repeated
+         73, 73, 72, 72,                % C#5 C#5 B4 B4
+         71, 71, 71, 71,                % A#4 repeated
+         71, 71, 69, 69,                % A#4 A#4 G#4 G#4
+         68, 68, 68, 68,                % F#4 repeated
+         68, 68, 69, 69,                % F#4 F#4 G#4 G#4
+         73, 73, 73, 73],               % C#5 (back to tonic)
+        61,   % C# minor
+        natural_minor,
+        romantic
+    ).
+
+% ==============================================================================
+% SYMPHONY NO. 6 IN F MAJOR, OP. 68 "PASTORAL"
+% First movement theme
+% Tests: phrase structure, balanced motion
+% ==============================================================================
+
+pastoral_theme() = Excerpt =>
+    Excerpt = $melody_excerpt(
+        beethoven_pastoral,
+        % Opening theme
+        [65, 67, 69, 72,                % F4 G4 A4 C5
+         74, 72, 69, 67,                % D5 C5 A4 G4
+         65, 69, 72, 74,                % F4 A4 C5 D5
+         72, 69, 67, 65,                % C5 A4 G4 F4
+         67, 69, 67, 65,                % G4 A4 G4 F4
+         64, 65, 67, 65],               % E4 F4 G4 F4 (ends on tonic)
+        65,   % F major
+        major,
+        classical_period
+    ).
+
+% ==============================================================================
+% REGISTRY OF ALL BEETHOVEN PIECES
+% ==============================================================================
+
+all_beethoven_pieces() = Pieces =>
+    Pieces = [
+        ode_to_joy(),
+        ode_to_joy_d_major(),
+        fur_elise_theme(),
+        symphony5_motif(),
+        pathetique_adagio(),
+        moonlight_melody(),
+        pastoral_theme()
+    ].
+
+beethoven_piece_ids() = [
+    beethoven_ode_to_joy,
+    beethoven_ode_to_joy_d,
+    beethoven_fur_elise,
+    beethoven_symphony5_motif,
+    beethoven_pathetique_adagio,
+    beethoven_moonlight,
+    beethoven_pastoral
+].
+
+% Get a piece by ID
+get_beethoven_piece(beethoven_ode_to_joy) = ode_to_joy().
+get_beethoven_piece(beethoven_ode_to_joy_d) = ode_to_joy_d_major().
+get_beethoven_piece(beethoven_fur_elise) = fur_elise_theme().
+get_beethoven_piece(beethoven_symphony5_motif) = symphony5_motif().
+get_beethoven_piece(beethoven_pathetique_adagio) = pathetique_adagio().
+get_beethoven_piece(beethoven_moonlight) = moonlight_melody().
+get_beethoven_piece(beethoven_pastoral) = pastoral_theme().
