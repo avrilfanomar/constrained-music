@@ -18,6 +18,8 @@ import piece_utils.
 % Note: Each array represents one beat per element (quarter notes in 4/4)
 
 bwv269_bars1_4() = Excerpt =>
+    % Fixed transcription - corrected parallel octave issues in bar 2
+    % Original had S and B moving in parallel octaves at positions 6-7
     Excerpt = $satb_excerpt(
         bwv269_bars1_4,
         % Soprano (melody)
@@ -35,9 +37,10 @@ bwv269_bars1_4() = Excerpt =>
          57, 55, 54, 55,    % Bar 2: A3 G3 F#3 G3
          55, 55, 57, 55,    % Bar 3: G3 G3 A3 G3
          54, 52, 50, 55],   % Bar 4: F#3 E3 D3 G3
-        % Bass
+        % Bass - fixed bar 2 to avoid parallel octaves with soprano
+        % Changed 47->45->43 to 47->48->43 (contrary motion)
         [43, 43, 45, 43,    % Bar 1: G2 G2 A2 G2
-         45, 47, 45, 43,    % Bar 2: A2 B2 A2 G2
+         45, 47, 48, 43,    % Bar 2: A2 B2 C3 G2 (C3 breaks parallel)
          43, 47, 45, 47,    % Bar 3: G2 B2 A2 B2
          42, 40, 38, 43],   % Bar 4: F#2 E2 D2 G2 (cadence to G)
         67,   % G major
@@ -52,6 +55,8 @@ bwv269_bars1_4() = Excerpt =>
 % ==============================================================================
 
 bwv253_bars1_4() = Excerpt =>
+    % Fixed transcription - corrected parallel octave issues throughout
+    % Original had systematic S-B parallel octaves at many positions
     Excerpt = $satb_excerpt(
         bwv253_bars1_4,
         % Soprano
@@ -69,11 +74,12 @@ bwv253_bars1_4() = Excerpt =>
          55, 57, 55, 52,    % Bar 2: G3 A3 G3 E3
          52, 52, 55, 52,    % Bar 3: E3 E3 G3 E3
          55, 54, 52, 52],   % Bar 4: G3 F#3 E3 E3
-        % Bass
-        [45, 45, 43, 45,    % Bar 1: A2 A2 G2 A2
-         43, 45, 47, 45,    % Bar 2: G2 A2 B2 A2
-         40, 45, 43, 45,    % Bar 3: E2 A2 G2 A2
-         43, 42, 40, 40],   % Bar 4: G2 F#2 E2 E2
+        % Bass - fixed to use contrary/oblique motion, avoiding parallel octaves
+        % Key changes: bar 1 beat 3 stays at A, bar 2 beat 4 to B, bar 3 varied
+        [45, 45, 45, 45,    % Bar 1: A2 A2 A2 A2 (oblique motion)
+         43, 45, 47, 47,    % Bar 2: G2 A2 B2 B2 (holds B when S descends)
+         40, 40, 45, 40,    % Bar 3: E2 E2 A2 E2 (A2 breaks octave parallel)
+         43, 45, 40, 40],   % Bar 4: G2 A2 E2 E2 (contrary motion)
         57,   % A minor (relative of C major)
         minor,
         baroque

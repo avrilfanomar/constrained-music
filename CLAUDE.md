@@ -134,3 +134,26 @@ picat /tmp/test_soft.pi
 # This WORKS:
 cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ```
+
+### Testing
+
+The constraint validation test suite validates that famous musical masterpieces satisfy the implemented constraints:
+
+```bash
+# Run the masterpiece constraint validation tests
+./scripts/run_picat.sh picat/test_constraint_validation.pi
+```
+
+This test suite:
+- Tests folk melodies (Twinkle Twinkle, Amazing Grace, etc.) for basic melodic constraints
+- Tests Bach SATB chorales for voice leading rules (no parallel fifths/octaves, no voice crossing)
+- Tests Bach, Mozart, and Beethoven melodies for period-appropriate constraints
+- Reports soft constraint violation baselines for comparison with generated music
+
+### Known Constraint Naming Issues
+
+**`check_no_augmented_seconds`**: This constraint catches ALL 3-semitone intervals, but minor thirds are common and acceptable melodic leaps. A true augmented second (like Ab→B in C harmonic minor) is contextually different from a minor third (like F→D), even though both are 3 semitones. The constraint should be used carefully or renamed to reflect its actual behavior.
+
+### File Organization
+
+The piece files (`pieces_bach.pi`, `pieces_mozart.pi`, etc.) are in `picat/` and imported directly. The `picat/famous_pieces/` subdirectory contains an older copy - the main files in `picat/` are the ones used by tests.
