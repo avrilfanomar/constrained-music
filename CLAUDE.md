@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## General instructions
+
+Constantly update this file or [README.md](README.md) with new useful findings, if discovered.
+
 ## Project Overview
 
 Constraint-based music generation system using Picat. Generates melodies using constraint programming (CP solver) that respect music theory rules while supporting emotional expression through a Valence-Arousal mood model.
