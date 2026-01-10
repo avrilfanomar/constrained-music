@@ -978,8 +978,21 @@ apply_genre_hard_constraints(Pitches, Root, ConstraintSet) =>
     end.
 
 % Dispatch hard constraints by ID
+% Legacy: no_augmented_seconds (catches all 3-semitone intervals)
 apply_hard_constraint_by_id(no_augmented_seconds, Notes, _Root, _Params, _Len) =>
     advanced.no_augmented_seconds(Notes).
+% Renamed version of the above (clearer name)
+apply_hard_constraint_by_id(no_three_semitone_intervals, Notes, _Root, _Params, _Len) =>
+    advanced.no_three_semitone_intervals(Notes).
+% Context-aware: only forbids true augmented seconds (3 semitones between adjacent scale degrees)
+% Requires mode=Mode in Params; falls back to legacy if mode not provided
+apply_hard_constraint_by_id(no_augmented_seconds_in_scale, Notes, Root, Params, _Len) =>
+    if member(mode=Mode, Params) then
+        advanced.no_augmented_seconds_in_scale(Notes, Root, Mode)
+    else
+        % Fallback to legacy constraint if mode not provided
+        advanced.no_augmented_seconds(Notes)
+    end.
 apply_hard_constraint_by_id(no_tritone_outline, Notes, _Root, _Params, _Len) =>
     advanced.no_tritone_outline(Notes).
 apply_hard_constraint_by_id(seventh_resolves_down, Notes, Root, _Params, _Len) =>

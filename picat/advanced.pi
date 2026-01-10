@@ -6,6 +6,7 @@ module advanced.
 
 import cp.
 import music_constraints.
+import scale_utils.
 
 % ==============================================================================
 % VOICE LEADING CONSTRAINTS (Classical Harmony)
@@ -339,12 +340,74 @@ single_climax(Notes) =>
 % MELODIC CONSTRAINTS (Advanced)
 % ==============================================================================
 
-% Avoid augmented intervals (augmented second = 3 semitones)
-no_augmented_seconds(Notes) =>
+% Avoid ALL 3-semitone intervals (overly broad - use no_augmented_seconds_in_scale instead)
+% This constraint catches minor thirds as well as augmented seconds.
+% Kept for backward compatibility; prefer no_augmented_seconds_in_scale for context-aware checking.
+no_three_semitone_intervals(Notes) =>
     Len = length(Notes),
     foreach(I in 1..Len-1)
         Interval = $abs(Notes[I+1] - Notes[I]),
         Interval #!= 3
+    end.
+
+% Legacy alias (deprecated - use no_three_semitone_intervals or no_augmented_seconds_in_scale)
+no_augmented_seconds(Notes) =>
+    no_three_semitone_intervals(Notes).
+
+% Context-aware augmented second detection
+% An augmented second is a 3-semitone interval between ADJACENT scale degrees.
+% For example, in C harmonic minor [C,D,Eb,F,G,Ab,B], Ab-B is an augmented second
+% (degrees 6→7, interval = 3 semitones). But a minor third like Eb-G is NOT an
+% augmented second because it spans degrees 3→5 (a leap of a third, not a second).
+%
+% Parameters:
+%   Notes: list of MIDI pitch values (constraint variables or integers)
+%   Root: root pitch of the scale (0-127, typically 0-11 for pitch class)
+%   Mode: scale mode atom (e.g., harmonic_minor, major, dorian)
+no_augmented_seconds_in_scale(Notes, Root, Mode) =>
+    Intervals = scale_utils.mode_intervals(Mode),
+    RootClass = Root mod 12,
+    Len = length(Notes),
+    foreach(I in 1..Len-1)
+        check_not_augmented_second(Notes[I], Notes[I+1], RootClass, Intervals)
+    end.
+
+% Helper: Check that two consecutive notes don't form an augmented second
+% An augmented second occurs when:
+%   1. Both notes are in the scale
+%   2. They are on adjacent scale degrees (degree difference = 1)
+%   3. The semitone interval is 3
+check_not_augmented_second(Note1, Note2, RootClass, Intervals) =>
+    AbsInterval = $abs(Note2 - Note1),
+    % If interval is 3 semitones, check if it's between adjacent scale degrees
+    (AbsInterval #= 3) #=>
+        #~(is_adjacent_scale_degrees(Note1, Note2, RootClass, Intervals)).
+
+% Check if two notes are on adjacent scale degrees
+% Returns a reified constraint (1 if adjacent, 0 otherwise)
+is_adjacent_scale_degrees(Note1, Note2, RootClass, Intervals) = Adjacent =>
+    ScaleSize = length(Intervals),
+    % Get pitch classes
+    PC1 = (Note1 - RootClass + 120) mod 12,
+    PC2 = (Note2 - RootClass + 120) mod 12,
+    % Find scale degrees (0 if not in scale)
+    Deg1 = find_scale_degree(PC1, Intervals),
+    Deg2 = find_scale_degree(PC2, Intervals),
+    % Check if degrees are adjacent (including wrap-around 7→1)
+    if Deg1 > 0, Deg2 > 0 then
+        DegDiff = abs(Deg1 - Deg2),
+        Adjacent = cond(DegDiff == 1 ; DegDiff == ScaleSize - 1, 1, 0)
+    else
+        Adjacent = 0  % Not both in scale, so not an augmented second
+    end.
+
+% Find scale degree (1-indexed) for a pitch class, 0 if not in scale
+find_scale_degree(PitchClass, Intervals) = Degree =>
+    Degree = 0,
+    foreach(I in 1..length(Intervals))
+        if Intervals[I] == PitchClass then
+            Degree := I
+        end
     end.
 
 % Avoid outlining tritone in three consecutive notes

@@ -12,6 +12,7 @@ import pieces_folk.
 import pieces_bach.
 import pieces_mozart.
 import pieces_beethoven.
+import scale_utils.
 
 % ==============================================================================
 % HARD CONSTRAINT CHECKERS (Boolean: pass/fail)
@@ -72,12 +73,55 @@ check_phrase_ends_stable(Pitches, KeyRoot) =>
     LastInterval = (Pitches[length(Pitches)] - KeyRoot) mod 12,
     member(LastInterval, [0, 4, 7]).  % Root, major third, fifth
 
-% Check no augmented seconds (3 semitones)
-check_no_augmented_seconds(Pitches) =>
+% Check no 3-semitone intervals (overly broad - catches minor thirds too)
+% Renamed from check_no_augmented_seconds for clarity
+check_no_three_semitone_intervals(Pitches) =>
     Len = length(Pitches),
     foreach(I in 1..Len-1)
         Interval = abs(Pitches[I+1] - Pitches[I]),
         Interval != 3
+    end.
+
+% Legacy alias for backward compatibility
+check_no_augmented_seconds(Pitches) =>
+    check_no_three_semitone_intervals(Pitches).
+
+% Context-aware augmented second check
+% Only forbids 3-semitone intervals between ADJACENT scale degrees
+% Parameters:
+%   Pitches: list of MIDI pitches
+%   KeyRoot: root of the scale (0-127)
+%   Mode: scale mode atom (e.g., harmonic_minor, major)
+check_no_augmented_seconds_in_scale(Pitches, KeyRoot, Mode) =>
+    Intervals = scale_utils.mode_intervals(Mode),
+    RootClass = KeyRoot mod 12,
+    Len = length(Pitches),
+    foreach(I in 1..Len-1)
+        Interval = abs(Pitches[I+1] - Pitches[I]),
+        if Interval == 3 then
+            % 3 semitones - check if it's between adjacent scale degrees
+            not is_adjacent_degrees(Pitches[I], Pitches[I+1], RootClass, Intervals)
+        end
+    end.
+
+% Helper: check if two notes are on adjacent scale degrees
+is_adjacent_degrees(Note1, Note2, RootClass, Intervals) =>
+    PC1 = (Note1 - RootClass + 120) mod 12,
+    PC2 = (Note2 - RootClass + 120) mod 12,
+    Deg1 = find_degree(PC1, Intervals),
+    Deg2 = find_degree(PC2, Intervals),
+    Deg1 > 0, Deg2 > 0,  % Both must be in scale
+    ScaleSize = length(Intervals),
+    DegDiff = abs(Deg1 - Deg2),
+    (DegDiff == 1 ; DegDiff == ScaleSize - 1).  % Adjacent including wrap-around
+
+% Find scale degree (1-indexed), 0 if not in scale
+find_degree(PitchClass, Intervals) = Degree =>
+    Degree = 0,
+    foreach(I in 1..length(Intervals))
+        if Intervals[I] == PitchClass then
+            Degree := I
+        end
     end.
 
 % Check no tritone outline (across 3 consecutive notes)
@@ -348,6 +392,78 @@ assert_no_voice_crossing(HigherVoice, LowerVoice, Label) =>
     end.
 
 % ==============================================================================
+% AUGMENTED SECOND CONSTRAINT TESTS
+% ==============================================================================
+% Tests the difference between the old (overly broad) and new (context-aware)
+% augmented second constraints.
+
+test_augmented_second_constraints =>
+    println("Testing augmented second constraint variants..."),
+
+    % Test 1: Minor third (C-Eb, 3 semitones) - should be ALLOWED
+    % This is a leap of a 3rd in C minor, NOT an augmented 2nd
+    MinorThirdMelody = [60, 63, 65, 67],  % C4, Eb4, F4, G4 in C minor
+    CMinorRoot = 60,
+
+    % Old constraint incorrectly FAILS on this (catches all 3-semitone intervals)
+    OldPassesMinorThird = catch(check_no_three_semitone_intervals(MinorThirdMelody), _, fail),
+    if OldPassesMinorThird then
+        println("  UNEXPECTED: Old constraint passed on minor third (expected fail)")
+    else
+        println("  OK: Old constraint correctly catches 3-semitone minor third (overly broad)")
+    end,
+
+    % New context-aware constraint should PASS (minor third is not between adjacent degrees)
+    (check_no_augmented_seconds_in_scale(MinorThirdMelody, CMinorRoot, minor) ->
+        println("  OK: Context-aware constraint correctly allows minor third (C-Eb)")
+    ;
+        println("FAIL: Context-aware constraint incorrectly rejects minor third"),
+        fail
+    ),
+
+    % Test 2: True augmented second (Ab-B in C harmonic minor, degrees 6->7)
+    % This SHOULD be forbidden by both constraints
+    % C harmonic minor: C D Eb F G Ab B -> degrees 1 2 3 4 5 6 7
+    % Ab (degree 6) to B (degree 7) = 3 semitones between adjacent degrees = aug 2nd
+    AugSecondMelody = [67, 68, 71, 72],  % G4, Ab4, B4, C5 in C harmonic minor
+    CHarmMinorRoot = 60,
+
+    % Old constraint should FAIL (catches the 3-semitone Ab-B interval)
+    OldPassesAugSecond = catch(check_no_three_semitone_intervals(AugSecondMelody), _, fail),
+    if OldPassesAugSecond then
+        println("FAIL: Old constraint should catch augmented second Ab-B"),
+        fail
+    else
+        println("  OK: Old constraint catches augmented second Ab-B")
+    end,
+
+    % New context-aware constraint should also FAIL (Ab-B is a true augmented 2nd)
+    NewPassesAugSecond = catch(check_no_augmented_seconds_in_scale(AugSecondMelody, CHarmMinorRoot, harmonic_minor), _, fail),
+    if NewPassesAugSecond then
+        println("FAIL: Context-aware constraint should catch true augmented second Ab-B"),
+        fail
+    else
+        println("  OK: Context-aware constraint correctly catches augmented second Ab-B")
+    end,
+
+    % Test 3: Major scale melody with minor third leap (C-E, then E-G has no 3-semitone)
+    % But let's test E-G# in A major which is a valid minor 3rd leap
+    % Actually E-G# in A major is: E (degree 5) to G# (degree 7) = 4 semitones, not 3
+    % Let's use F#-A in D major: F# (degree 3) to A (degree 5) = 3 semitones (minor 3rd)
+    DMajorMelody = [62, 66, 69, 71],  % D4, F#4, A4, B4 in D major
+    DMajorRoot = 62,  % D
+
+    % F# to A is 3 semitones but degrees 3 to 5 (not adjacent) - should pass context-aware
+    (check_no_augmented_seconds_in_scale(DMajorMelody, DMajorRoot, major) ->
+        println("  OK: Context-aware allows minor 3rd leap F#-A in D major (degrees 3->5)")
+    ;
+        println("FAIL: Context-aware incorrectly rejects F#-A leap in D major"),
+        fail
+    ),
+
+    println("Augmented second constraint tests passed!").
+
+% ==============================================================================
 % MAIN ENTRY POINT
 % ==============================================================================
 
@@ -362,6 +478,7 @@ main =>
     FailCount = 0,
 
     % Run all test categories
+    (test_augmented_second_constraints() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_folk_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_bach_satb() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_bach_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
