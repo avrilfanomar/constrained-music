@@ -406,12 +406,11 @@ test_augmented_second_constraints =>
     CMinorRoot = 60,
 
     % Old constraint incorrectly FAILS on this (catches all 3-semitone intervals)
-    OldPassesMinorThird = catch(check_no_three_semitone_intervals(MinorThirdMelody), _, fail),
-    if OldPassesMinorThird then
+    (check_no_three_semitone_intervals(MinorThirdMelody) ->
         println("  UNEXPECTED: Old constraint passed on minor third (expected fail)")
-    else
+    ;
         println("  OK: Old constraint correctly catches 3-semitone minor third (overly broad)")
-    end,
+    ),
 
     % New context-aware constraint should PASS (minor third is not between adjacent degrees)
     (check_no_augmented_seconds_in_scale(MinorThirdMelody, CMinorRoot, minor) ->
@@ -429,22 +428,20 @@ test_augmented_second_constraints =>
     CHarmMinorRoot = 60,
 
     % Old constraint should FAIL (catches the 3-semitone Ab-B interval)
-    OldPassesAugSecond = catch(check_no_three_semitone_intervals(AugSecondMelody), _, fail),
-    if OldPassesAugSecond then
+    (check_no_three_semitone_intervals(AugSecondMelody) ->
         println("FAIL: Old constraint should catch augmented second Ab-B"),
         fail
-    else
+    ;
         println("  OK: Old constraint catches augmented second Ab-B")
-    end,
+    ),
 
     % New context-aware constraint should also FAIL (Ab-B is a true augmented 2nd)
-    NewPassesAugSecond = catch(check_no_augmented_seconds_in_scale(AugSecondMelody, CHarmMinorRoot, harmonic_minor), _, fail),
-    if NewPassesAugSecond then
+    (check_no_augmented_seconds_in_scale(AugSecondMelody, CHarmMinorRoot, harmonic_minor) ->
         println("FAIL: Context-aware constraint should catch true augmented second Ab-B"),
         fail
-    else
+    ;
         println("  OK: Context-aware constraint correctly catches augmented second Ab-B")
-    end,
+    ),
 
     % Test 3: Major scale melody with minor third leap (C-E, then E-G has no 3-semitone)
     % But let's test E-G# in A major which is a valid minor 3rd leap

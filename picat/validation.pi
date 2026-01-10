@@ -1,0 +1,218 @@
+% validation.pi - Input validation module
+% Provides validators for all input parameters with clear error messages
+
+module validation.
+
+import util.
+
+% ==============================================================================
+% DURATION VALIDATION
+% ==============================================================================
+
+% Validate duration (must be positive)
+validate_duration(Duration) =>
+    if not number(Duration) then
+        throw($validation_error(duration, Duration, "Duration must be a number"))
+    elseif Duration =< 0 then
+        throw($validation_error(duration, Duration, "Duration must be positive"))
+    end.
+
+% ==============================================================================
+% RANDOMNESS VALIDATION
+% ==============================================================================
+
+% Validate randomness (must be in [0.0, 1.0])
+validate_randomness(Randomness) =>
+    if not number(Randomness) then
+        throw($validation_error(randomness, Randomness, "Randomness must be a number"))
+    elseif Randomness < 0.0 then
+        throw($validation_error(randomness, Randomness, "Randomness must be >= 0.0"))
+    elseif Randomness > 1.0 then
+        throw($validation_error(randomness, Randomness, "Randomness must be <= 1.0"))
+    end.
+
+% ==============================================================================
+% KEY/PITCH VALIDATION
+% ==============================================================================
+
+% Validate key_root (must be valid MIDI pitch 0-127)
+validate_key_root(KeyRoot) =>
+    if not integer(KeyRoot) then
+        throw($validation_error(key_root, KeyRoot, "Key root must be an integer"))
+    elseif KeyRoot < 0 then
+        throw($validation_error(key_root, KeyRoot, "Key root must be >= 0"))
+    elseif KeyRoot > 127 then
+        throw($validation_error(key_root, KeyRoot, "Key root must be <= 127"))
+    end.
+
+% Validate MIDI pitch
+validate_midi_pitch(Pitch) =>
+    if not integer(Pitch) then
+        throw($validation_error(midi_pitch, Pitch, "MIDI pitch must be an integer"))
+    elseif Pitch < 0 then
+        throw($validation_error(midi_pitch, Pitch, "MIDI pitch must be >= 0"))
+    elseif Pitch > 127 then
+        throw($validation_error(midi_pitch, Pitch, "MIDI pitch must be <= 127"))
+    end.
+
+% ==============================================================================
+% MOOD VALIDATION
+% ==============================================================================
+
+% Validate mood structure
+validate_mood(Mood) =>
+    if Mood = $mood(V, A) then
+        validate_valence(V),
+        validate_arousal(A)
+    else
+        throw($validation_error(mood, Mood, "Mood must be mood(Valence, Arousal) structure"))
+    end.
+
+% Validate valence (-1.0 to 1.0)
+validate_valence(V) =>
+    if not number(V) then
+        throw($validation_error(valence, V, "Valence must be a number"))
+    elseif V < -1.0 then
+        throw($validation_error(valence, V, "Valence must be >= -1.0"))
+    elseif V > 1.0 then
+        throw($validation_error(valence, V, "Valence must be <= 1.0"))
+    end.
+
+% Validate arousal (-1.0 to 1.0)
+validate_arousal(A) =>
+    if not number(A) then
+        throw($validation_error(arousal, A, "Arousal must be a number"))
+    elseif A < -1.0 then
+        throw($validation_error(arousal, A, "Arousal must be >= -1.0"))
+    elseif A > 1.0 then
+        throw($validation_error(arousal, A, "Arousal must be <= 1.0"))
+    end.
+
+% ==============================================================================
+% TEMPO VALIDATION
+% ==============================================================================
+
+% Validate tempo BPM (reasonable range: 20-300)
+validate_tempo(Tempo) =>
+    if not number(Tempo) then
+        throw($validation_error(tempo, Tempo, "Tempo must be a number"))
+    elseif Tempo < 20 then
+        throw($validation_error(tempo, Tempo, "Tempo must be >= 20 BPM"))
+    elseif Tempo > 300 then
+        throw($validation_error(tempo, Tempo, "Tempo must be <= 300 BPM"))
+    end.
+
+% ==============================================================================
+% MUSIC STRUCTURE VALIDATION
+% ==============================================================================
+
+% Validate number of bars (must be positive integer)
+validate_num_bars(NumBars) =>
+    if not integer(NumBars) then
+        throw($validation_error(num_bars, NumBars, "Number of bars must be an integer"))
+    elseif NumBars < 1 then
+        throw($validation_error(num_bars, NumBars, "Number of bars must be >= 1"))
+    elseif NumBars > 256 then
+        throw($validation_error(num_bars, NumBars, "Number of bars must be <= 256"))
+    end.
+
+% Validate notes per bar (reasonable range: 1-32)
+validate_notes_per_bar(NotesPerBar) =>
+    if not integer(NotesPerBar) then
+        throw($validation_error(notes_per_bar, NotesPerBar, "Notes per bar must be an integer"))
+    elseif NotesPerBar < 1 then
+        throw($validation_error(notes_per_bar, NotesPerBar, "Notes per bar must be >= 1"))
+    elseif NotesPerBar > 32 then
+        throw($validation_error(notes_per_bar, NotesPerBar, "Notes per bar must be <= 32"))
+    end.
+
+% ==============================================================================
+% OUTPUT PATH VALIDATION
+% ==============================================================================
+
+% Validate output path (basic validation - just check it's a string/atom)
+% We don't validate directory existence here as it may be created later
+validate_output_path(Path) =>
+    if not string(Path), not atom(Path) then
+        throw($validation_error(output_path, Path, "Output path must be a string"))
+    end.
+    % Note: We don't check if parent directory exists as it complicates
+    % things and the file write will fail with a clear error anyway
+
+% ==============================================================================
+% CONSTRAINT PARAMETER VALIDATION
+% ==============================================================================
+
+% Validate max_interval (must be positive integer, reasonable range 1-12)
+validate_max_interval(MaxInterval) =>
+    if not integer(MaxInterval) then
+        throw($validation_error(max_interval, MaxInterval, "Max interval must be an integer"))
+    elseif MaxInterval < 1 then
+        throw($validation_error(max_interval, MaxInterval, "Max interval must be >= 1"))
+    elseif MaxInterval > 24 then
+        throw($validation_error(max_interval, MaxInterval, "Max interval must be <= 24 semitones"))
+    end.
+
+% Validate max_range (must be positive integer)
+validate_max_range(MaxRange) =>
+    if not integer(MaxRange) then
+        throw($validation_error(max_range, MaxRange, "Max range must be an integer"))
+    elseif MaxRange < 1 then
+        throw($validation_error(max_range, MaxRange, "Max range must be >= 1"))
+    elseif MaxRange > 48 then
+        throw($validation_error(max_range, MaxRange, "Max range must be <= 48 semitones (4 octaves)"))
+    end.
+
+% Validate min_range (must be non-negative integer)
+validate_min_range(MinRange) =>
+    if not integer(MinRange) then
+        throw($validation_error(min_range, MinRange, "Min range must be an integer"))
+    elseif MinRange < 0 then
+        throw($validation_error(min_range, MinRange, "Min range must be >= 0"))
+    elseif MinRange > 48 then
+        throw($validation_error(min_range, MinRange, "Min range must be <= 48 semitones"))
+    end.
+
+% ==============================================================================
+% ERROR FORMATTING
+% ==============================================================================
+
+% Format validation error for display
+format_validation_error(Error) = Formatted =>
+    if Error = $validation_error(Field, Value, Message) then
+        Formatted = to_fstring("Validation error for '%w': %s (got: %w)", Field, Message, Value)
+    else
+        Formatted = to_fstring("Unknown error: %w", Error)
+    end.
+
+% Print validation error
+print_validation_error(Error) =>
+    printf("%s%n", format_validation_error(Error)).
+
+% ==============================================================================
+% COMPOUND VALIDATORS
+% ==============================================================================
+
+% Validate all companion inputs at once
+validate_companion_inputs(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
+    validate_mood(StartMood),
+    validate_mood(EndMood),
+    validate_duration(DurationSecs),
+    validate_output_path(OutputPath),
+    validate_randomness(Randomness).
+
+% Validate melody generation config
+validate_melody_config(Config) =>
+    Config = $config(
+        meter = _Meter,
+        key_root = KeyRoot,
+        mode = _Mode,
+        num_bars = NumBars,
+        notes_per_bar = NotesPerBar,
+        tempo_bpm = Tempo,
+        voice = _Voice
+    ),
+    validate_key_root(KeyRoot),
+    validate_num_bars(NumBars),
+    validate_notes_per_bar(NotesPerBar),
+    validate_tempo(Tempo).

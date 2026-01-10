@@ -18,6 +18,7 @@ import mood_mapping.
 import constraint_selector.
 import soft_constraints.
 import genre_profiles.
+import diagnostics.
 
 % ==============================================================================
 % MAIN MELODY GENERATION
@@ -921,6 +922,23 @@ generate_melody_with_genre(Config, Genre, Preferences, Randomness, Melody) =>
 
     % Get max_interval from genre params
     MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    % Check for constraint conflicts before solving
+    MinRange = constraint_selector.get_param(ConstraintSet, min_range, 0),
+    MaxRange = constraint_selector.get_param(ConstraintSet, max_range, 24),
+    MinUnique = constraint_selector.get_param(ConstraintSet, min_unique_pitches, 3),
+    ConflictConfig = [
+        num_notes=TotalNotes,
+        max_interval=MaxInterval,
+        min_range=MinRange,
+        max_range=MaxRange,
+        min_unique_pitches=MinUnique
+    ],
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, $range(LowMidi, HighMidi), ConflictConfig),
+    if Conflicts != [] then
+        diagnostics.print_conflicts(Conflicts),
+        println("Attempting generation anyway...")
+    end,
 
     % Apply base melodic constraints
     apply_base_melodic_constraints(Pitches, Root, MaxInterval, ScaleNotes),

@@ -1,0 +1,192 @@
+% test_validation.pi - Tests for input validation module
+% Tests that validators correctly accept valid inputs and reject invalid ones
+
+module test_validation.
+
+import validation.
+
+% ==============================================================================
+% MAIN ENTRY POINT
+% ==============================================================================
+
+main(Args) => main.
+
+main =>
+    println("=== Validation Module Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run test categories
+    (test_duration_validation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_randomness_validation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_key_root_validation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_validation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_tempo_validation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_structure_validation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All validation tests passed!")
+    else
+        println("Some tests failed."),
+        fail
+    end.
+
+% ==============================================================================
+% DURATION VALIDATION TESTS
+% ==============================================================================
+
+test_duration_validation =>
+    println("Testing duration validation..."),
+
+    % Valid durations - should not throw
+    validation.validate_duration(60),
+    validation.validate_duration(300),
+    validation.validate_duration(1),
+    validation.validate_duration(0.5),
+
+    % Invalid durations - should throw
+    (catch(validation.validate_duration(0), _, true) -> true
+     ; println("FAIL: duration=0 should be invalid"), fail),
+    (catch(validation.validate_duration(-10), _, true) -> true
+     ; println("FAIL: duration=-10 should be invalid"), fail),
+
+    println("  Duration validation: OK").
+
+% ==============================================================================
+% RANDOMNESS VALIDATION TESTS
+% ==============================================================================
+
+test_randomness_validation =>
+    println("Testing randomness validation..."),
+
+    % Valid randomness values
+    validation.validate_randomness(0.0),
+    validation.validate_randomness(0.5),
+    validation.validate_randomness(1.0),
+
+    % Invalid randomness values
+    (catch(validation.validate_randomness(-0.1), _, true) -> true
+     ; println("FAIL: randomness=-0.1 should be invalid"), fail),
+    (catch(validation.validate_randomness(1.1), _, true) -> true
+     ; println("FAIL: randomness=1.1 should be invalid"), fail),
+    (catch(validation.validate_randomness(2.0), _, true) -> true
+     ; println("FAIL: randomness=2.0 should be invalid"), fail),
+
+    println("  Randomness validation: OK").
+
+% ==============================================================================
+% KEY ROOT VALIDATION TESTS
+% ==============================================================================
+
+test_key_root_validation =>
+    println("Testing key root validation..."),
+
+    % Valid key roots
+    validation.validate_key_root(0),
+    validation.validate_key_root(60),
+    validation.validate_key_root(127),
+
+    % Invalid key roots
+    (catch(validation.validate_key_root(-1), _, true) -> true
+     ; println("FAIL: key_root=-1 should be invalid"), fail),
+    (catch(validation.validate_key_root(128), _, true) -> true
+     ; println("FAIL: key_root=128 should be invalid"), fail),
+
+    println("  Key root validation: OK").
+
+% ==============================================================================
+% MOOD VALIDATION TESTS
+% ==============================================================================
+
+test_mood_validation =>
+    println("Testing mood validation..."),
+
+    % Valid moods
+    validation.validate_mood($mood(0.0, 0.0)),
+    validation.validate_mood($mood(-1.0, -1.0)),
+    validation.validate_mood($mood(1.0, 1.0)),
+    validation.validate_mood($mood(-0.5, 0.8)),
+
+    % Invalid moods - valence out of range
+    (catch(validation.validate_mood($mood(-1.1, 0.0)), _, true) -> true
+     ; println("FAIL: mood(-1.1,0) should be invalid"), fail),
+    (catch(validation.validate_mood($mood(1.1, 0.0)), _, true) -> true
+     ; println("FAIL: mood(1.1,0) should be invalid"), fail),
+
+    % Invalid moods - arousal out of range
+    (catch(validation.validate_mood($mood(0.0, -1.1)), _, true) -> true
+     ; println("FAIL: mood(0,-1.1) should be invalid"), fail),
+    (catch(validation.validate_mood($mood(0.0, 1.1)), _, true) -> true
+     ; println("FAIL: mood(0,1.1) should be invalid"), fail),
+
+    % Invalid mood structure
+    (catch(validation.validate_mood(invalid), _, true) -> true
+     ; println("FAIL: mood=invalid should be invalid"), fail),
+    (catch(validation.validate_mood(123), _, true) -> true
+     ; println("FAIL: mood=123 should be invalid"), fail),
+
+    println("  Mood validation: OK").
+
+% ==============================================================================
+% TEMPO VALIDATION TESTS
+% ==============================================================================
+
+test_tempo_validation =>
+    println("Testing tempo validation..."),
+
+    % Valid tempos
+    validation.validate_tempo(60),
+    validation.validate_tempo(120),
+    validation.validate_tempo(20),
+    validation.validate_tempo(300),
+
+    % Invalid tempos
+    (catch(validation.validate_tempo(19), _, true) -> true
+     ; println("FAIL: tempo=19 should be invalid"), fail),
+    (catch(validation.validate_tempo(301), _, true) -> true
+     ; println("FAIL: tempo=301 should be invalid"), fail),
+    (catch(validation.validate_tempo(0), _, true) -> true
+     ; println("FAIL: tempo=0 should be invalid"), fail),
+    (catch(validation.validate_tempo(-60), _, true) -> true
+     ; println("FAIL: tempo=-60 should be invalid"), fail),
+
+    println("  Tempo validation: OK").
+
+% ==============================================================================
+% MUSIC STRUCTURE VALIDATION TESTS
+% ==============================================================================
+
+test_structure_validation =>
+    println("Testing music structure validation..."),
+
+    % Valid number of bars
+    validation.validate_num_bars(1),
+    validation.validate_num_bars(16),
+    validation.validate_num_bars(256),
+
+    % Invalid number of bars
+    (catch(validation.validate_num_bars(0), _, true) -> true
+     ; println("FAIL: num_bars=0 should be invalid"), fail),
+    (catch(validation.validate_num_bars(-1), _, true) -> true
+     ; println("FAIL: num_bars=-1 should be invalid"), fail),
+    (catch(validation.validate_num_bars(257), _, true) -> true
+     ; println("FAIL: num_bars=257 should be invalid"), fail),
+
+    % Valid notes per bar
+    validation.validate_notes_per_bar(4),
+    validation.validate_notes_per_bar(1),
+    validation.validate_notes_per_bar(32),
+
+    % Invalid notes per bar
+    (catch(validation.validate_notes_per_bar(0), _, true) -> true
+     ; println("FAIL: notes_per_bar=0 should be invalid"), fail),
+    (catch(validation.validate_notes_per_bar(33), _, true) -> true
+     ; println("FAIL: notes_per_bar=33 should be invalid"), fail),
+
+    println("  Music structure validation: OK").

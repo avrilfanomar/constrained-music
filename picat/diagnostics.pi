@@ -1,0 +1,201 @@
+% diagnostics.pi - Constraint diagnostics and conflict detection
+% Provides tools for detecting constraint conflicts and reporting diagnostics
+
+module diagnostics.
+
+% ==============================================================================
+% CONSTRAINT CONFLICT DETECTION
+% ==============================================================================
+
+% Check for obvious conflicts before solving
+% Returns a list of conflict descriptions, empty if no conflicts
+detect_constraint_conflicts(ScaleNotes, VoiceRange, Config) = Conflicts =>
+    Conflicts = [],
+
+    % Extract config values
+    NumNotes = get_config_value(Config, num_notes, 16),
+    MaxInterval = get_config_value(Config, max_interval, 5),
+    MinRange = get_config_value(Config, min_range, 0),
+    MaxRange = get_config_value(Config, max_range, 24),
+    MinUniquePitches = get_config_value(Config, min_unique_pitches, 3),
+
+    % Calculate available range
+    VoiceRange = $range(LowMidi, HighMidi),
+    AvailableRange = HighMidi - LowMidi,
+    ScaleSize = length(ScaleNotes),
+
+    % Check 1: min_range > available voice range
+    if MinRange > AvailableRange then
+        Conflicts := Conflicts ++ [$conflict(
+            min_range_exceeds_voice,
+            "Minimum range constraint exceeds voice range",
+            $details(min_range=MinRange, voice_range=AvailableRange)
+        )]
+    end,
+
+    % Check 2: max_range < minimum viable for melody length
+    % A melody of N notes needs at least some range to be interesting
+    MinViableRange = min(5, NumNotes // 4),
+    if MaxRange < MinViableRange, NumNotes > 8 then
+        Conflicts := Conflicts ++ [$conflict(
+            max_range_too_narrow,
+            "Maximum range too narrow for melody length",
+            $details(max_range=MaxRange, num_notes=NumNotes, min_viable=MinViableRange)
+        )]
+    end,
+
+    % Check 3: min_range > max_range
+    if MinRange > MaxRange then
+        Conflicts := Conflicts ++ [$conflict(
+            range_inversion,
+            "Minimum range exceeds maximum range",
+            $details(min_range=MinRange, max_range=MaxRange)
+        )]
+    end,
+
+    % Check 4: min_unique_pitches > available scale notes in range
+    if MinUniquePitches > ScaleSize then
+        Conflicts := Conflicts ++ [$conflict(
+            insufficient_scale_notes,
+            "Required unique pitches exceeds available scale notes",
+            $details(min_unique=MinUniquePitches, scale_size=ScaleSize)
+        )]
+    end,
+
+    % Check 5: max_interval too small for required range
+    if MaxInterval > 0, MinRange > 0 then
+        % With max_interval I, reaching range R needs at least R/I steps
+        MinStepsNeeded = MinRange // MaxInterval,
+        if MinStepsNeeded > NumNotes - 1 then
+            Conflicts := Conflicts ++ [$conflict(
+                interval_range_mismatch,
+                "Max interval too small to achieve min range",
+                $details(max_interval=MaxInterval, min_range=MinRange,
+                        notes_available=NumNotes, steps_needed=MinStepsNeeded)
+            )]
+        end
+    end.
+
+% Helper: Get value from config list or return default
+get_config_value(Config, Key, Default) = Value =>
+    if member(Key=V, Config) then
+        Value = V
+    else
+        Value = Default
+    end.
+
+% ==============================================================================
+% CONFLICT REPORTING
+% ==============================================================================
+
+% Print all detected conflicts
+print_conflicts(Conflicts) =>
+    if Conflicts == [] then
+        println("No constraint conflicts detected.")
+    else
+        printf("WARNING: %d constraint conflict(s) detected:%n", length(Conflicts)),
+        foreach(Conflict in Conflicts)
+            print_conflict(Conflict)
+        end
+    end.
+
+% Print a single conflict
+print_conflict(Conflict) =>
+    if Conflict = $conflict(Type, Message, Details) then
+        printf("  - [%w] %s%n", Type, Message),
+        print_conflict_details(Details)
+    else
+        printf("  - Unknown conflict: %w%n", Conflict)
+    end.
+
+% Print conflict details
+print_conflict_details(Details) =>
+    if Details = $details(Items) then
+        foreach(Item in Items)
+            if Item = (Key=Value) then
+                printf("      %w = %w%n", Key, Value)
+            end
+        end
+    elseif Details != [] then
+        printf("      Details: %w%n", Details)
+    end.
+
+% ==============================================================================
+% CONSTRAINT SUMMARY
+% ==============================================================================
+
+% Print summary of active constraints
+print_constraint_summary(HardConstraints, SoftConstraints) =>
+    println("Active constraints:"),
+    println("  Hard constraints (must be satisfied):"),
+    if HardConstraints == [] then
+        println("    (none)")
+    else
+        foreach(C in HardConstraints)
+            printf("    - %w%n", C)
+        end
+    end,
+    println("  Soft constraints (optimized):"),
+    if SoftConstraints == [] then
+        println("    (none)")
+    else
+        foreach((C, Weight) in SoftConstraints)
+            printf("    - %w (weight: %d)%n", C, Weight)
+        end
+    end.
+
+% ==============================================================================
+% SOLVE DIAGNOSTICS
+% ==============================================================================
+
+% Report on solve timeout
+report_solve_timeout(TimeoutMs, Context) =>
+    printf("WARNING: Constraint solving timed out after %dms%n", TimeoutMs),
+    println("Context at timeout:"),
+    foreach(Key=Value in Context)
+        printf("  %w = %w%n", Key, Value)
+    end,
+    println("Consider:"),
+    println("  - Reducing the number of notes"),
+    println("  - Relaxing some hard constraints"),
+    println("  - Increasing randomness (uses satisfying search instead of optimization)").
+
+% Report on solve failure
+report_solve_failure(Reason, Context) =>
+    printf("ERROR: Melody generation failed: %w%n", Reason),
+    println("Context at failure:"),
+    foreach(Key=Value in Context)
+        printf("  %w = %w%n", Key, Value)
+    end.
+
+% ==============================================================================
+% GENERATION STATISTICS
+% ==============================================================================
+
+% Compute and print melody statistics
+print_melody_stats(Pitches) =>
+    Len = length(Pitches),
+    if Len > 0 then
+        MinPitch = min(Pitches),
+        MaxPitch = max(Pitches),
+        Range = MaxPitch - MinPitch,
+        UniquePitches = length(remove_dups(Pitches)),
+
+        % Count intervals
+        Intervals = [abs(Pitches[I+1] - Pitches[I]) : I in 1..Len-1],
+        Steps = length([I : I in Intervals, I =< 2]),
+        Leaps = length([I : I in Intervals, I > 2]),
+
+        println("Melody statistics:"),
+        printf("  Notes: %d%n", Len),
+        printf("  Range: %d semitones (MIDI %d-%d)%n", Range, MinPitch, MaxPitch),
+        printf("  Unique pitches: %d%n", UniquePitches),
+        printf("  Steps (<=2 semitones): %d (%.1f%%)%n", Steps, 100.0*Steps/(Len-1)),
+        printf("  Leaps (>2 semitones): %d (%.1f%%)%n", Leaps, 100.0*Leaps/(Len-1))
+    else
+        println("Empty melody - no statistics available")
+    end.
+
+% Helper: Remove duplicates from list
+remove_dups([]) = [].
+remove_dups([H|T]) = [H|remove_dups([X : X in T, X != H])].

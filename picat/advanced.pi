@@ -396,7 +396,7 @@ is_adjacent_scale_degrees(Note1, Note2, RootClass, Intervals) = Adjacent =>
     % Check if degrees are adjacent (including wrap-around 7→1)
     if Deg1 > 0, Deg2 > 0 then
         DegDiff = abs(Deg1 - Deg2),
-        Adjacent = cond(DegDiff == 1 ; DegDiff == ScaleSize - 1, 1, 0)
+        Adjacent = cond(DegDiff == 1, 1, cond(DegDiff == ScaleSize - 1, 1, 0))
     else
         Adjacent = 0  % Not both in scale, so not an augmented second
     end.

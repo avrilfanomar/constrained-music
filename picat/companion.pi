@@ -17,6 +17,7 @@ import util.
 import genre_profiles.
 import constraint_selector.
 import form.
+import validation.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -47,13 +48,12 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
     println("=== Music Companion ==="),
     nl,
 
-    % Validate moods
-    if not is_valid_mood(StartMood) then
-        throw($error(invalid_start_mood, StartMood))
-    end,
-    if not is_valid_mood(EndMood) then
-        throw($error(invalid_end_mood, EndMood))
-    end,
+    % Comprehensive input validation
+    catch(
+        validation.validate_companion_inputs(StartMood, EndMood, DurationSecs, OutputPath, Randomness),
+        ValidationError,
+        handle_validation_error(ValidationError)
+    ),
 
     % Print session info
     printf("Generating emotional transition:%n"),
@@ -93,11 +93,18 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     println("=== Music Companion (Genre Mode) ==="),
     nl,
 
+    % Comprehensive input validation
+    catch(
+        validation.validate_companion_inputs(StartMood, EndMood, DurationSecs, OutputPath, Randomness),
+        ValidationError,
+        handle_validation_error(ValidationError)
+    ),
+
     % Validate genre
     if not genre_profiles.genre_exists(Genre) then
         printf("Error: Unknown genre '%w'%n", Genre),
         printf("Available genres: %w%n", genre_profiles.all_genres()),
-        halt
+        halt(1)
     end,
 
     % Print session info
@@ -1054,3 +1061,18 @@ convert_note_for_bar(Note, BarToSegment) = VNote =>
         % Fallback: use defaults
         VNote = note_to_violin_note(Note)
     end.
+
+% ==============================================================================
+% ERROR HANDLING
+% ==============================================================================
+
+% Handle validation errors with user-friendly messages
+handle_validation_error(Error) =>
+    if Error = $validation_error(Field, Value, Message) then
+        printf("Error: Invalid %w%n", Field),
+        printf("  %s%n", Message),
+        printf("  Got: %w%n", Value)
+    else
+        printf("Unexpected validation error: %w%n", Error)
+    end,
+    halt(1).

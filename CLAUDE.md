@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## General instructions
 
-Constantly update this file or [README.md](README.md) with new useful findings, if discovered.
+Constantly update this file and/or [README.md](README.md) with new useful findings, when discovered.
 
 ## Project Overview
 
@@ -137,23 +137,76 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 
 ### Testing
 
-The constraint validation test suite validates that famous musical masterpieces satisfy the implemented constraints:
-
 ```bash
-# Run the masterpiece constraint validation tests
-./scripts/run_picat.sh picat/test_constraint_validation.pi
+# Run all test suites
+./scripts/run_picat.sh picat/test_constraint_validation.pi  # Masterpiece validation
+./scripts/run_picat.sh picat/test_generation.pi             # Generation regression tests
+./scripts/run_picat.sh picat/test_music_types.pi            # Unit tests for primitives
+./scripts/run_picat.sh picat/test_validation.pi             # Input validation tests
+./scripts/run_picat.sh picat/test_intervals.pi              # Interval calculation tests
+./scripts/run_picat.sh picat/test_styles.pi                 # Style-based generation tests
+./scripts/run_picat.sh picat/test_form.pi                   # Form structure tests
 ```
 
-This test suite:
+The **constraint validation test suite** (`test_constraint_validation.pi`) validates that famous musical masterpieces satisfy the implemented constraints:
 - Tests folk melodies (Twinkle Twinkle, Amazing Grace, etc.) for basic melodic constraints
 - Tests Bach SATB chorales for voice leading rules (no parallel fifths/octaves, no voice crossing)
 - Tests Bach, Mozart, and Beethoven melodies for period-appropriate constraints
 - Reports soft constraint violation baselines for comparison with generated music
+- Tests the context-aware augmented second constraint
 
-### Known Constraint Naming Issues
+### Augmented Second Constraints
 
-**`check_no_augmented_seconds`**: This constraint catches ALL 3-semitone intervals, but minor thirds are common and acceptable melodic leaps. A true augmented second (like Ab→B in C harmonic minor) is contextually different from a minor third (like F→D), even though both are 3 semitones. The constraint should be used carefully or renamed to reflect its actual behavior.
+The system provides two variants for handling augmented seconds:
+
+1. **`no_three_semitone_intervals`** (formerly `no_augmented_seconds`): Catches ALL 3-semitone intervals including minor thirds. Use when you want to forbid any 3-semitone melodic motion. The legacy `no_augmented_seconds` name still works as an alias.
+
+2. **`no_augmented_seconds_in_scale`**: Context-aware constraint that only forbids TRUE augmented seconds (3 semitones between adjacent scale degrees). For example, in C harmonic minor, Ab→B is forbidden (degrees 6→7), but C→Eb is allowed (degrees 1→3, a minor third leap). Requires `mode=Mode` in constraint params.
+
+**Usage in melody.pi**:
+```picat
+% Legacy (catches all 3-semitone intervals)
+apply_hard_constraint_by_id(no_augmented_seconds, Notes, Root, Params, Len)
+
+% Context-aware (needs mode in Params)
+apply_hard_constraint_by_id(no_augmented_seconds_in_scale, Notes, Root, [mode=harmonic_minor|...], Len)
+```
+
+Genre profiles currently use the legacy constraint for backward compatibility.
+
+### Input Validation
+
+The `validation.pi` module provides validators for all input parameters:
+
+```picat
+import validation.
+
+% Validate individual parameters
+validation.validate_duration(60)         % Must be positive
+validation.validate_randomness(0.5)      % Must be in [0.0, 1.0]
+validation.validate_key_root(60)         % Must be 0-127
+validation.validate_mood($mood(0.5, 0.3)) % Valence/arousal in [-1.0, 1.0]
+validation.validate_tempo(120)           % Must be 20-300
+validation.validate_num_bars(16)         % Must be 1-256
+
+% Validate all companion inputs at once
+validation.validate_companion_inputs(StartMood, EndMood, Duration, OutputPath, Randomness)
+```
+
+Validation errors are thrown as `$validation_error(field, value, message)` structures.
+
+### Constraint Conflict Detection
+
+The `diagnostics.pi` module detects obvious constraint conflicts before solving:
+
+- min_range > voice range
+- max_range too narrow for melody length
+- min_range > max_range
+- required unique pitches > available scale notes
+- max_interval too small to achieve min_range
+
+Conflicts are printed as warnings before generation attempts.
 
 ### File Organization
 
-The piece files (`pieces_bach.pi`, `pieces_mozart.pi`, etc.) are in `picat/` and imported directly. The `picat/famous_pieces/` subdirectory contains an older copy - the main files in `picat/` are the ones used by tests.
+The piece files (`pieces_bach.pi`, `pieces_mozart.pi`, etc.) are in `picat/` and imported directly.
