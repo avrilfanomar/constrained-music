@@ -20,7 +20,7 @@ module genre_profiles.
 genre_profile(
     classical_period,
     classical,
-    [no_augmented_seconds, no_tritone_outline],
+    [no_augmented_seconds, no_tritone_outline, max_consecutive_repeats],
     [
         (no_parallel_fifths_single, 90),
         (consonant_leaps_only, 85),
@@ -46,7 +46,7 @@ genre_profile(
 genre_profile(
     baroque,
     baroque,
-    [no_augmented_seconds],
+    [no_augmented_seconds, max_consecutive_repeats],
     [
         (leading_tone_resolution, 85),
         (consonant_leaps_only, 80),
@@ -67,7 +67,7 @@ genre_profile(
 genre_profile(
     romantic,
     romantic,
-    [min_range],
+    [min_range, max_consecutive_repeats],
     [
         (phrase_ends_stable, 75),
         (min_unique_pitches, 70),
@@ -87,7 +87,7 @@ genre_profile(
 genre_profile(
     traditional_jazz,
     jazz,
-    [min_range],
+    [min_range, max_consecutive_repeats],
     [
         (min_unique_pitches, 80),
         (leading_tone_resolution, 75),
@@ -107,7 +107,7 @@ genre_profile(
 genre_profile(
     folk_traditional,
     folk,
-    [no_augmented_seconds, no_tritone_outline, max_range],
+    [no_augmented_seconds, no_tritone_outline, max_range, max_consecutive_repeats],
     [
         (mostly_stepwise, 85),
         (consonant_leaps_only, 80),
@@ -115,7 +115,6 @@ genre_profile(
         (leap_recovery, 70),
         (prefer_smaller_intervals, 70),
         (large_leap_recovery, 70),
-        (max_consecutive_repeats, 65),
         (peak_approach_exit, 65),
         (arch_contour, 55),
         (no_repetitive_intervals, 50),
@@ -129,7 +128,7 @@ genre_profile(
 genre_profile(
     contemporary,
     contemporary,
-    [],
+    [max_consecutive_repeats],
     [
         (min_unique_pitches, 75),
         (no_repetitive_intervals, 65),
@@ -147,7 +146,7 @@ genre_profile(
 genre_profile(
     sacred_chant,
     chant,
-    [ends_on_tonic, max_range],
+    [ends_on_tonic, max_range, max_consecutive_repeats],
     [
         (mostly_stepwise, 95),
         (consonant_leaps_only, 90),
@@ -168,7 +167,7 @@ genre_profile(
 genre_profile(
     children_songs,
     children,
-    [ends_on_tonic, no_tritone_outline, max_range],
+    [ends_on_tonic, no_tritone_outline, max_range, max_consecutive_repeats],
     [
         (mostly_stepwise, 90),
         (consonant_leaps_only, 85),
@@ -189,13 +188,12 @@ genre_profile(
 genre_profile(
     minimalist,
     minimalist,
-    [max_range],
+    [max_range, max_consecutive_repeats],
     [
         (mostly_stepwise, 85),
         (prefer_smaller_intervals, 75),
         (consonant_leaps_only, 75),
         (large_leap_recovery, 70),
-        (max_consecutive_repeats, 50),  % low weight - repeats OK
         (peak_approach_exit, 40),
         (no_immediate_repeat, 30),
         (no_repetitive_intervals, 25)   % low weight - repetition is the style!
@@ -208,7 +206,7 @@ genre_profile(
 genre_profile(
     modal,
     modal,
-    [],
+    [max_consecutive_repeats],
     [
         (no_leading_tone_emphasis, 85),
         (phrase_ends_stable, 70),
@@ -228,10 +226,9 @@ genre_profile(
 genre_profile(
     blues,
     blues,
-    [min_range],
+    [min_range, max_consecutive_repeats],
     [
         (phrase_ends_stable, 75),
-        (max_consecutive_repeats, 60),
         (no_repetitive_intervals, 55),
         (leap_recovery, 55),
         (consonant_leaps_only, 55),

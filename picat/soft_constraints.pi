@@ -79,10 +79,6 @@ apply_soft(no_leading_tone_emphasis, Notes, Root, Weight, Cost) =>
     reify_no_leading_tone_emphasis(Notes, Root, ViolationCount),
     Cost #= Weight * ViolationCount.
 
-apply_soft(max_consecutive_repeats, Notes, _Root, Weight, Cost) =>
-    reify_max_consecutive_repeats(Notes, 2, ViolationCount),
-    Cost #= Weight * ViolationCount.
-
 apply_soft(arch_contour, Notes, _Root, Weight, Cost) =>
     reify_arch_contour(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
@@ -690,7 +686,6 @@ supported_soft_constraints() = [
     min_unique_pitches,
     sequence_encouraged,
     no_leading_tone_emphasis,
-    max_consecutive_repeats,
     arch_contour,
     tonic_anchoring,
     prefer_smaller_intervals,

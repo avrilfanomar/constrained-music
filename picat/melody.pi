@@ -1025,6 +1025,9 @@ apply_hard_constraint_by_id(max_range, Notes, _Root, Params, _Len) =>
 apply_hard_constraint_by_id(min_range, Notes, _Root, Params, _Len) =>
     MinRangeVal = cond(member(min_range=V, Params), V, 5),
     music_constraints.min_range(Notes, MinRangeVal).
+apply_hard_constraint_by_id(max_consecutive_repeats, Notes, _Root, Params, _Len) =>
+    MaxReps = cond(member(max_consecutive_repeats=V, Params), V, 2),
+    music_constraints.max_consecutive_repeats(Notes, MaxReps).
 apply_hard_constraint_by_id(_UnknownId, _Notes, _Root, _Params, _Len) =>
     true.  % Unknown constraint - skip
 

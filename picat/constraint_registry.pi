@@ -135,10 +135,10 @@ constraint_def(
 constraint_def(
     max_consecutive_repeats,
     melodic,
-    soft,
-    65,
-    [folk_traditional, blues, minimalist],
-    "Limit consecutive note repetitions"
+    hard,
+    100,
+    [classical_period, baroque, romantic, traditional_jazz, folk_traditional, contemporary, sacred_chant, children_songs, minimalist, modal, blues],
+    "Maximum 2 consecutive note repetitions (hard constraint)"
 ).
 
 constraint_def(
