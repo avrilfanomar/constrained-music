@@ -26,6 +26,7 @@ constrained-music/
 │   ├── music_types.pi          # Musical primitives (pitch, duration, voice)
 │   ├── temporal.pi             # Time positions, meter handling
 │   ├── scale_utils.pi          # Scale/mode definitions
+│   ├── intervals.pi            # Interval calculations
 │   ├── melody.pi               # Melody generation with constraints
 │   │
 │   ├── music_constraints.pi    # Basic constraints (intervals, ranges)
@@ -42,11 +43,17 @@ constrained-music/
 │   ├── mood_mapping.pi         # Maps moods to musical parameters
 │   ├── transition.pi           # Emotional transition planning
 │   │
+│   ├── form.pi                 # Musical form structures (binary, ternary, rondo)
+│   ├── validation.pi           # Input validation
+│   ├── diagnostics.pi          # Constraint conflict detection
+│   │
 │   ├── violin_types.pi         # Violin articulations, bowing, expression
 │   ├── violin_constraints.pi   # Violin-specific playing constraints
 │   │
 │   ├── midi_export.pi          # JSON export for MIDI conversion
-│   └── test_music_types.pi     # Unit tests
+│   │
+│   ├── pieces_*.pi             # Reference pieces for validation (Bach, Mozart, etc.)
+│   └── test_*.pi               # Test suites
 │
 └── scripts/
     ├── run_picat.sh            # Helper script to run Picat
@@ -90,7 +97,20 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 
 ```bash
 ./scripts/run_picat.sh picat/companion.pi demo
-./scripts/run_picat.sh picat/companion.pi demo genre=baroque randomness=0.5
+./scripts/run_picat.sh picat/companion.pi demo randomness=0.5
+```
+
+### Generate a Transition
+
+```bash
+# Basic transition (requires from and to parameters)
+./scripts/run_picat.sh picat/companion.pi from=sad_depressed to=energized duration=300
+
+# With randomness for variation
+./scripts/run_picat.sh picat/companion.pi from=calm_peaceful to=happy randomness=0.5
+
+# Using VA coordinates instead of presets
+./scripts/run_picat.sh picat/companion.pi from_va=-0.7,-0.3 to_va=0.5,0.8 duration=600
 ```
 
 ### Generate MIDI File
@@ -112,6 +132,19 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 ./scripts/run_picat.sh picat/test_music_types.pi
 ```
 
+### Available Commands
+
+| Command       | Description                                        |
+|---------------|----------------------------------------------------|
+| `demo`        | Quick 60-second demo (sad_depressed to energized)  |
+| `melody_demo` | Demo melody generation with different modes        |
+| `violin`      | Generate in violin mode with articulations         |
+| `test`        | Quick functionality test                           |
+| `path`        | Show transition path without generating music      |
+| `moods`       | List available mood presets                        |
+| `genres`      | List available genres with constraint info         |
+| `help`, `-h`  | Show help message                                  |
+
 ### Script Options
 
 | Option           | Description                                    |
@@ -122,14 +155,27 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 
 ### Companion Options
 
+**Required** (one of each pair):
+
 | Option              | Description                                      |
 |---------------------|--------------------------------------------------|
+| `from=<mood>`       | Starting emotional state (preset name)           |
+| `to=<mood>`         | Ending emotional state (preset name)             |
+| `from_va=V,A`       | Starting mood as valence,arousal (e.g., -0.7,-0.3) |
+| `to_va=V,A`         | Ending mood as valence,arousal (e.g., 0.5,0.8)   |
+
+**Optional**:
+
+| Option              | Description                                      |
+|---------------------|--------------------------------------------------|
+| `duration=<secs>`   | Total duration in seconds (default: 300)         |
+| `output=<path>`     | Output JSON file (default: session.json)         |
+| `randomness=<0-1>`  | Variation level (0=deterministic, 1=max)         |
 | `genre=<id>`        | Use genre profile (classical_period, baroque...) |
-| `randomness=<0-1>`  | Variation level (0=strict, 1=loose)              |
 | `intensity=<level>` | Constraint strictness (light, standard, strict)  |
-| `from=<mood>`       | Starting emotional state                         |
-| `to=<mood>`         | Ending emotional state                           |
-| `duration=<secs>`   | Total duration for transitions                   |
+| `form=<type>`       | Form structure (binary, ternary, rondo, through) |
+| `disable=<id>`      | Disable a constraint (can use multiple times)    |
+| `weight:<id>=<n>`   | Override constraint weight (0-100)               |
 
 ### Clean Compiled Files
 
@@ -272,10 +318,16 @@ The genre system provides pre-configured constraint sets for different musical s
 
 ```bash
 # Generate with classical period constraints
-./scripts/run_picat.sh picat/companion.pi genre=classical_period randomness=0.3
+./scripts/run_picat.sh picat/companion.pi from=calm_peaceful to=energized genre=classical_period randomness=0.3
 
 # Folk style with strict intensity
-./scripts/run_picat.sh picat/companion.pi genre=folk_traditional intensity=strict
+./scripts/run_picat.sh picat/companion.pi from=sad_depressed to=happy genre=folk_traditional intensity=strict
+
+# Using VA coordinates instead of presets
+./scripts/run_picat.sh picat/companion.pi from_va=-0.5,0.2 to_va=0.7,0.8 genre=baroque
+
+# With form structure
+./scripts/run_picat.sh picat/companion.pi from=calm_peaceful to=energized form=ternary genre=classical_period
 ```
 
 ### Constraint Registry
