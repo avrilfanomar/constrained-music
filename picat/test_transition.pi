@@ -1,0 +1,351 @@
+% test_transition.pi - Unit tests for transition module
+% Run with: ./scripts/run_picat.sh picat/test_transition.pi
+
+module test_transition.
+
+import mood.
+import mood_mapping.
+import transition.
+import music_types.
+
+main(Args) =>
+    main.
+
+main =>
+    println("=== Transition Module Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_easing_linear() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_easing_in_out() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_apply_easing() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_calculate_num_segments() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_plan_transition() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_segment_accessors() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_smooth_tempo_transitions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_related_modes() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_session_config() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed!")
+    else
+        println("Some tests failed."),
+        fail
+    end.
+
+% ==============================================================================
+% EASING LINEAR TESTS
+% ==============================================================================
+
+test_easing_linear =>
+    println("Testing easing_linear..."),
+
+    % Linear: output equals input
+    assert_near(transition.ease_linear(0.0), 0.0, 0.01, "linear at 0"),
+    assert_near(transition.ease_linear(0.5), 0.5, 0.01, "linear at 0.5"),
+    assert_near(transition.ease_linear(1.0), 1.0, 0.01, "linear at 1"),
+    assert_near(transition.ease_linear(0.25), 0.25, 0.01, "linear at 0.25"),
+
+    println("  Easing linear: OK").
+
+% ==============================================================================
+% EASING IN OUT TESTS
+% ==============================================================================
+
+test_easing_in_out =>
+    println("Testing ease_in and ease_out..."),
+
+    % Ease-in: starts slow (below linear)
+    In0 = transition.ease_in(0.25),
+    assert_true(In0 < 0.25, "ease_in below linear at 0.25"),
+
+    In1 = transition.ease_in(0.0),
+    assert_near(In1, 0.0, 0.01, "ease_in starts at 0"),
+
+    In2 = transition.ease_in(1.0),
+    assert_near(In2, 1.0, 0.01, "ease_in ends at 1"),
+
+    % Ease-out: starts fast (above linear)
+    Out0 = transition.ease_out(0.25),
+    assert_true(Out0 > 0.25, "ease_out above linear at 0.25"),
+
+    Out1 = transition.ease_out(0.0),
+    assert_near(Out1, 0.0, 0.01, "ease_out starts at 0"),
+
+    Out2 = transition.ease_out(1.0),
+    assert_near(Out2, 1.0, 0.01, "ease_out ends at 1"),
+
+    % Ease-in-out: slow at both ends
+    IO_Mid = transition.ease_in_out(0.5),
+    assert_near(IO_Mid, 0.5, 0.01, "ease_in_out at midpoint is 0.5"),
+
+    IO_Start = transition.ease_in_out(0.0),
+    assert_near(IO_Start, 0.0, 0.01, "ease_in_out starts at 0"),
+
+    IO_End = transition.ease_in_out(1.0),
+    assert_near(IO_End, 1.0, 0.01, "ease_in_out ends at 1"),
+
+    println("  Easing in/out: OK").
+
+% ==============================================================================
+% APPLY EASING TESTS
+% ==============================================================================
+
+test_apply_easing =>
+    println("Testing apply_easing..."),
+
+    T = 0.5,
+
+    % Test each easing type by name
+    L = transition.apply_easing(T, linear),
+    assert_near(L, 0.5, 0.01, "apply_easing linear"),
+
+    I = transition.apply_easing(T, ease_in),
+    assert_near(I, transition.ease_in(T), 0.01, "apply_easing ease_in"),
+
+    O = transition.apply_easing(T, ease_out),
+    assert_near(O, transition.ease_out(T), 0.01, "apply_easing ease_out"),
+
+    IO = transition.apply_easing(T, ease_in_out),
+    assert_near(IO, transition.ease_in_out(T), 0.01, "apply_easing ease_in_out"),
+
+    % Unknown easing should default to linear
+    U = transition.apply_easing(T, unknown_easing_type),
+    assert_near(U, 0.5, 0.01, "apply_easing unknown defaults to linear"),
+
+    println("  Apply easing: OK").
+
+% ==============================================================================
+% CALCULATE NUM SEGMENTS TESTS
+% ==============================================================================
+
+test_calculate_num_segments =>
+    println("Testing calculate_num_segments..."),
+
+    % Short duration (60 seconds) -> minimum segments
+    N1 = transition.calculate_num_segments(60),
+    assert_true(N1 >= 8, "short duration gets at least 8 segments"),
+
+    % Medium duration (300 seconds = 5 min)
+    N2 = transition.calculate_num_segments(300),
+    assert_true(N2 >= 10, "medium duration gets reasonable segments"),
+    assert_true(N2 <= 30, "medium duration not too many segments"),
+
+    % Long duration (600 seconds = 10 min)
+    N3 = transition.calculate_num_segments(600),
+    assert_true(N3 <= 45, "long duration capped at 45 segments"),
+
+    % Very short duration
+    N4 = transition.calculate_num_segments(30),
+    assert_true(N4 >= 8, "very short still gets minimum segments"),
+
+    println("  Calculate num segments: OK").
+
+% ==============================================================================
+% PLAN TRANSITION TESTS
+% ==============================================================================
+
+test_plan_transition =>
+    println("Testing plan_transition..."),
+
+    StartMood = mood.mood_preset(sad_depressed),
+    EndMood = mood.mood_preset(happy),
+    DurationSecs = 120,
+
+    % Use 5-argument version with explicit randomness=0
+    Segments = transition.plan_transition(StartMood, EndMood, DurationSecs, linear, 0.0),
+
+    % Should have multiple segments
+    NumSegs = length(Segments),
+    assert_true(NumSegs >= 1, "at least 1 segment"),
+
+    % First segment should be at time 0
+    FirstSeg = Segments[1],
+    StartTime = transition.get_segment_start_time(FirstSeg),
+    assert_near(StartTime, 0.0, 0.1, "first segment starts at 0"),
+
+    % First segment mood should be close to start mood
+    FirstMood = transition.get_segment_mood(FirstSeg),
+    assert_true(mood.mood_distance(FirstMood, StartMood) < 0.5,
+                "first segment mood close to start"),
+
+    % Last segment mood should be close to end mood
+    LastSeg = Segments[NumSegs],
+    LastMood = transition.get_segment_mood(LastSeg),
+    assert_true(mood.mood_distance(LastMood, EndMood) < 0.5,
+                "last segment mood close to end"),
+
+    % All segments should have valid params
+    foreach(Seg in Segments)
+        P = transition.get_segment_params(Seg),
+        Tempo = mood_mapping.get_tempo(P),
+        assert_true(Tempo >= 50, "segment tempo >= 50"),
+        assert_true(Tempo <= 200, "segment tempo <= 200")
+    end,
+
+    println("  Plan transition: OK").
+
+% ==============================================================================
+% SEGMENT ACCESSORS TESTS
+% ==============================================================================
+
+test_segment_accessors =>
+    println("Testing segment accessors..."),
+
+    % Create a test segment
+    TestParams = mood_mapping.default_music_params(),
+    TestMood = mood.mood_preset(neutral),
+    Seg = $segment(5, 100.0, 20.0, TestMood, TestParams, 8),
+
+    % Test accessors
+    assert_eq(transition.get_segment_index(Seg), 5, "get_segment_index"),
+    assert_near(transition.get_segment_start_time(Seg), 100.0, 0.01, "get_segment_start_time"),
+    assert_near(transition.get_segment_duration(Seg), 20.0, 0.01, "get_segment_duration"),
+    assert_eq(transition.get_segment_num_bars(Seg), 8, "get_segment_num_bars"),
+
+    % Test mood accessor
+    M = transition.get_segment_mood(Seg),
+    assert_near(mood.get_valence(M), 0.0, 0.01, "segment mood valence"),
+
+    % Test params accessor
+    P = transition.get_segment_params(Seg),
+    assert_eq(mood_mapping.get_tempo(P), 120, "segment params tempo"),
+
+    println("  Segment accessors: OK").
+
+% ==============================================================================
+% SMOOTH TEMPO TRANSITIONS TESTS
+% ==============================================================================
+
+test_smooth_tempo_transitions =>
+    println("Testing smooth_tempo_transitions..."),
+
+    % Create segments with large tempo jumps
+    P1 = $music_params(80, major, 4, 5, soprano, 80, 15, 0.9, 0.0, 0.0),
+    P2 = $music_params(150, major, 4, 5, soprano, 80, 15, 0.9, 0.0, 0.0),  % 70 BPM jump!
+    P3 = $music_params(160, major, 4, 5, soprano, 80, 15, 0.9, 0.0, 0.0),
+
+    M = mood.mood_preset(neutral),
+    Seg1 = $segment(1, 0.0, 20.0, M, P1, 8),
+    Seg2 = $segment(2, 20.0, 20.0, M, P2, 8),
+    Seg3 = $segment(3, 40.0, 20.0, M, P3, 8),
+
+    Segments = [Seg1, Seg2, Seg3],
+
+    % Smooth with max 20 BPM jump
+    Smoothed = transition.smooth_tempo_transitions(Segments, 20),
+
+    % Check that tempo jumps are within limit
+    Tempos = [mood_mapping.get_tempo(transition.get_segment_params(S)) : S in Smoothed],
+    foreach(I in 1..length(Tempos)-1)
+        Jump = abs(Tempos[I+1] - Tempos[I]),
+        assert_true(Jump <= 20, "tempo jump <= 20 BPM")
+    end,
+
+    println("  Smooth tempo transitions: OK").
+
+% ==============================================================================
+% RELATED MODES TESTS
+% ==============================================================================
+
+test_related_modes =>
+    println("Testing related_modes..."),
+
+    % Major should have related modes
+    MajorRelated = transition.related_modes(major),
+    assert_true(length(MajorRelated) > 0, "major has related modes"),
+
+    % Minor should have related modes
+    MinorRelated = transition.related_modes(minor),
+    assert_true(length(MinorRelated) > 0, "minor has related modes"),
+
+    % Test modes_related predicate
+    (transition.modes_related(major, mixolydian) ->
+        true
+    ;
+        println("FAIL: major and mixolydian should be related"),
+        fail
+    ),
+
+    (transition.modes_related(minor, dorian) ->
+        true
+    ;
+        println("FAIL: minor and dorian should be related"),
+        fail
+    ),
+
+    % Unknown mode should have fallback
+    UnknownRelated = transition.related_modes(nonexistent_mode),
+    assert_true(length(UnknownRelated) > 0, "unknown mode has fallback related"),
+
+    println("  Related modes: OK").
+
+% ==============================================================================
+% SESSION CONFIG TESTS
+% ==============================================================================
+
+test_session_config =>
+    println("Testing session_config..."),
+
+    StartMood = mood.mood_preset(calm_peaceful),
+    EndMood = mood.mood_preset(excited),
+
+    % Create config directly to avoid meter/2 dependency
+    Config = $session_config(
+        StartMood,
+        EndMood,
+        300,
+        ease_in_out,
+        $meter(4, 4),
+        60,
+        "test.mid"
+    ),
+
+    % Test accessors
+    SM = transition.get_session_start_mood(Config),
+    assert_near(mood.get_valence(SM), mood.get_valence(StartMood), 0.01,
+                "session start mood"),
+
+    EM = transition.get_session_end_mood(Config),
+    assert_near(mood.get_valence(EM), mood.get_valence(EndMood), 0.01,
+                "session end mood"),
+
+    D = transition.get_session_duration(Config),
+    assert_eq(D, 300, "default duration is 300s"),
+
+    E = transition.get_session_easing(Config),
+    assert_eq(E, ease_in_out, "default easing is ease_in_out"),
+
+    K = transition.get_session_key_root(Config),
+    assert_eq(K, 60, "default key root is 60"),
+
+    println("  Session config: OK").
+
+% ==============================================================================
+% ASSERTION HELPERS
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_near(Actual, Expected, Tolerance, Msg) =>
+    if abs(Actual - Expected) > Tolerance then
+        printf("FAIL: %s - expected ~%w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Condition, Msg) =>
+    if not Condition then
+        printf("FAIL: %s - expected true%n", Msg),
+        fail
+    end.

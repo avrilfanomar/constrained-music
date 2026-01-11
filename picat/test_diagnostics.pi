@@ -1,0 +1,273 @@
+% test_diagnostics.pi - Unit tests for diagnostics module
+% Run with: ./scripts/run_picat.sh picat/test_diagnostics.pi
+
+module test_diagnostics.
+
+import diagnostics.
+
+main(Args) =>
+    main.
+
+main =>
+    println("=== Diagnostics Module Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_no_conflicts() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_min_range_exceeds_voice() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_max_range_too_narrow() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_range_inversion() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_insufficient_scale_notes() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_interval_range_mismatch() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_get_config_value() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_remove_dups() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_multiple_conflicts() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed!")
+    else
+        println("Some tests failed."),
+        fail
+    end.
+
+% ==============================================================================
+% NO CONFLICTS TEST
+% ==============================================================================
+
+test_no_conflicts =>
+    println("Testing no conflicts case..."),
+
+    % Valid configuration - no conflicts expected
+    ScaleNotes = [60, 62, 64, 65, 67, 69, 71],  % C major scale
+    VoiceRange = $range(60, 84),  % Soprano-ish range
+    Config = [
+        num_notes=16,
+        max_interval=5,
+        min_range=5,
+        max_range=12,
+        min_unique_pitches=4
+    ],
+
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, VoiceRange, Config),
+    assert_eq(Conflicts, [], "no conflicts with valid config"),
+
+    println("  No conflicts: OK").
+
+% ==============================================================================
+% MIN RANGE EXCEEDS VOICE TEST
+% ==============================================================================
+
+test_min_range_exceeds_voice =>
+    println("Testing min_range_exceeds_voice conflict..."),
+
+    ScaleNotes = [60, 62, 64, 65, 67],
+    VoiceRange = $range(60, 70),  % Only 10 semitones available
+    Config = [
+        num_notes=8,
+        min_range=15  % Requires 15, but only 10 available
+    ],
+
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, VoiceRange, Config),
+    assert_true(length(Conflicts) >= 1, "at least one conflict detected"),
+    assert_conflict_type(Conflicts, min_range_exceeds_voice,
+                     "min_range_exceeds_voice conflict found"),
+
+    println("  Min range exceeds voice: OK").
+
+% ==============================================================================
+% MAX RANGE TOO NARROW TEST
+% ==============================================================================
+
+test_max_range_too_narrow =>
+    println("Testing max_range_too_narrow conflict..."),
+
+    ScaleNotes = [60, 62, 64, 65, 67, 69, 71],
+    VoiceRange = $range(48, 84),
+    Config = [
+        num_notes=32,   % Long melody
+        max_range=2     % But very narrow max range
+    ],
+
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, VoiceRange, Config),
+    assert_conflict_type(Conflicts, max_range_too_narrow,
+                     "max_range_too_narrow conflict found"),
+
+    println("  Max range too narrow: OK").
+
+% ==============================================================================
+% RANGE INVERSION TEST
+% ==============================================================================
+
+test_range_inversion =>
+    println("Testing range_inversion conflict..."),
+
+    ScaleNotes = [60, 62, 64, 65, 67],
+    VoiceRange = $range(60, 84),
+    Config = [
+        num_notes=8,
+        min_range=12,   % Min is larger than max
+        max_range=6
+    ],
+
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, VoiceRange, Config),
+    assert_conflict_type(Conflicts, range_inversion,
+                     "range_inversion conflict found"),
+
+    println("  Range inversion: OK").
+
+% ==============================================================================
+% INSUFFICIENT SCALE NOTES TEST
+% ==============================================================================
+
+test_insufficient_scale_notes =>
+    println("Testing insufficient_scale_notes conflict..."),
+
+    ScaleNotes = [60, 62, 64],  % Only 3 scale notes
+    VoiceRange = $range(60, 72),
+    Config = [
+        num_notes=8,
+        min_unique_pitches=7  % Requires 7 unique, but only 3 available
+    ],
+
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, VoiceRange, Config),
+    assert_conflict_type(Conflicts, insufficient_scale_notes,
+                     "insufficient_scale_notes conflict found"),
+
+    println("  Insufficient scale notes: OK").
+
+% ==============================================================================
+% INTERVAL RANGE MISMATCH TEST
+% ==============================================================================
+
+test_interval_range_mismatch =>
+    println("Testing interval_range_mismatch conflict..."),
+
+    ScaleNotes = [60, 62, 64, 65, 67, 69, 71],
+    VoiceRange = $range(60, 84),
+    Config = [
+        num_notes=4,      % Only 4 notes (3 intervals)
+        max_interval=2,   % Max interval of 2 semitones
+        min_range=12      % But need 12 semitone range
+        % With interval=2 and 3 steps, max range = 6 semitones
+        % Need 12/2 = 6 steps, but only have 3
+    ],
+
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, VoiceRange, Config),
+    assert_conflict_type(Conflicts, interval_range_mismatch,
+                     "interval_range_mismatch conflict found"),
+
+    println("  Interval range mismatch: OK").
+
+% ==============================================================================
+% GET CONFIG VALUE TEST
+% ==============================================================================
+
+test_get_config_value =>
+    println("Testing get_config_value..."),
+
+    Config = [num_notes=16, max_interval=5, tempo=120],
+
+    % Existing key
+    V1 = diagnostics.get_config_value(Config, num_notes, 8),
+    assert_eq(V1, 16, "get_config_value returns existing value"),
+
+    % Non-existing key returns default
+    V2 = diagnostics.get_config_value(Config, min_range, 999),
+    assert_eq(V2, 999, "get_config_value returns default for missing key"),
+
+    % Empty config returns default
+    V3 = diagnostics.get_config_value([], num_notes, 42),
+    assert_eq(V3, 42, "get_config_value on empty config returns default"),
+
+    println("  Get config value: OK").
+
+% ==============================================================================
+% REMOVE DUPS TEST
+% ==============================================================================
+
+test_remove_dups =>
+    println("Testing remove_dups..."),
+
+    % No duplicates
+    L1 = diagnostics.remove_dups([1, 2, 3, 4]),
+    assert_eq(L1, [1, 2, 3, 4], "no dups unchanged"),
+
+    % Some duplicates
+    L2 = diagnostics.remove_dups([1, 2, 2, 3, 3, 3, 4]),
+    assert_eq(length(L2), 4, "duplicates removed"),
+
+    % All same
+    L3 = diagnostics.remove_dups([5, 5, 5, 5]),
+    assert_eq(L3, [5], "all same reduces to one"),
+
+    % Empty list
+    L4 = diagnostics.remove_dups([]),
+    assert_eq(L4, [], "empty stays empty"),
+
+    println("  Remove dups: OK").
+
+% ==============================================================================
+% MULTIPLE CONFLICTS TEST
+% ==============================================================================
+
+test_multiple_conflicts =>
+    println("Testing multiple conflicts..."),
+
+    ScaleNotes = [60, 62],  % Only 2 scale notes
+    VoiceRange = $range(60, 65),  % Only 5 semitones
+    Config = [
+        num_notes=20,
+        max_interval=2,
+        min_range=15,   % Exceeds voice range (5)
+        max_range=4,    % min > max
+        min_unique_pitches=10  % More than scale notes (2)
+    ],
+
+    Conflicts = diagnostics.detect_constraint_conflicts(ScaleNotes, VoiceRange, Config),
+
+    % Should have multiple conflicts
+    assert_true(length(Conflicts) >= 3, "multiple conflicts detected"),
+    assert_conflict_type(Conflicts, min_range_exceeds_voice,
+                         "has min_range_exceeds_voice"),
+    assert_conflict_type(Conflicts, range_inversion,
+                         "has range_inversion"),
+    assert_conflict_type(Conflicts, insufficient_scale_notes,
+                         "has insufficient_scale_notes"),
+
+    println("  Multiple conflicts: OK").
+
+% ==============================================================================
+% ASSERTION HELPERS
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Condition, Msg) =>
+    if not Condition then
+        printf("FAIL: %s - expected true%n", Msg),
+        fail
+    end.
+
+% Assert that a conflict type exists in the list
+assert_conflict_type(Conflicts, Type, Msg) =>
+    Found = false,
+    foreach(Conflict in Conflicts)
+        if Conflict = $conflict(T, _, _), T == Type then
+            Found := true
+        end
+    end,
+    if Found != true then
+        printf("FAIL: %s - conflict type %w not found%n", Msg, Type),
+        fail
+    end.

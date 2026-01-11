@@ -1,0 +1,449 @@
+% test_mood_mapping.pi - Unit tests for mood_mapping module
+% Run with: ./scripts/run_picat.sh picat/test_mood_mapping.pi
+
+module test_mood_mapping.
+
+import mood.
+import mood_mapping.
+import music_types.
+
+main(Args) =>
+    main.
+
+main =>
+    println("=== Mood Mapping Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_default_params() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_params_accessors() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_tempo_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mode_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_density_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_interval_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_voice_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_velocity_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_legato_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_dissonance_mapping() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_to_params_deterministic() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_interpolate_params() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_constraint_level() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_violin_params() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed!")
+    else
+        println("Some tests failed."),
+        fail
+    end.
+
+% ==============================================================================
+% DEFAULT PARAMS TESTS
+% ==============================================================================
+
+test_default_params =>
+    println("Testing default params..."),
+
+    Params = mood_mapping.default_music_params(),
+
+    % Verify default values
+    assert_eq(mood_mapping.get_tempo(Params), 120, "default tempo"),
+    assert_eq(mood_mapping.get_mode(Params), major, "default mode"),
+    assert_eq(mood_mapping.get_note_density(Params), 4, "default density"),
+    assert_eq(mood_mapping.get_max_interval(Params), 5, "default max interval"),
+    assert_eq(mood_mapping.get_velocity_base(Params), 80, "default velocity base"),
+    assert_eq(mood_mapping.get_velocity_var(Params), 15, "default velocity var"),
+    assert_near(mood_mapping.get_legato(Params), 0.9, 0.01, "default legato"),
+    assert_near(mood_mapping.get_dissonance(Params), 0.0, 0.01, "default dissonance"),
+    assert_near(mood_mapping.get_randomness(Params), 0.0, 0.01, "default randomness"),
+
+    println("  Default params: OK").
+
+% ==============================================================================
+% PARAMS ACCESSORS TESTS
+% ==============================================================================
+
+test_params_accessors =>
+    println("Testing params accessors..."),
+
+    % Create custom params
+    Params = $music_params(100, minor, 6, 4, alto_voice(), 70, 20, 0.85, 0.2, 0.3),
+
+    assert_eq(mood_mapping.get_tempo(Params), 100, "get_tempo"),
+    assert_eq(mood_mapping.get_mode(Params), minor, "get_mode"),
+    assert_eq(mood_mapping.get_note_density(Params), 6, "get_note_density"),
+    assert_eq(mood_mapping.get_max_interval(Params), 4, "get_max_interval"),
+    assert_eq(mood_mapping.get_velocity_base(Params), 70, "get_velocity_base"),
+    assert_eq(mood_mapping.get_velocity_var(Params), 20, "get_velocity_var"),
+    assert_near(mood_mapping.get_legato(Params), 0.85, 0.01, "get_legato"),
+    assert_near(mood_mapping.get_dissonance(Params), 0.2, 0.01, "get_dissonance"),
+    assert_near(mood_mapping.get_randomness(Params), 0.3, 0.01, "get_randomness"),
+
+    println("  Params accessors: OK").
+
+% ==============================================================================
+% TEMPO MAPPING TESTS
+% ==============================================================================
+
+test_tempo_mapping =>
+    println("Testing tempo mapping..."),
+
+    % Low arousal, low valence -> slow tempo
+    T1 = mood_mapping.tempo_from_va(-1.0, -1.0),
+    assert_true(T1 >= 60, "min tempo >= 60"),
+    assert_true(T1 <= 90, "sad slow tempo <= 90"),
+
+    % High arousal, high valence -> fast tempo
+    T2 = mood_mapping.tempo_from_va(1.0, 1.0),
+    assert_true(T2 >= 150, "happy fast tempo >= 150"),
+    assert_true(T2 <= 180, "max tempo <= 180"),
+
+    % Neutral -> moderate tempo
+    T3 = mood_mapping.tempo_from_va(0.0, 0.0),
+    assert_true(T3 >= 100, "neutral tempo >= 100"),
+    assert_true(T3 <= 140, "neutral tempo <= 140"),
+
+    % Arousal is primary driver
+    T4_low_a = mood_mapping.tempo_from_va(0.0, -0.8),
+    T4_high_a = mood_mapping.tempo_from_va(0.0, 0.8),
+    assert_true(T4_high_a > T4_low_a, "higher arousal -> faster tempo"),
+
+    println("  Tempo mapping: OK").
+
+% ==============================================================================
+% MODE MAPPING TESTS
+% ==============================================================================
+
+test_mode_mapping =>
+    println("Testing mode mapping..."),
+
+    % Positive valence -> major/bright modes
+    M1 = mood_mapping.mode_from_va(0.8, 0.5),
+    assert_member(M1, [lydian, major], "very positive -> bright mode"),
+
+    M2 = mood_mapping.mode_from_va(0.3, 0.0),
+    assert_member(M2, [major, mixolydian], "positive -> major mode"),
+
+    % Negative valence -> minor/dark modes
+    M3 = mood_mapping.mode_from_va(-0.3, 0.0),
+    assert_member(M3, [dorian, natural_minor, minor], "negative -> minor mode"),
+
+    M4 = mood_mapping.mode_from_va(-0.8, 0.0),
+    assert_member(M4, [phrygian, minor, aeolian], "very negative -> dark mode"),
+
+    % Test modes_for_valence returns appropriate lists
+    Modes1 = mood_mapping.modes_for_valence(0.7),
+    assert_member(major, Modes1, "positive valence includes major"),
+
+    Modes2 = mood_mapping.modes_for_valence(-0.7),
+    assert_member(minor, Modes2, "negative valence includes minor"),
+
+    println("  Mode mapping: OK").
+
+% ==============================================================================
+% DENSITY MAPPING TESTS
+% ==============================================================================
+
+test_density_mapping =>
+    println("Testing density mapping..."),
+
+    % Low arousal -> sparse
+    D1 = mood_mapping.density_from_va(0.0, -1.0),
+    assert_eq(D1, 4, "low arousal -> 4 notes/bar"),
+
+    % High arousal -> dense
+    D2 = mood_mapping.density_from_va(0.0, 1.0),
+    assert_eq(D2, 12, "high arousal -> 12 notes/bar"),
+
+    % Neutral -> moderate
+    D3 = mood_mapping.density_from_va(0.0, 0.0),
+    assert_eq(D3, 8, "neutral arousal -> 8 notes/bar"),
+
+    % Valence doesn't affect density
+    D4 = mood_mapping.density_from_va(-1.0, 0.0),
+    D5 = mood_mapping.density_from_va(1.0, 0.0),
+    assert_eq(D4, D5, "valence doesn't affect density"),
+
+    println("  Density mapping: OK").
+
+% ==============================================================================
+% INTERVAL MAPPING TESTS
+% ==============================================================================
+
+test_interval_mapping =>
+    println("Testing interval mapping..."),
+
+    % Extreme valence prefers stepwise (smaller intervals)
+    I1 = mood_mapping.interval_from_va(1.0, 0.0),
+    I2 = mood_mapping.interval_from_va(-1.0, 0.0),
+    I3 = mood_mapping.interval_from_va(0.0, 0.0),
+
+    assert_true(I1 < I3, "extreme positive valence -> smaller intervals"),
+    assert_true(I2 < I3, "extreme negative valence -> smaller intervals"),
+
+    % Higher arousal allows larger jumps
+    I4 = mood_mapping.interval_from_va(0.0, -0.8),
+    I5 = mood_mapping.interval_from_va(0.0, 0.8),
+    assert_true(I5 > I4, "higher arousal -> larger intervals allowed"),
+
+    % All intervals in valid range
+    assert_true(I1 >= 2, "min interval >= 2"),
+    assert_true(I5 <= 7, "max interval <= 7"),
+
+    println("  Interval mapping: OK").
+
+% ==============================================================================
+% VOICE MAPPING TESTS
+% ==============================================================================
+
+test_voice_mapping =>
+    println("Testing voice mapping..."),
+
+    % High energy, positive -> soprano
+    V1 = mood_mapping.voice_from_va(0.5, 0.5),
+    V1 = $voice(_, Type1, _, _),
+    assert_eq(Type1, soprano, "positive energetic -> soprano"),
+
+    % Sad, low energy -> tenor
+    V2 = mood_mapping.voice_from_va(-0.5, -0.5),
+    V2 = $voice(_, Type2, _, _),
+    assert_eq(Type2, tenor, "sad low energy -> tenor"),
+
+    % Moderate -> alto
+    V3 = mood_mapping.voice_from_va(0.1, 0.1),
+    V3 = $voice(_, Type3, _, _),
+    assert_eq(Type3, alto, "moderate mood -> alto"),
+
+    println("  Voice mapping: OK").
+
+% ==============================================================================
+% VELOCITY MAPPING TESTS
+% ==============================================================================
+
+test_velocity_mapping =>
+    println("Testing velocity mapping..."),
+
+    % Low arousal -> quiet
+    VB1 = mood_mapping.velocity_base_from_va(0.0, -1.0),
+    assert_true(VB1 >= 45, "min velocity >= 45"),
+    assert_true(VB1 <= 60, "low arousal velocity <= 60"),
+
+    % High arousal -> loud
+    VB2 = mood_mapping.velocity_base_from_va(0.0, 1.0),
+    assert_true(VB2 >= 90, "high arousal velocity >= 90"),
+    assert_true(VB2 <= 100, "max velocity <= 100"),
+
+    % Extreme valence -> more variance
+    VV1 = mood_mapping.velocity_var_from_va(0.0, 0.0),
+    VV2 = mood_mapping.velocity_var_from_va(1.0, 0.0),
+    VV3 = mood_mapping.velocity_var_from_va(-1.0, 0.0),
+
+    assert_true(VV2 > VV1, "extreme positive valence -> more variance"),
+    assert_true(VV3 > VV1, "extreme negative valence -> more variance"),
+
+    println("  Velocity mapping: OK").
+
+% ==============================================================================
+% LEGATO MAPPING TESTS
+% ==============================================================================
+
+test_legato_mapping =>
+    println("Testing legato mapping..."),
+
+    % Low arousal -> more legato
+    L1 = mood_mapping.legato_from_va(0.0, -1.0),
+    assert_true(L1 >= 0.90, "low arousal -> high legato"),
+
+    % High arousal -> less legato (more staccato)
+    L2 = mood_mapping.legato_from_va(0.0, 1.0),
+    assert_true(L2 <= 0.85, "high arousal -> lower legato"),
+
+    % All legato values in valid range
+    assert_true(L1 <= 0.98, "max legato <= 0.98"),
+    assert_true(L2 >= 0.75, "min legato >= 0.75"),
+
+    println("  Legato mapping: OK").
+
+% ==============================================================================
+% DISSONANCE MAPPING TESTS
+% ==============================================================================
+
+test_dissonance_mapping =>
+    println("Testing dissonance mapping..."),
+
+    % Positive valence -> consonant
+    D1 = mood_mapping.dissonance_from_va(1.0, 0.0),
+    assert_near(D1, 0.0, 0.01, "positive valence -> no dissonance"),
+
+    % Negative valence -> more dissonance
+    D2 = mood_mapping.dissonance_from_va(-1.0, 0.0),
+    assert_true(D2 > 0.3, "negative valence -> more dissonance"),
+    assert_true(D2 <= 0.5, "max dissonance <= 0.5"),
+
+    % Neutral -> moderate
+    D3 = mood_mapping.dissonance_from_va(0.0, 0.0),
+    assert_near(D3, 0.0, 0.01, "neutral -> low dissonance"),
+
+    println("  Dissonance mapping: OK").
+
+% ==============================================================================
+% MOOD TO PARAMS DETERMINISTIC TESTS
+% ==============================================================================
+
+test_mood_to_params_deterministic =>
+    println("Testing mood_to_params deterministic..."),
+
+    Happy = mood.mood_preset(happy),
+    Sad = mood.mood_preset(sad_depressed),
+
+    % Deterministic version (randomness = 0)
+    P1 = mood_mapping.mood_to_params(Happy),
+    P2 = mood_mapping.mood_to_params(Happy),
+
+    % Same mood should produce same params with no randomness
+    assert_eq(mood_mapping.get_tempo(P1), mood_mapping.get_tempo(P2), "deterministic tempo"),
+    assert_eq(mood_mapping.get_mode(P1), mood_mapping.get_mode(P2), "deterministic mode"),
+    assert_eq(mood_mapping.get_note_density(P1), mood_mapping.get_note_density(P2), "deterministic density"),
+
+    % Happy should have different params than sad
+    PS = mood_mapping.mood_to_params(Sad),
+    assert_true(mood_mapping.get_tempo(P1) > mood_mapping.get_tempo(PS), "happy faster than sad"),
+
+    % Test randomness parameter is stored
+    P3 = mood_mapping.mood_to_params(Happy, 0.5),
+    assert_near(mood_mapping.get_randomness(P3), 0.5, 0.01, "randomness stored in params"),
+
+    println("  Mood to params deterministic: OK").
+
+% ==============================================================================
+% INTERPOLATE PARAMS TESTS
+% ==============================================================================
+
+test_interpolate_params =>
+    println("Testing interpolate_params..."),
+
+    P1 = $music_params(80, major, 4, 3, soprano_voice(), 60, 10, 0.95, 0.0, 0.0),
+    P2 = $music_params(160, minor, 8, 6, tenor_voice(), 100, 20, 0.80, 0.4, 0.0),
+
+    % T=0 should return P1's values
+    R0 = mood_mapping.interpolate_params(P1, P2, 0.0),
+    assert_eq(mood_mapping.get_tempo(R0), 80, "interp T=0 tempo"),
+    assert_eq(mood_mapping.get_mode(R0), major, "interp T=0 mode"),
+
+    % T=1 should return P2's values
+    R1 = mood_mapping.interpolate_params(P1, P2, 1.0),
+    assert_eq(mood_mapping.get_tempo(R1), 160, "interp T=1 tempo"),
+    assert_eq(mood_mapping.get_mode(R1), minor, "interp T=1 mode"),
+
+    % T=0.5 should return midpoint for numeric values
+    R05 = mood_mapping.interpolate_params(P1, P2, 0.5),
+    assert_eq(mood_mapping.get_tempo(R05), 120, "interp T=0.5 tempo"),
+    assert_eq(mood_mapping.get_note_density(R05), 6, "interp T=0.5 density"),
+    assert_eq(mood_mapping.get_velocity_base(R05), 80, "interp T=0.5 velocity"),
+
+    println("  Interpolate params: OK").
+
+% ==============================================================================
+% CONSTRAINT LEVEL TESTS
+% ==============================================================================
+
+test_constraint_level =>
+    println("Testing constraint_level..."),
+
+    % Neutral mood -> relaxed
+    Neutral = mood.mood_preset(neutral),
+    L1 = mood_mapping.constraint_level_from_mood(Neutral),
+    assert_eq(L1, relaxed, "neutral mood -> relaxed"),
+
+    % Extreme mood -> strict
+    Excited = mood.mood_preset(excited),
+    L2 = mood_mapping.constraint_level_from_mood(Excited),
+    assert_eq(L2, strict, "extreme mood -> strict"),
+
+    % Moderate mood -> standard
+    Focused = mood.mood_preset(focused),
+    L3 = mood_mapping.constraint_level_from_mood(Focused),
+    % focused has V=0.2, A=0.3, intensity = (0.2 + 0.3)/2 = 0.25, so relaxed
+    assert_member(L3, [relaxed, standard], "moderate mood -> relaxed or standard"),
+
+    println("  Constraint level: OK").
+
+% ==============================================================================
+% VIOLIN PARAMS TESTS
+% ==============================================================================
+
+test_violin_params =>
+    println("Testing violin params..."),
+
+    % Test default violin params
+    VDefault = mood_mapping.default_violin_params(),
+    assert_eq(mood_mapping.get_articulation(VDefault), arco, "default articulation"),
+    assert_near(mood_mapping.get_vibrato(VDefault), 0.5, 0.01, "default vibrato"),
+
+    % High arousal, positive valence -> spiccato
+    Happy = mood.mood_preset(happy),
+    VHappy = mood_mapping.mood_to_violin_params(Happy),
+    % Happy has A=0.5, V=0.8 - moderate-high arousal
+    assert_member(mood_mapping.get_articulation(VHappy), [spiccato, detache, arco],
+                  "happy -> energetic articulation"),
+
+    % Low arousal -> legato
+    Calm = mood.mood_preset(calm_peaceful),
+    VCalm = mood_mapping.mood_to_violin_params(Calm),
+    assert_member(mood_mapping.get_articulation(VCalm), [legato, arco],
+                  "calm -> connected articulation"),
+
+    % Extreme emotion -> high vibrato
+    Excited = mood.mood_preset(excited),
+    VExcited = mood_mapping.mood_to_violin_params(Excited),
+    assert_true(mood_mapping.get_vibrato(VExcited) >= 0.5, "excited -> high vibrato"),
+
+    % Test technique mapping
+    SadDepressed = mood.mood_preset(sad_depressed),
+    VSad = mood_mapping.mood_to_violin_params(SadDepressed),
+    % Sad has V=-0.7, A=-0.3, should be sul_tasto (sad, subdued)
+    Tech = mood_mapping.get_technique(VSad),
+    assert_member(Tech, [sul_tasto, normal], "sad -> ethereal or normal technique"),
+
+    println("  Violin params: OK").
+
+% ==============================================================================
+% ASSERTION HELPERS
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_near(Actual, Expected, Tolerance, Msg) =>
+    if abs(Actual - Expected) > Tolerance then
+        printf("FAIL: %s - expected ~%w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Condition, Msg) =>
+    if not Condition then
+        printf("FAIL: %s - expected true%n", Msg),
+        fail
+    end.
+
+assert_member(Item, List, Msg) =>
+    (member_check(Item, List) ->
+        true
+    ;
+        printf("FAIL: %s - %w not in %w%n", Msg, Item, List),
+        fail
+    ).
+
+% Helper to check membership
+member_check(X, [X|_]) => true.
+member_check(X, [_|T]) => member_check(X, T).

@@ -1,0 +1,412 @@
+% test_mood.pi - Unit tests for mood module
+% Run with: ./scripts/run_picat.sh picat/test_mood.pi
+
+module test_mood.
+
+import mood.
+
+main(Args) =>
+    main.
+
+main =>
+    println("=== Mood Module Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_mood_creation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_presets() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_accessors() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_lerp() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_distance() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_moods_similar() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_blend_moods() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_descriptions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_quadrants() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_mood_validation() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_preset_lookup() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed!")
+    else
+        println("Some tests failed."),
+        fail
+    end.
+
+% ==============================================================================
+% MOOD CREATION TESTS
+% ==============================================================================
+
+test_mood_creation =>
+    println("Testing mood creation..."),
+
+    % Test new_mood with valid values
+    M1 = mood.new_mood(0.5, -0.3),
+    M1 = $mood(V1, A1),
+    assert_near(V1, 0.5, 0.01, "new_mood valence"),
+    assert_near(A1, -0.3, 0.01, "new_mood arousal"),
+
+    % Test clamping for out-of-range values
+    M2 = mood.new_mood(2.0, -1.5),
+    M2 = $mood(V2, A2),
+    assert_near(V2, 1.0, 0.01, "clamped valence high"),
+    assert_near(A2, -1.0, 0.01, "clamped arousal low"),
+
+    M3 = mood.new_mood(-2.0, 1.5),
+    M3 = $mood(V3, A3),
+    assert_near(V3, -1.0, 0.01, "clamped valence low"),
+    assert_near(A3, 1.0, 0.01, "clamped arousal high"),
+
+    % Test boundary values
+    M4 = mood.new_mood(-1.0, 1.0),
+    M4 = $mood(V4, A4),
+    assert_near(V4, -1.0, 0.01, "boundary valence -1"),
+    assert_near(A4, 1.0, 0.01, "boundary arousal 1"),
+
+    println("  Mood creation: OK").
+
+% ==============================================================================
+% MOOD PRESETS TESTS
+% ==============================================================================
+
+test_mood_presets =>
+    println("Testing mood presets..."),
+
+    % Test all presets exist and are valid
+    Presets = mood.all_mood_presets(),
+    assert_true(length(Presets) >= 18, "at least 18 presets"),
+
+    % Verify each preset returns a valid mood
+    foreach(Name in Presets)
+        M = mood.mood_preset(Name),
+        (mood.is_valid_mood(M) ->
+            true
+        ;
+            printf("FAIL: preset %w is invalid%n", Name),
+            fail
+        )
+    end,
+
+    % Test specific preset values
+    Sad = mood.mood_preset(sad_depressed),
+    Sad = $mood(V1, A1),
+    assert_true(V1 < 0, "sad_depressed has negative valence"),
+    assert_true(A1 < 0.5, "sad_depressed has low-moderate arousal"),
+
+    Happy = mood.mood_preset(happy),
+    Happy = $mood(V2, A2),
+    assert_true(V2 > 0, "happy has positive valence"),
+    assert_true(A2 > 0, "happy has positive arousal"),
+
+    Calm = mood.mood_preset(calm_peaceful),
+    Calm = $mood(V3, A3),
+    assert_true(V3 > 0, "calm_peaceful has positive valence"),
+    assert_true(A3 < 0, "calm_peaceful has negative arousal"),
+
+    Angry = mood.mood_preset(angry),
+    Angry = $mood(V4, A4),
+    assert_true(V4 < 0, "angry has negative valence"),
+    assert_true(A4 > 0, "angry has positive arousal"),
+
+    Neutral = mood.mood_preset(neutral),
+    Neutral = $mood(V5, A5),
+    assert_near(V5, 0.0, 0.01, "neutral valence is zero"),
+    assert_near(A5, 0.0, 0.01, "neutral arousal is zero"),
+
+    println("  Mood presets: OK").
+
+% ==============================================================================
+% MOOD ACCESSORS TESTS
+% ==============================================================================
+
+test_mood_accessors =>
+    println("Testing mood accessors..."),
+
+    M = $mood(0.7, -0.4),
+
+    V = mood.get_valence(M),
+    assert_near(V, 0.7, 0.01, "get_valence"),
+
+    A = mood.get_arousal(M),
+    assert_near(A, -0.4, 0.01, "get_arousal"),
+
+    % Test with preset
+    Happy = mood.mood_preset(happy),
+    assert_near(mood.get_valence(Happy), 0.8, 0.01, "happy preset valence"),
+    assert_near(mood.get_arousal(Happy), 0.5, 0.01, "happy preset arousal"),
+
+    println("  Mood accessors: OK").
+
+% ==============================================================================
+% MOOD LERP TESTS
+% ==============================================================================
+
+test_mood_lerp =>
+    println("Testing mood lerp..."),
+
+    M1 = $mood(-1.0, -1.0),
+    M2 = $mood(1.0, 1.0),
+
+    % Test T=0 returns M1
+    R0 = mood.mood_lerp(M1, M2, 0.0),
+    assert_near(mood.get_valence(R0), -1.0, 0.01, "lerp T=0 valence"),
+    assert_near(mood.get_arousal(R0), -1.0, 0.01, "lerp T=0 arousal"),
+
+    % Test T=1 returns M2
+    R1 = mood.mood_lerp(M1, M2, 1.0),
+    assert_near(mood.get_valence(R1), 1.0, 0.01, "lerp T=1 valence"),
+    assert_near(mood.get_arousal(R1), 1.0, 0.01, "lerp T=1 arousal"),
+
+    % Test T=0.5 returns midpoint
+    R05 = mood.mood_lerp(M1, M2, 0.5),
+    assert_near(mood.get_valence(R05), 0.0, 0.01, "lerp T=0.5 valence"),
+    assert_near(mood.get_arousal(R05), 0.0, 0.01, "lerp T=0.5 arousal"),
+
+    % Test T=0.25
+    R025 = mood.mood_lerp(M1, M2, 0.25),
+    assert_near(mood.get_valence(R025), -0.5, 0.01, "lerp T=0.25 valence"),
+    assert_near(mood.get_arousal(R025), -0.5, 0.01, "lerp T=0.25 arousal"),
+
+    % Test clamping of T values
+    RNeg = mood.mood_lerp(M1, M2, -0.5),
+    assert_near(mood.get_valence(RNeg), -1.0, 0.01, "lerp T<0 clamps to 0"),
+
+    RHigh = mood.mood_lerp(M1, M2, 1.5),
+    assert_near(mood.get_valence(RHigh), 1.0, 0.01, "lerp T>1 clamps to 1"),
+
+    println("  Mood lerp: OK").
+
+% ==============================================================================
+% MOOD DISTANCE TESTS
+% ==============================================================================
+
+test_mood_distance =>
+    println("Testing mood distance..."),
+
+    M1 = $mood(0.0, 0.0),
+    M2 = $mood(1.0, 0.0),
+    M3 = $mood(0.0, 1.0),
+    M4 = $mood(1.0, 1.0),
+
+    % Distance along valence axis
+    D1 = mood.mood_distance(M1, M2),
+    assert_near(D1, 1.0, 0.01, "distance valence=1, arousal=0"),
+
+    % Distance along arousal axis
+    D2 = mood.mood_distance(M1, M3),
+    assert_near(D2, 1.0, 0.01, "distance valence=0, arousal=1"),
+
+    % Diagonal distance (sqrt(2))
+    D3 = mood.mood_distance(M1, M4),
+    assert_near(D3, 1.414, 0.01, "diagonal distance"),
+
+    % Distance to self is 0
+    D4 = mood.mood_distance(M1, M1),
+    assert_near(D4, 0.0, 0.01, "distance to self"),
+
+    % Maximum possible distance (corner to corner)
+    MCorner1 = $mood(-1.0, -1.0),
+    MCorner2 = $mood(1.0, 1.0),
+    D5 = mood.mood_distance(MCorner1, MCorner2),
+    assert_near(D5, 2.828, 0.01, "max distance corner to corner"),
+
+    println("  Mood distance: OK").
+
+% ==============================================================================
+% MOODS SIMILAR TESTS
+% ==============================================================================
+
+test_moods_similar =>
+    println("Testing moods_similar..."),
+
+    M1 = $mood(0.5, 0.5),
+    M2 = $mood(0.6, 0.5),  % Distance = 0.1
+    M3 = $mood(0.8, 0.8),  % Distance = 0.424
+
+    % Close moods should be similar with default threshold (0.2)
+    (mood.moods_similar(M1, M2) -> true ; println("FAIL: close moods should be similar"), fail),
+
+    % Far moods should not be similar
+    (not mood.moods_similar(M1, M3) -> true ; println("FAIL: far moods should not be similar"), fail),
+
+    % Identical moods are always similar
+    (mood.moods_similar(M1, M1) -> true ; println("FAIL: identical moods should be similar"), fail),
+
+    % Test with custom threshold
+    (mood.moods_similar(M1, M3, 0.5) -> true ; println("FAIL: far moods similar with larger threshold"), fail),
+    (not mood.moods_similar(M1, M2, 0.05) -> true ; println("FAIL: close moods not similar with tiny threshold"), fail),
+
+    println("  Moods similar: OK").
+
+% ==============================================================================
+% BLEND MOODS TESTS
+% ==============================================================================
+
+test_blend_moods =>
+    println("Testing blend_moods..."),
+
+    M1 = $mood(1.0, 0.0),
+    M2 = $mood(-1.0, 0.0),
+
+    % Equal weights should give average
+    R1 = mood.blend_moods([M1, M2], [1.0, 1.0]),
+    assert_near(mood.get_valence(R1), 0.0, 0.01, "equal blend valence"),
+
+    % Weighted blend
+    R2 = mood.blend_moods([M1, M2], [3.0, 1.0]),
+    assert_near(mood.get_valence(R2), 0.5, 0.01, "3:1 blend valence"),
+
+    % Single mood blend
+    R3 = mood.blend_moods([M1], [1.0]),
+    assert_near(mood.get_valence(R3), 1.0, 0.01, "single mood blend"),
+
+    % Three moods blend
+    M3 = $mood(0.0, 1.0),
+    R4 = mood.blend_moods([M1, M2, M3], [1.0, 1.0, 1.0]),
+    assert_near(mood.get_valence(R4), 0.0, 0.01, "three mood blend valence"),
+    assert_near(mood.get_arousal(R4), 0.333, 0.02, "three mood blend arousal"),
+
+    % Zero weights should return neutral
+    R5 = mood.blend_moods([M1, M2], [0.0, 0.0]),
+    assert_near(mood.get_valence(R5), 0.0, 0.01, "zero weights returns neutral"),
+
+    println("  Blend moods: OK").
+
+% ==============================================================================
+% MOOD DESCRIPTIONS TESTS
+% ==============================================================================
+
+test_mood_descriptions =>
+    println("Testing mood descriptions..."),
+
+    % Test valence descriptions
+    assert_eq(mood.valence_desc(0.8), "very positive", "valence_desc high positive"),
+    assert_eq(mood.valence_desc(0.3), "positive", "valence_desc positive"),
+    assert_eq(mood.valence_desc(0.0), "neutral", "valence_desc neutral"),
+    assert_eq(mood.valence_desc(-0.3), "negative", "valence_desc negative"),
+    assert_eq(mood.valence_desc(-0.8), "very negative", "valence_desc very negative"),
+
+    % Test arousal descriptions
+    assert_eq(mood.arousal_desc(0.8), "high energy", "arousal_desc high"),
+    assert_eq(mood.arousal_desc(0.3), "moderate energy", "arousal_desc moderate"),
+    assert_eq(mood.arousal_desc(0.0), "calm", "arousal_desc calm"),
+    assert_eq(mood.arousal_desc(-0.3), "low energy", "arousal_desc low"),
+    assert_eq(mood.arousal_desc(-0.8), "very calm", "arousal_desc very calm"),
+
+    % Test full description - just verify it returns a non-empty string
+    Desc = mood.mood_description($mood(0.8, 0.8)),
+    assert_true(length(Desc) > 0, "description is non-empty"),
+
+    println("  Mood descriptions: OK").
+
+% ==============================================================================
+% MOOD QUADRANTS TESTS
+% ==============================================================================
+
+test_mood_quadrants =>
+    println("Testing mood quadrants..."),
+
+    % Top-right: positive valence, positive arousal
+    Q1 = mood.mood_quadrant($mood(0.5, 0.5)),
+    assert_eq(Q1, "excited/happy", "top-right quadrant"),
+
+    % Bottom-right: positive valence, negative arousal
+    Q2 = mood.mood_quadrant($mood(0.5, -0.5)),
+    assert_eq(Q2, "calm/relaxed", "bottom-right quadrant"),
+
+    % Top-left: negative valence, positive arousal
+    Q3 = mood.mood_quadrant($mood(-0.5, 0.5)),
+    assert_eq(Q3, "stressed/anxious", "top-left quadrant"),
+
+    % Bottom-left: negative valence, negative arousal
+    Q4 = mood.mood_quadrant($mood(-0.5, -0.5)),
+    assert_eq(Q4, "sad/depressed", "bottom-left quadrant"),
+
+    % Boundaries (at zero)
+    Q5 = mood.mood_quadrant($mood(0.0, 0.0)),
+    assert_eq(Q5, "excited/happy", "origin is top-right"),
+
+    println("  Mood quadrants: OK").
+
+% ==============================================================================
+% MOOD VALIDATION TESTS
+% ==============================================================================
+
+test_mood_validation =>
+    println("Testing mood validation..."),
+
+    % Valid moods
+    (mood.is_valid_mood($mood(0.0, 0.0)) -> true ; println("FAIL: origin is valid"), fail),
+    (mood.is_valid_mood($mood(1.0, 1.0)) -> true ; println("FAIL: max corner is valid"), fail),
+    (mood.is_valid_mood($mood(-1.0, -1.0)) -> true ; println("FAIL: min corner is valid"), fail),
+    (mood.is_valid_mood($mood(0.5, -0.5)) -> true ; println("FAIL: mid values are valid"), fail),
+
+    % Invalid moods (out of range)
+    (not mood.is_valid_mood($mood(1.1, 0.0)) -> true ; println("FAIL: valence > 1 is invalid"), fail),
+    (not mood.is_valid_mood($mood(-1.1, 0.0)) -> true ; println("FAIL: valence < -1 is invalid"), fail),
+    (not mood.is_valid_mood($mood(0.0, 1.1)) -> true ; println("FAIL: arousal > 1 is invalid"), fail),
+    (not mood.is_valid_mood($mood(0.0, -1.1)) -> true ; println("FAIL: arousal < -1 is invalid"), fail),
+
+    println("  Mood validation: OK").
+
+% ==============================================================================
+% PRESET LOOKUP TESTS
+% ==============================================================================
+
+test_preset_lookup =>
+    println("Testing preset lookup..."),
+
+    % Test lookup_mood_preset
+    M1 = mood.lookup_mood_preset(happy),
+    (mood.is_valid_mood(M1) -> true ; println("FAIL: lookup returns valid mood"), fail),
+    assert_near(mood.get_valence(M1), 0.8, 0.01, "lookup happy valence"),
+
+    % Test is_mood_preset
+    (mood.is_mood_preset(happy) -> true ; println("FAIL: happy is a preset"), fail),
+    (mood.is_mood_preset(sad_depressed) -> true ; println("FAIL: sad_depressed is a preset"), fail),
+    % Non-existent preset should fail or throw error
+    (catch(mood.is_mood_preset(nonexistent_mood), _, fail) ->
+        println("FAIL: nonexistent should not be a preset"), fail
+    ;
+        true
+    ),
+
+    % Verify all listed presets are lookupable
+    foreach(Name in mood.all_mood_presets())
+        (mood.is_mood_preset(Name) ->
+            true
+        ;
+            printf("FAIL: preset %w not lookupable%n", Name),
+            fail
+        )
+    end,
+
+    println("  Preset lookup: OK").
+
+% ==============================================================================
+% ASSERTION HELPERS
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_near(Actual, Expected, Tolerance, Msg) =>
+    if abs(Actual - Expected) > Tolerance then
+        printf("FAIL: %s - expected ~%w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Condition, Msg) =>
+    if not Condition then
+        printf("FAIL: %s - expected true%n", Msg),
+        fail
+    end.

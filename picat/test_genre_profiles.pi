@@ -1,0 +1,412 @@
+% test_genre_profiles.pi - Unit tests for genre_profiles module
+% Run with: ./scripts/run_picat.sh picat/test_genre_profiles.pi
+
+module test_genre_profiles.
+
+import genre_profiles.
+
+main(Args) =>
+    main.
+
+main =>
+    println("=== Genre Profiles Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_all_genres_exist() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_genre_profile_structure() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_query_functions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_hard_constraints() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_soft_constraints() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_param_overrides() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_genre_descriptions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_intensity_modifiers() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_genre_param_values() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed!")
+    else
+        println("Some tests failed."),
+        fail
+    end.
+
+% ==============================================================================
+% ALL GENRES EXIST TESTS
+% ==============================================================================
+
+test_all_genres_exist =>
+    println("Testing all genres exist..."),
+
+    Genres = genre_profiles.all_genres(),
+    assert_true(length(Genres) >= 11, "at least 11 genres defined"),
+
+    % Test each genre exists
+    foreach(GenreId in Genres)
+        (genre_profiles.genre_exists(GenreId) ->
+            true
+        ;
+            printf("FAIL: genre %w should exist%n", GenreId),
+            fail
+        )
+    end,
+
+    % Test specific expected genres
+    (genre_profiles.genre_exists(classical_period) -> true ; println("FAIL: classical_period missing"), fail),
+    (genre_profiles.genre_exists(baroque) -> true ; println("FAIL: baroque missing"), fail),
+    (genre_profiles.genre_exists(romantic) -> true ; println("FAIL: romantic missing"), fail),
+    (genre_profiles.genre_exists(folk_traditional) -> true ; println("FAIL: folk_traditional missing"), fail),
+    (genre_profiles.genre_exists(children_songs) -> true ; println("FAIL: children_songs missing"), fail),
+
+    % Test non-existent genre
+    (not genre_profiles.genre_exists(nonexistent_genre) -> true ; println("FAIL: nonexistent_genre should not exist"), fail),
+
+    println("  All genres exist: OK").
+
+% ==============================================================================
+% GENRE PROFILE STRUCTURE TESTS
+% ==============================================================================
+
+test_genre_profile_structure =>
+    println("Testing genre profile structure..."),
+
+    % Test get_profile returns proper structure
+    Profile = genre_profiles.get_profile(classical_period),
+    assert_true(Profile != not_found, "classical_period profile exists"),
+
+    % Test structure fields
+    Profile = $genre_profile(
+        id = Id,
+        base_style = Style,
+        hard_constraints = Hard,
+        soft_constraints = Soft,
+        param_overrides = Params
+    ),
+    assert_eq(Id, classical_period, "profile has correct id"),
+    assert_eq(Style, classical, "classical_period has classical base style"),
+    assert_list(Hard, "hard_constraints is a list"),
+    assert_list(Soft, "soft_constraints is a list"),
+    assert_list(Params, "param_overrides is a list"),
+
+    % Test not_found for invalid genre
+    BadProfile = genre_profiles.get_profile(not_a_real_genre),
+    assert_eq(BadProfile, not_found, "invalid genre returns not_found"),
+
+    println("  Genre profile structure: OK").
+
+% ==============================================================================
+% QUERY FUNCTIONS TESTS
+% ==============================================================================
+
+test_query_functions =>
+    println("Testing query functions..."),
+
+    % Test base_style
+    Style1 = genre_profiles.base_style(classical_period),
+    assert_eq(Style1, classical, "classical_period base_style"),
+
+    Style2 = genre_profiles.base_style(baroque),
+    assert_eq(Style2, baroque, "baroque base_style"),
+
+    Style3 = genre_profiles.base_style(folk_traditional),
+    assert_eq(Style3, folk, "folk_traditional base_style"),
+
+    % Test hard_constraints returns list
+    Hard = genre_profiles.hard_constraints(classical_period),
+    assert_list(Hard, "hard_constraints returns list"),
+
+    % Test soft_constraints returns list of tuples
+    Soft = genre_profiles.soft_constraints(classical_period),
+    assert_list(Soft, "soft_constraints returns list"),
+    % Verify first soft constraint is a tuple with weight
+    (Soft = [(_FirstId, FirstWeight)|_] ->
+        assert_true(FirstWeight > 0, "soft constraint has positive weight"),
+        assert_true(FirstWeight <= 100, "soft constraint weight <= 100")
+    ;
+        true  % Empty list is valid for some genres
+    ),
+
+    % Test param_overrides
+    Params = genre_profiles.param_overrides(classical_period),
+    assert_list(Params, "param_overrides returns list"),
+
+    println("  Query functions: OK").
+
+% ==============================================================================
+% HARD CONSTRAINTS TESTS
+% ==============================================================================
+
+test_hard_constraints =>
+    println("Testing hard constraints..."),
+
+    % Classical period has specific hard constraints
+    HardClassical = genre_profiles.hard_constraints(classical_period),
+    assert_member(no_augmented_seconds, HardClassical, "classical has no_augmented_seconds"),
+    assert_member(no_tritone_outline, HardClassical, "classical has no_tritone_outline"),
+
+    % Baroque has different constraints
+    HardBaroque = genre_profiles.hard_constraints(baroque),
+    assert_member(no_augmented_seconds, HardBaroque, "baroque has no_augmented_seconds"),
+
+    % Contemporary has no hard constraints
+    HardContemporary = genre_profiles.hard_constraints(contemporary),
+    assert_eq(HardContemporary, [], "contemporary has no hard constraints"),
+
+    % Children songs have ends_on_tonic
+    HardChildren = genre_profiles.hard_constraints(children_songs),
+    assert_member(ends_on_tonic, HardChildren, "children_songs ends_on_tonic"),
+    assert_member(max_range, HardChildren, "children_songs has max_range"),
+
+    println("  Hard constraints: OK").
+
+% ==============================================================================
+% SOFT CONSTRAINTS TESTS
+% ==============================================================================
+
+test_soft_constraints =>
+    println("Testing soft constraints..."),
+
+    % Classical has leading_tone_resolution with high weight
+    SoftClassical = genre_profiles.soft_constraints(classical_period),
+    % Find leading_tone_resolution weight
+    (find_weight(leading_tone_resolution, SoftClassical, W1) ->
+        assert_true(W1 >= 80, "leading_tone_resolution weight >= 80")
+    ;
+        println("FAIL: leading_tone_resolution not found"), fail
+    ),
+
+    % Sacred chant has mostly_stepwise with high weight
+    SoftChant = genre_profiles.soft_constraints(sacred_chant),
+    (find_weight(mostly_stepwise, SoftChant, W2) ->
+        assert_true(W2 >= 85, "chant mostly_stepwise weight >= 85")
+    ;
+        println("FAIL: mostly_stepwise not found in chant"), fail
+    ),
+
+    % Minimalist has low weight for no_immediate_repeat (repeats allowed)
+    SoftMinimalist = genre_profiles.soft_constraints(minimalist),
+    (find_weight(no_immediate_repeat, SoftMinimalist, W3) ->
+        assert_true(W3 <= 40, "minimalist no_immediate_repeat has low weight")
+    ;
+        println("FAIL: no_immediate_repeat not found in minimalist"), fail
+    ),
+
+    % All soft constraint weights should be in valid range
+    foreach(GenreId in genre_profiles.all_genres())
+        Soft = genre_profiles.soft_constraints(GenreId),
+        foreach((_, Weight) in Soft)
+            (Weight >= 0, Weight <= 100 ->
+                true
+            ;
+                printf("FAIL: %w has invalid weight %d%n", GenreId, Weight),
+                fail
+            )
+        end
+    end,
+
+    println("  Soft constraints: OK").
+
+% ==============================================================================
+% PARAM OVERRIDES TESTS
+% ==============================================================================
+
+test_param_overrides =>
+    println("Testing param overrides..."),
+
+    % Classical period has max_interval=5
+    MaxIntClassical = genre_profiles.max_interval(classical_period),
+    assert_eq(MaxIntClassical, 5, "classical max_interval = 5"),
+
+    % Folk has max_interval=4 (more stepwise)
+    MaxIntFolk = genre_profiles.max_interval(folk_traditional),
+    assert_eq(MaxIntFolk, 4, "folk max_interval = 4"),
+
+    % Jazz has larger max_interval
+    MaxIntJazz = genre_profiles.max_interval(traditional_jazz),
+    assert_true(MaxIntJazz >= 7, "jazz max_interval >= 7"),
+
+    % Tempo ranges
+    (TMin1, TMax1) = genre_profiles.tempo_range(classical_period),
+    assert_true(TMin1 >= 60, "classical min tempo >= 60"),
+    assert_true(TMax1 <= 160, "classical max tempo <= 160"),
+
+    (TMin2, TMax2) = genre_profiles.tempo_range(sacred_chant),
+    assert_true(TMax2 <= 100, "chant max tempo <= 100"),
+
+    % Test get_param with default
+    DefaultVal = genre_profiles.get_param(classical_period, nonexistent_param, 999),
+    assert_eq(DefaultVal, 999, "get_param returns default for missing param"),
+
+    println("  Param overrides: OK").
+
+% ==============================================================================
+% GENRE DESCRIPTIONS TESTS
+% ==============================================================================
+
+test_genre_descriptions =>
+    println("Testing genre descriptions..."),
+
+    % Each genre has a non-empty description
+    foreach(GenreId in genre_profiles.all_genres())
+        Desc = genre_profiles.genre_description(GenreId),
+        assert_true(length(Desc) > 10, to_string(GenreId) ++ " has description")
+    end,
+
+    % Specific descriptions contain expected keywords
+    D1 = genre_profiles.genre_description(baroque),
+    assert_true(length(D1) > 20, "baroque description not empty"),
+
+    D2 = genre_profiles.genre_description(children_songs),
+    assert_true(length(D2) > 20, "children_songs description not empty"),
+
+    % Unknown genre has default description
+    D3 = genre_profiles.genre_description(unknown_genre_xyz),
+    assert_eq(D3, "Unknown genre", "unknown genre has default description"),
+
+    println("  Genre descriptions: OK").
+
+% ==============================================================================
+% INTENSITY MODIFIERS TESTS
+% ==============================================================================
+
+test_intensity_modifiers =>
+    println("Testing intensity modifiers..."),
+
+    % Test modifier values
+    LightMod = genre_profiles.light_intensity_modifier(),
+    assert_near(LightMod, 0.7, 0.01, "light modifier = 0.7"),
+
+    StdMod = genre_profiles.standard_intensity_modifier(),
+    assert_near(StdMod, 1.0, 0.01, "standard modifier = 1.0"),
+
+    StrictMod = genre_profiles.strict_intensity_modifier(),
+    assert_near(StrictMod, 1.2, 0.01, "strict modifier = 1.2"),
+
+    % Test apply_intensity
+    TestSoft = [(leap_recovery, 80), (mostly_stepwise, 70)],
+
+    % Light intensity reduces weights
+    LightResult = genre_profiles.apply_intensity(TestSoft, light),
+    (find_weight(leap_recovery, LightResult, W1) ->
+        assert_eq(W1, 56, "light intensity: 80 * 0.7 = 56")
+    ;
+        println("FAIL: leap_recovery not in light result"), fail
+    ),
+
+    % Standard intensity keeps weights
+    StdResult = genre_profiles.apply_intensity(TestSoft, standard),
+    (find_weight(leap_recovery, StdResult, W2) ->
+        assert_eq(W2, 80, "standard intensity: weight unchanged")
+    ;
+        println("FAIL: leap_recovery not in standard result"), fail
+    ),
+
+    % Strict intensity increases weights
+    StrictResult = genre_profiles.apply_intensity(TestSoft, strict),
+    (find_weight(leap_recovery, StrictResult, W3) ->
+        assert_eq(W3, 96, "strict intensity: 80 * 1.2 = 96")
+    ;
+        println("FAIL: leap_recovery not in strict result"), fail
+    ),
+
+    % Test soft_constraints_with_intensity
+    IntenseSoft = genre_profiles.soft_constraints_with_intensity(classical_period, strict),
+    assert_list(IntenseSoft, "soft_constraints_with_intensity returns list"),
+
+    println("  Intensity modifiers: OK").
+
+% ==============================================================================
+% GENRE PARAM VALUES TESTS
+% ==============================================================================
+
+test_genre_param_values =>
+    println("Testing genre param values..."),
+
+    % Different genres have different param profiles
+    % Verify some expected relationships
+
+    % Children songs should have smaller max_interval than jazz
+    ChildrenInt = genre_profiles.max_interval(children_songs),
+    JazzInt = genre_profiles.max_interval(traditional_jazz),
+    assert_true(ChildrenInt < JazzInt, "children smaller interval than jazz"),
+
+    % Sacred chant should have smaller max_interval than romantic
+    ChantInt = genre_profiles.max_interval(sacred_chant),
+    RomanticInt = genre_profiles.max_interval(romantic),
+    assert_true(ChantInt < RomanticInt, "chant smaller interval than romantic"),
+
+    % Minimalist should have small max_interval
+    MinimalistInt = genre_profiles.max_interval(minimalist),
+    assert_true(MinimalistInt <= 4, "minimalist max_interval <= 4"),
+
+    % Contemporary should have largest max_interval
+    ContemporaryInt = genre_profiles.max_interval(contemporary),
+    assert_true(ContemporaryInt >= 8, "contemporary max_interval >= 8"),
+
+    println("  Genre param values: OK").
+
+% ==============================================================================
+% ASSERTION HELPERS
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_near(Actual, Expected, Tolerance, Msg) =>
+    if abs(Actual - Expected) > Tolerance then
+        printf("FAIL: %s - expected ~%w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Condition, Msg) =>
+    if not Condition then
+        printf("FAIL: %s - expected true%n", Msg),
+        fail
+    end.
+
+assert_member(Item, List, Msg) =>
+    (member_check(Item, List) ->
+        true
+    ;
+        printf("FAIL: %s - %w not in %w%n", Msg, Item, List),
+        fail
+    ).
+
+% Helper to check membership
+member_check(X, [X|_]) => true.
+member_check(X, [_|T]) => member_check(X, T).
+
+% Helper to find weight for a constraint ID in soft constraint list
+% Returns the weight if found, or fails
+find_weight(TargetId, List, Weight) =>
+    Found = false,
+    FoundWeight = 0,
+    foreach((ItemId, ItemWeight) in List)
+        if ItemId == TargetId then
+            Found := true,
+            FoundWeight := ItemWeight
+        end
+    end,
+    Found == true,
+    Weight = FoundWeight.
+
+assert_list(List, Msg) =>
+    (is_list_check(List) ->
+        true
+    ;
+        printf("FAIL: %s - not a list: %w%n", Msg, List),
+        fail
+    ).
+
+% Helper to check if something is a list
+is_list_check([]) => true.
+is_list_check([_|_]) => true.

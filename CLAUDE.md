@@ -138,7 +138,10 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ### Testing
 
 ```bash
-# Run all test suites
+# Run ALL test suites at once
+./scripts/run_all_tests.sh
+
+# Or run individual test suites:
 ./scripts/run_picat.sh picat/test_constraint_validation.pi  # Masterpiece validation
 ./scripts/run_picat.sh picat/test_generation.pi             # Generation regression tests
 ./scripts/run_picat.sh picat/test_music_types.pi            # Unit tests for primitives
@@ -146,6 +149,11 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ./scripts/run_picat.sh picat/test_intervals.pi              # Interval calculation tests
 ./scripts/run_picat.sh picat/test_styles.pi                 # Style-based generation tests
 ./scripts/run_picat.sh picat/test_form.pi                   # Form structure tests
+./scripts/run_picat.sh picat/test_mood.pi                   # Mood model tests
+./scripts/run_picat.sh picat/test_mood_mapping.pi           # Mood-to-params mapping tests
+./scripts/run_picat.sh picat/test_genre_profiles.pi         # Genre configuration tests
+./scripts/run_picat.sh picat/test_diagnostics.pi            # Constraint conflict detection tests
+./scripts/run_picat.sh picat/test_transition.pi             # Mood transition planning tests
 ```
 
 The **constraint validation test suite** (`test_constraint_validation.pi`) validates that famous musical masterpieces satisfy the implemented constraints:
