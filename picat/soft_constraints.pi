@@ -99,6 +99,18 @@ apply_soft(no_repetitive_intervals, Notes, _Root, Weight, Cost) =>
     reify_no_repetitive_intervals(Notes, 2, ViolationCount),  % Max 2 same intervals in a row
     Cost #= Weight * ViolationCount.
 
+apply_soft(large_leap_recovery, Notes, _Root, Weight, Cost) =>
+    reify_large_leap_recovery(Notes, 8, ViolationCount),  % 8 semitones = minor 6th
+    Cost #= Weight * ViolationCount.
+
+apply_soft(consonant_leaps_only, Notes, _Root, Weight, Cost) =>
+    reify_consonant_leaps_only(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(peak_approach_exit, Notes, _Root, Weight, Cost) =>
+    reify_peak_approach_exit(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown constraint returns 0 cost (no penalty)
 apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
     Cost #= 0.
@@ -539,6 +551,124 @@ reify_no_repetitive_intervals(Notes, MaxConsecutive, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% Large leap recovery: leaps >= Threshold semitones require stepwise approach AND exit
+% Classical style restricts large intervals - approach stepwise, leave stepwise
+% Returns count of violations (leap without proper approach or exit)
+reify_large_leap_recovery(Notes, Threshold, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        % Check positions 2..Len-1 (notes that have both predecessor and successor)
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 2..Len-1)
+            % Interval INTO this note
+            IntervalIn = $abs(Notes[I] - Notes[I-1]),
+            % Interval OUT of this note
+            IntervalOut = $abs(Notes[I+1] - Notes[I]),
+            % Interval to previous note (for checking stepwise approach)
+            PrevInterval = $abs(Notes[I] - Notes[I-1]),
+            % Interval to next note (for checking stepwise exit)
+            NextInterval = $abs(Notes[I+1] - Notes[I]),
+
+            % Violation: large leap INTO without stepwise before,
+            % OR large leap OUT without stepwise after
+            % Since we're at position I, we check:
+            % - If leap to I was large, the move TO I-1 should have been stepwise (but we can only check I-2 -> I-1 if I >= 3)
+            % Simplified: penalize if this note is part of a large leap AND surrounding intervals aren't stepwise
+
+            % A large leap exists at I if either interval in or out is >= Threshold
+            % Penalty if large leap AND the other side isn't stepwise (<=2)
+            Violations[I-1] #<=> (
+                (IntervalIn #>= Threshold #/\ IntervalOut #> 2) #\/
+                (IntervalOut #>= Threshold #/\ IntervalIn #> 2)
+            )
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Consonant leaps only: leaps (intervals > 2) should be consonant intervals
+% Consonant leaps: 3 (m3), 4 (M3), 5 (P4), 7 (P5), 8 (m6), 9 (M6), 12 (P8)
+% Dissonant leaps: 6 (tritone), 10 (m7), 11 (M7), and anything > 12
+% Returns count of dissonant leaps
+reify_consonant_leaps_only(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            Interval = $abs(Notes[I+1] - Notes[I]),
+            % A leap is an interval > 2
+            % Dissonant if: interval > 2 AND interval not in {3,4,5,7,8,9,12}
+            % Which means: 6, 10, 11, or > 12
+            Violations[I] #<=> (
+                (Interval #> 2) #/\ (
+                    (Interval #= 6) #\/   % tritone
+                    (Interval #= 10) #\/  % minor 7th
+                    (Interval #= 11) #\/  % major 7th
+                    (Interval #> 12)      % beyond octave
+                )
+            )
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Peak approach and exit: highest note should be approached from below and left by step down
+% Approach: reached by ascending motion (can be step or leap from below)
+% Exit: left by descending step (interval 1-2 going down)
+% Returns 0, 1, or 2 depending on violations
+reify_peak_approach_exit(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        MaxPitch = max(Notes),
+        % Find positions of max pitch and check approach/exit
+        ApproachViolations = new_list(Len),
+        ApproachViolations :: 0..1,
+        ExitViolations = new_list(Len),
+        ExitViolations :: 0..1,
+
+        foreach(I in 1..Len)
+            if I == 1 then
+                % First note: can't check approach, only exit if it's peak
+                ApproachViolations[I] #= 0,
+                if Len > 1 then
+                    % Exit violation: peak at start but doesn't descend
+                    ExitViolations[I] #<=> (
+                        (Notes[I] #= MaxPitch) #/\ (Notes[I+1] #>= Notes[I])
+                    )
+                else
+                    ExitViolations[I] #= 0
+                end
+            elseif I == Len then
+                % Last note: can't check exit, only approach if it's peak
+                ExitViolations[I] #= 0,
+                % Approach violation: peak at end but wasn't approached from below
+                ApproachViolations[I] #<=> (
+                    (Notes[I] #= MaxPitch) #/\ (Notes[I-1] #>= Notes[I])
+                )
+            else
+                % Middle notes: check both approach and exit
+                % Approach violation: is peak AND previous note is >= this note (not approached from below)
+                ApproachViolations[I] #<=> (
+                    (Notes[I] #= MaxPitch) #/\ (Notes[I-1] #>= Notes[I])
+                ),
+                % Exit violation: is peak AND next note is not a descending step
+                % Descending step means: Notes[I] - Notes[I+1] is 1 or 2
+                DescentAmount :: -24..24,
+                DescentAmount #= Notes[I] - Notes[I+1],
+                ExitViolations[I] #<=> (
+                    (Notes[I] #= MaxPitch) #/\ ((DescentAmount #< 1) #\/ (DescentAmount #> 2))
+                )
+            end
+        end,
+        ViolationCount #= sum(ApproachViolations) + sum(ExitViolations)
+    else
+        ViolationCount = 0
+    end.
+
 % ==============================================================================
 % UTILITY FUNCTIONS
 % ==============================================================================
@@ -564,7 +694,10 @@ supported_soft_constraints() = [
     arch_contour,
     tonic_anchoring,
     prefer_smaller_intervals,
-    no_repetitive_intervals
+    no_repetitive_intervals,
+    large_leap_recovery,
+    consonant_leaps_only,
+    peak_approach_exit
 ].
 
 % Check if a constraint ID is supported for soft application

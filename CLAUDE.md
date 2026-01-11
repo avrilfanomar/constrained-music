@@ -230,6 +230,26 @@ Both are soft constraints with genre-specific weights:
 
 The leap threshold (`base_interval_category(leap)` in `intervals.pi`) is set to 4 semitones, meaning major thirds and above trigger leap recovery constraints.
 
+### Melodic Motion Constraints
+
+Three soft constraints based on Classical period music theory (see `docs/classical_constraint_ideas.md`):
+
+1. **`large_leap_recovery`**: Leaps of 8+ semitones (minor 6th and above) require stepwise motion on both sides. If a large leap enters a note, the exit must be stepwise (≤2 semitones), and vice versa. This enforces the classical rule that octave leaps need careful preparation and resolution.
+
+2. **`consonant_leaps_only`**: Penalizes non-consonant leaps. When an interval exceeds 2 semitones (is a leap), it should be consonant:
+   - Allowed: 3 (m3), 4 (M3), 5 (P4), 7 (P5), 8 (m6), 9 (M6), 12 (P8)
+   - Penalized: 6 (tritone), 10 (m7), 11 (M7), >12 (beyond octave)
+
+   Mozart's melodies characteristically use consonant leaps.
+
+3. **`peak_approach_exit`**: The melodic climax (highest note) should be approached from below (ascending motion) and left by descending stepwise motion (1-2 semitones down). This creates the classic arch contour with a highlighted peak.
+
+Genre-specific weights:
+- Classical period, baroque, folk: High weights (70-85) for classical melodic rules
+- Romantic, modal: Moderate weights (45-60) for expressive flexibility
+- Jazz, contemporary: Low weights (20-40) for bebop lines and modern idioms
+- Sacred chant, children's songs: High weights (60-90) for simple, singable melodies
+
 ### File Organization
 
 The piece files (`pieces_bach.pi`, `pieces_mozart.pi`, etc.) are in `picat/` and imported directly.

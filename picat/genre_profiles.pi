@@ -23,17 +23,20 @@ genre_profile(
     [no_augmented_seconds, no_tritone_outline],
     [
         (no_parallel_fifths_single, 90),
+        (consonant_leaps_only, 85),
         (leading_tone_resolution, 85),
         (leap_recovery, 80),
         (phrase_ends_stable, 80),
+        (large_leap_recovery, 75),
         (mostly_stepwise, 75),
+        (peak_approach_exit, 70),
+        (max_octave_leaps, 70),
         (balanced_motion, 65),
         (no_repetitive_intervals, 65),
         (prefer_smaller_intervals, 60),
         (approach_climax_by_step, 60),
         (leave_climax_contrary, 55),
-        (single_climax, 50),
-        (max_octave_leaps, 70)
+        (single_climax, 50)
     ],
     [max_interval=5, tempo_range=(80,140)]
 ).
@@ -46,11 +49,14 @@ genre_profile(
     [no_augmented_seconds],
     [
         (leading_tone_resolution, 85),
+        (consonant_leaps_only, 80),
         (sequence_encouraged, 75),
         (phrase_ends_stable, 75),
         (leap_recovery, 70),
+        (large_leap_recovery, 70),
         (no_consecutive_same_direction_leaps, 65),
         (prefer_smaller_intervals, 55),
+        (peak_approach_exit, 55),
         (no_repetitive_intervals, 40)
     ],
     [max_interval=6, tempo_range=(60,120)]
@@ -68,6 +74,9 @@ genre_profile(
         (no_repetitive_intervals, 60),
         (leading_tone_resolution, 60),
         (single_climax, 55),
+        (consonant_leaps_only, 50),
+        (peak_approach_exit, 50),
+        (large_leap_recovery, 45),
         (prefer_smaller_intervals, 35)
     ],
     [max_interval=7, tempo_range=(50,160), min_range=7]
@@ -85,6 +94,9 @@ genre_profile(
         (no_repetitive_intervals, 70),
         (phrase_ends_stable, 70),
         (no_immediate_repeat, 60),
+        (consonant_leaps_only, 40),
+        (peak_approach_exit, 40),
+        (large_leap_recovery, 35),
         (prefer_smaller_intervals, 30)
     ],
     [max_interval=8, tempo_range=(100,240), min_range=10]
@@ -98,10 +110,13 @@ genre_profile(
     [no_augmented_seconds, no_tritone_outline, max_range],
     [
         (mostly_stepwise, 85),
+        (consonant_leaps_only, 80),
         (phrase_ends_stable, 75),
         (leap_recovery, 70),
         (prefer_smaller_intervals, 70),
+        (large_leap_recovery, 70),
         (max_consecutive_repeats, 65),
+        (peak_approach_exit, 65),
         (arch_contour, 55),
         (no_repetitive_intervals, 50),
         (tonic_anchoring, 50)
@@ -119,7 +134,10 @@ genre_profile(
         (min_unique_pitches, 75),
         (no_repetitive_intervals, 65),
         (no_immediate_repeat, 40),
-        (prefer_smaller_intervals, 20)
+        (peak_approach_exit, 30),
+        (large_leap_recovery, 25),
+        (prefer_smaller_intervals, 20),
+        (consonant_leaps_only, 20)
     ],
     [max_interval=10, tempo_range=(40,200)]
 ).
@@ -132,11 +150,14 @@ genre_profile(
     [ends_on_tonic, max_range],
     [
         (mostly_stepwise, 95),
+        (consonant_leaps_only, 90),
         (leap_recovery, 85),
+        (large_leap_recovery, 85),
         (no_leading_tone_emphasis, 80),
         (prefer_smaller_intervals, 80),
         (no_consecutive_same_direction_leaps, 75),
         (phrase_ends_stable, 70),
+        (peak_approach_exit, 60),
         (no_repetitive_intervals, 35)
     ],
     [max_interval=3, tempo_range=(50,80), max_range=10]
@@ -150,9 +171,12 @@ genre_profile(
     [ends_on_tonic, no_tritone_outline, max_range],
     [
         (mostly_stepwise, 90),
+        (consonant_leaps_only, 85),
         (phrase_ends_stable, 80),
+        (large_leap_recovery, 80),
         (leap_recovery, 75),
         (prefer_smaller_intervals, 75),
+        (peak_approach_exit, 65),
         (arch_contour, 60),
         (tonic_anchoring, 55),
         (no_repetitive_intervals, 45)
@@ -169,7 +193,10 @@ genre_profile(
     [
         (mostly_stepwise, 85),
         (prefer_smaller_intervals, 75),
+        (consonant_leaps_only, 75),
+        (large_leap_recovery, 70),
         (max_consecutive_repeats, 50),  % low weight - repeats OK
+        (peak_approach_exit, 40),
         (no_immediate_repeat, 30),
         (no_repetitive_intervals, 25)   % low weight - repetition is the style!
     ],
@@ -186,8 +213,11 @@ genre_profile(
         (no_leading_tone_emphasis, 85),
         (phrase_ends_stable, 70),
         (min_unique_pitches, 65),
+        (consonant_leaps_only, 60),
         (no_repetitive_intervals, 55),
+        (large_leap_recovery, 55),
         (prefer_smaller_intervals, 50),
+        (peak_approach_exit, 50),
         (single_climax, 45)
     ],
     [max_interval=6, tempo_range=(50,100)]
@@ -204,6 +234,9 @@ genre_profile(
         (max_consecutive_repeats, 60),
         (no_repetitive_intervals, 55),
         (leap_recovery, 55),
+        (consonant_leaps_only, 55),
+        (large_leap_recovery, 50),
+        (peak_approach_exit, 45),
         (prefer_smaller_intervals, 40)
     ],
     [max_interval=7, tempo_range=(60,120), min_range=5]
