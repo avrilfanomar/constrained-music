@@ -91,6 +91,14 @@ apply_soft(tonic_anchoring, Notes, Root, Weight, Cost) =>
     reify_tonic_anchoring(Notes, Root, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+apply_soft(prefer_smaller_intervals, Notes, _Root, Weight, Cost) =>
+    reify_prefer_smaller_intervals(Notes, 2, ViolationCount),  % Threshold = 2 (stepwise)
+    Cost #= Weight * ViolationCount.
+
+apply_soft(no_repetitive_intervals, Notes, _Root, Weight, Cost) =>
+    reify_no_repetitive_intervals(Notes, 2, ViolationCount),  % Max 2 same intervals in a row
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown constraint returns 0 cost (no penalty)
 apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
     Cost #= 0.
@@ -484,6 +492,53 @@ reify_tonic_anchoring(Notes, RootPitch, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% Prefer smaller intervals: penalize intervals proportionally to size beyond threshold
+% Returns sum of (interval_size - threshold) for all intervals exceeding threshold
+reify_prefer_smaller_intervals(Notes, Threshold, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Costs = new_list(Len - 1),
+        Costs :: 0..24,  % Max possible interval cost
+        foreach(I in 1..Len-1)
+            Interval = $abs(Notes[I+1] - Notes[I]),
+            % Cost = max(0, Interval - Threshold)
+            Excess #= Interval - Threshold,
+            (Excess #=< 0) #=> (Costs[I] #= 0),
+            (Excess #> 0) #=> (Costs[I] #= Excess)
+        end,
+        ViolationCount #= sum(Costs)
+    else
+        ViolationCount = 0
+    end.
+
+% No repetitive intervals: penalize consecutive identical intervals (same size and direction)
+% This prevents "boring" melodic patterns like C-E-G-B (all +4) or scale runs
+reify_no_repetitive_intervals(Notes, MaxConsecutive, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= MaxConsecutive + 2 then
+        % Count runs of identical intervals exceeding MaxConsecutive
+        Violations = new_list(Len - MaxConsecutive - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-MaxConsecutive-1)
+            % Check if MaxConsecutive+1 consecutive intervals are identical
+            AllSame = new_list(MaxConsecutive),
+            AllSame :: 0..1,
+            % Use constraint variable for base interval (signed - preserves direction)
+            BaseInterval :: -24..24,
+            BaseInterval #= Notes[I+1] - Notes[I],
+            foreach(J in 1..MaxConsecutive)
+                NextInterval :: -24..24,
+                NextInterval #= Notes[I+J+1] - Notes[I+J],
+                AllSame[J] #<=> (NextInterval #= BaseInterval)
+            end,
+            SameCount #= sum(AllSame),
+            Violations[I] #<=> (SameCount #= MaxConsecutive)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
 % ==============================================================================
 % UTILITY FUNCTIONS
 % ==============================================================================
@@ -507,7 +562,9 @@ supported_soft_constraints() = [
     no_leading_tone_emphasis,
     max_consecutive_repeats,
     arch_contour,
-    tonic_anchoring
+    tonic_anchoring,
+    prefer_smaller_intervals,
+    no_repetitive_intervals
 ].
 
 % Check if a constraint ID is supported for soft application

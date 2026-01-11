@@ -26,8 +26,10 @@ genre_profile(
         (leading_tone_resolution, 85),
         (leap_recovery, 80),
         (phrase_ends_stable, 80),
-        (mostly_stepwise, 70),
+        (mostly_stepwise, 75),
         (balanced_motion, 65),
+        (no_repetitive_intervals, 65),
+        (prefer_smaller_intervals, 60),
         (approach_climax_by_step, 60),
         (leave_climax_contrary, 55),
         (single_climax, 50),
@@ -45,9 +47,11 @@ genre_profile(
     [
         (leading_tone_resolution, 85),
         (sequence_encouraged, 75),
-        (leap_recovery, 70),
         (phrase_ends_stable, 75),
-        (no_consecutive_same_direction_leaps, 65)
+        (leap_recovery, 70),
+        (no_consecutive_same_direction_leaps, 65),
+        (prefer_smaller_intervals, 55),
+        (no_repetitive_intervals, 40)
     ],
     [max_interval=6, tempo_range=(60,120)]
 ).
@@ -61,8 +65,10 @@ genre_profile(
     [
         (phrase_ends_stable, 75),
         (min_unique_pitches, 70),
+        (no_repetitive_intervals, 60),
+        (leading_tone_resolution, 60),
         (single_climax, 55),
-        (leading_tone_resolution, 60)
+        (prefer_smaller_intervals, 35)
     ],
     [max_interval=7, tempo_range=(50,160), min_range=7]
 ).
@@ -74,10 +80,12 @@ genre_profile(
     jazz,
     [min_range],
     [
-        (phrase_ends_stable, 70),
-        (leading_tone_resolution, 75),
         (min_unique_pitches, 80),
-        (no_immediate_repeat, 60)
+        (leading_tone_resolution, 75),
+        (no_repetitive_intervals, 70),
+        (phrase_ends_stable, 70),
+        (no_immediate_repeat, 60),
+        (prefer_smaller_intervals, 30)
     ],
     [max_interval=8, tempo_range=(100,240), min_range=10]
 ).
@@ -89,11 +97,13 @@ genre_profile(
     folk,
     [no_augmented_seconds, no_tritone_outline, max_range],
     [
-        (mostly_stepwise, 80),
+        (mostly_stepwise, 85),
         (phrase_ends_stable, 75),
         (leap_recovery, 70),
+        (prefer_smaller_intervals, 70),
         (max_consecutive_repeats, 65),
         (arch_contour, 55),
+        (no_repetitive_intervals, 50),
         (tonic_anchoring, 50)
     ],
     [max_interval=4, tempo_range=(70,130), max_range=12]
@@ -107,7 +117,9 @@ genre_profile(
     [],
     [
         (min_unique_pitches, 75),
-        (no_immediate_repeat, 40)
+        (no_repetitive_intervals, 65),
+        (no_immediate_repeat, 40),
+        (prefer_smaller_intervals, 20)
     ],
     [max_interval=10, tempo_range=(40,200)]
 ).
@@ -119,11 +131,13 @@ genre_profile(
     chant,
     [ends_on_tonic, max_range],
     [
-        (mostly_stepwise, 90),
+        (mostly_stepwise, 95),
         (leap_recovery, 85),
         (no_leading_tone_emphasis, 80),
+        (prefer_smaller_intervals, 80),
         (no_consecutive_same_direction_leaps, 75),
-        (phrase_ends_stable, 70)
+        (phrase_ends_stable, 70),
+        (no_repetitive_intervals, 35)
     ],
     [max_interval=3, tempo_range=(50,80), max_range=10]
 ).
@@ -135,11 +149,13 @@ genre_profile(
     children,
     [ends_on_tonic, no_tritone_outline, max_range],
     [
-        (mostly_stepwise, 85),
+        (mostly_stepwise, 90),
         (phrase_ends_stable, 80),
         (leap_recovery, 75),
+        (prefer_smaller_intervals, 75),
         (arch_contour, 60),
-        (tonic_anchoring, 55)
+        (tonic_anchoring, 55),
+        (no_repetitive_intervals, 45)
     ],
     [max_interval=4, tempo_range=(80,120), max_range=8]
 ).
@@ -152,8 +168,10 @@ genre_profile(
     [max_range],
     [
         (mostly_stepwise, 85),
+        (prefer_smaller_intervals, 75),
         (max_consecutive_repeats, 50),  % low weight - repeats OK
-        (no_immediate_repeat, 30)
+        (no_immediate_repeat, 30),
+        (no_repetitive_intervals, 25)   % low weight - repetition is the style!
     ],
     [max_interval=3, tempo_range=(90,140), max_range=7]
 ).
@@ -165,9 +183,11 @@ genre_profile(
     modal,
     [],
     [
-        (phrase_ends_stable, 70),
         (no_leading_tone_emphasis, 85),
+        (phrase_ends_stable, 70),
         (min_unique_pitches, 65),
+        (no_repetitive_intervals, 55),
+        (prefer_smaller_intervals, 50),
         (single_climax, 45)
     ],
     [max_interval=6, tempo_range=(50,100)]
@@ -182,7 +202,9 @@ genre_profile(
     [
         (phrase_ends_stable, 75),
         (max_consecutive_repeats, 60),
-        (leap_recovery, 55)
+        (no_repetitive_intervals, 55),
+        (leap_recovery, 55),
+        (prefer_smaller_intervals, 40)
     ],
     [max_interval=7, tempo_range=(60,120), min_range=5]
 ).

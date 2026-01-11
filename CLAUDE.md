@@ -215,6 +215,21 @@ The `diagnostics.pi` module detects obvious constraint conflicts before solving:
 
 Conflicts are printed as warnings before generation attempts.
 
+### Interval Dynamic Constraints
+
+Two soft constraints improve interval selection for more dynamic, varied melodies:
+
+1. **`prefer_smaller_intervals`**: Penalizes intervals proportionally to their size beyond a threshold (default 2 semitones). A 3-semitone interval costs 1, a 5-semitone costs 3, etc. This creates graduated preference for smaller intervals rather than binary stepwise/non-stepwise.
+
+2. **`no_repetitive_intervals`**: Penalizes consecutive identical intervals (same size AND direction). Prevents "boring" patterns like scale runs (C-D-E-F-G, all +2) or arpeggios (C-E-G-B, all +4). Forces melodic contour changes.
+
+Both are soft constraints with genre-specific weights:
+- Higher weights for folk, children's songs, sacred chant (stepwise preferred)
+- Lower weights for jazz, romantic, blues (expressive leaps allowed)
+- Very low `no_repetitive_intervals` for minimalist (repetition is the style)
+
+The leap threshold (`base_interval_category(leap)` in `intervals.pi`) is set to 4 semitones, meaning major thirds and above trigger leap recovery constraints.
+
 ### File Organization
 
 The piece files (`pieces_bach.pi`, `pieces_mozart.pi`, etc.) are in `picat/` and imported directly.
