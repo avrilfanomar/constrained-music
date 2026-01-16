@@ -85,6 +85,92 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
     nl.
 
 % ==============================================================================
+% MULTIPLE OUTPUT GENERATION
+% ==============================================================================
+
+% Generate N different outputs (variations) satisfying the same criteria
+run_companion_multiple(StartMood, EndMood, DurationSecs, OutputPath, Randomness, Count, Genre, FormType, Preferences) =>
+    printf("=== Generating %d Variations ===%n%n", Count),
+
+    % Validate count
+    if Count < 1 then
+        println("Error: count must be at least 1"),
+        halt(1)
+    end,
+    if Count > 100 then
+        println("Error: count cannot exceed 100"),
+        halt(1)
+    end,
+
+    % Ensure minimum randomness to guarantee different outputs
+    % Without randomness, the CP solver would produce identical results
+    MinRandomness = 0.2,
+    BaseRandomness = max(Randomness, MinRandomness),
+    if Randomness < MinRandomness then
+        printf("Note: Using minimum randomness %.2f to ensure distinct variations%n%n", MinRandomness)
+    end,
+
+    % Generate each variation with slightly varied randomness for extra diversity
+    foreach(I in 1..Count)
+        printf("--- Variation %d of %d ---%n", I, Count),
+        NumberedPath = output_path_with_number(OutputPath, I, Count),
+
+        % Advance random state to ensure different CP solver results
+        % Each iteration consumes random values to diverge the random sequence
+        advance_random_state(I * 100),
+
+        % Vary randomness slightly per iteration (within ±0.05) for extra diversity
+        VariationOffset = (I - 1) * 0.02,
+        IterRandomness = min(1.0, BaseRandomness + VariationOffset),
+
+        % Dispatch to appropriate generator
+        if FormType != none, FormType != through then
+            run_companion_with_form(StartMood, EndMood, DurationSecs, NumberedPath, IterRandomness, FormType, Genre, Preferences)
+        elseif Genre != none then
+            run_companion_with_genre(StartMood, EndMood, DurationSecs, NumberedPath, IterRandomness, Genre, Preferences)
+        else
+            run_companion(StartMood, EndMood, DurationSecs, NumberedPath, IterRandomness)
+        end,
+
+        if I < Count then nl end
+    end,
+
+    printf("%n=== Generated %d variations ===%n", Count),
+    printf("Output files: %s%n", describe_output_files(OutputPath, Count)).
+
+% Generate numbered output path: session.json -> session_1.json, session_2.json, etc.
+output_path_with_number(BasePath, Index, TotalCount) = NumberedPath =>
+    % Only add number suffix if generating multiple outputs
+    if TotalCount == 1 then
+        NumberedPath = BasePath
+    else
+        % Check if path ends with .json
+        if append(Prefix, ".json", BasePath) then
+            NumberedPath = Prefix ++ "_" ++ to_string(Index) ++ ".json"
+        else
+            % No .json extension, just append number
+            NumberedPath = BasePath ++ "_" ++ to_string(Index)
+        end
+    end.
+
+% Describe output files for summary message
+describe_output_files(BasePath, Count) = Description =>
+    if Count == 1 then
+        Description = BasePath
+    else
+        FirstPath = output_path_with_number(BasePath, 1, Count),
+        LastPath = output_path_with_number(BasePath, Count, Count),
+        Description = FirstPath ++ " ... " ++ LastPath
+    end.
+
+% Advance random state by consuming N random values
+% This ensures different CP solver results for each iteration
+advance_random_state(N) =>
+    foreach(_ in 1..N)
+        _ = random2()
+    end.
+
+% ==============================================================================
 % GENRE-BASED COMPANION
 % ==============================================================================
 
@@ -582,14 +668,18 @@ main(Args) =>
     % Check for form-based generation
     FormType = get_arg(ParsedArgs, form, none),
     Genre = get_arg(ParsedArgs, genre, none),
+    Count = get_arg(ParsedArgs, count, 1),
+    Preferences = build_preferences(ParsedArgs),
 
-    if FormType != none, FormType != through then
+    % Dispatch to single or multiple output generation
+    if Count > 1 then
+        % Generate N different outputs
+        run_companion_multiple(StartMood, EndMood, Duration, Output, Randomness, Count, Genre, FormType, Preferences)
+    elseif FormType != none, FormType != through then
         % Form-based generation (optionally with genre)
-        Preferences = build_preferences(ParsedArgs),
         run_companion_with_form(StartMood, EndMood, Duration, Output, Randomness, FormType, Genre, Preferences)
     elseif Genre != none then
         % Genre-based generation (no form)
-        Preferences = build_preferences(ParsedArgs),
         run_companion_with_genre(StartMood, EndMood, Duration, Output, Randomness, Genre, Preferences)
     else
         % Standard generation
@@ -660,6 +750,8 @@ set_arg(Map, "disable", Value) = Map =>
     Map.put(disable, Existing ++ [to_atom(Value)]).
 set_arg(Map, "intensity", Value) = Map =>
     Map.put(intensity, to_atom(Value)).
+set_arg(Map, "count", Value) = Map =>
+    Map.put(count, to_integer(Value)).
 set_arg(Map, Key, Value) = Map =>
     % Check for weight:constraint=value pattern
     if append("weight:", ConstraintStr, Key) then
@@ -713,6 +805,8 @@ print_usage() =>
     println("  output=PATH      Output JSON file (default: session.json)"),
     println("  randomness=VAL   Randomness factor 0.0-1.0 (default: 0.0)"),
     println("                   0.0 = deterministic, 1.0 = maximum variation"),
+    println("  count=N          Generate N different outputs (default: 1)"),
+    println("                   Creates numbered files: session_1.json, session_2.json, etc."),
     nl,
     println("Form Options (for structured composition):"),
     println("  form=TYPE        Use form structure for composition"),
@@ -736,6 +830,7 @@ print_usage() =>
     println("  picat companion.pi from=sad_depressed to=energized duration=300"),
     println("  picat companion.pi from_va=-0.7,-0.3 to_va=0.5,0.8 duration=600"),
     println("  picat companion.pi from=calm_peaceful to=energized randomness=0.5"),
+    println("  picat companion.pi from=calm_peaceful to=energized count=5 randomness=0.3"),
     nl,
     println("Form examples:"),
     println("  picat companion.pi from=calm_peaceful to=energized form=ternary"),

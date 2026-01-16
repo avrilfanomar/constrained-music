@@ -111,6 +111,9 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 
 # Using VA coordinates instead of presets
 ./scripts/run_picat.sh picat/companion.pi from_va=-0.7,-0.3 to_va=0.5,0.8 duration=600
+
+# Generate 5 different variations with same criteria
+./scripts/run_picat.sh picat/companion.pi from=calm_peaceful to=happy count=5 randomness=0.3
 ```
 
 ### Generate MIDI File
@@ -171,6 +174,7 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 | `duration=<secs>`   | Total duration in seconds (default: 300)         |
 | `output=<path>`     | Output JSON file (default: session.json)         |
 | `randomness=<0-1>`  | Variation level (0=deterministic, 1=max)         |
+| `count=<n>`         | Generate N different outputs (default: 1)        |
 | `genre=<id>`        | Use genre profile (classical_period, baroque...) |
 | `intensity=<level>` | Constraint strictness (light, standard, strict)  |
 | `form=<type>`       | Form structure (binary, ternary, rondo, through) |

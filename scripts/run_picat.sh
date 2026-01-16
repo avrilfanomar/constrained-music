@@ -123,9 +123,27 @@ if [ ! -f "$FILE" ]; then
     exit 1
 fi
 
-# Determine output name from first arg if not specified
+# Determine output name from Picat arguments if not specified via --output
+# Look for output=... in the Picat args
+if [ -z "$OUTPUT_NAME" ]; then
+    for arg in "$@"; do
+        if [[ "$arg" == output=* ]]; then
+            OUTPUT_NAME="${arg#output=}"
+            OUTPUT_NAME="${OUTPUT_NAME%.json}"  # Remove .json if present
+            break
+        fi
+    done
+fi
+
+# Fall back to first arg or default
 if [ -z "$OUTPUT_NAME" ] && [ $# -gt 0 ]; then
-    OUTPUT_NAME="$1"
+    # Check if first arg is a command like 'demo', use it as output name
+    first_arg="$1"
+    if [[ ! "$first_arg" == *=* ]]; then
+        OUTPUT_NAME="$first_arg"
+    else
+        OUTPUT_NAME="session"
+    fi
 fi
 
 # Run Picat with the file and any additional arguments
@@ -139,23 +157,61 @@ echo "PICATPATH: $PICATPATH"
 echo ""
 picat "$FILE" "$@"
 
-# Find JSON file for post-processing
-JSON_FILE=""
+# Find JSON files for post-processing
+# Supports multiple outputs from count=N option (session_1.json, session_2.json, etc.)
+find_json_files() {
+    local base_name="$1"
+    local files=()
+
+    # Check for numbered files (from count=N option)
+    for f in "${base_name}"_*.json; do
+        if [ -f "$f" ]; then
+            files+=("$f")
+        fi
+    done
+
+    # If no numbered files, check for single file
+    if [ ${#files[@]} -eq 0 ]; then
+        if [ -f "${base_name}.json" ]; then
+            files=("${base_name}.json")
+        fi
+    fi
+
+    echo "${files[@]}"
+}
+
+# Determine base name for output files
+OUTPUT_BASE=""
 if [ -n "$OUTPUT_NAME" ]; then
-    JSON_FILE="${OUTPUT_NAME}.json"
-elif [ -f "session.json" ]; then
-    JSON_FILE="session.json"
+    OUTPUT_BASE="${OUTPUT_NAME%.json}"  # Remove .json if present
+elif [ -f "session.json" ] || ls session_*.json &>/dev/null 2>&1; then
+    OUTPUT_BASE="session"
+fi
+
+# Get list of JSON files to process
+JSON_FILES=()
+if [ -n "$OUTPUT_BASE" ]; then
+    mapfile -t JSON_FILES < <(find_json_files "$OUTPUT_BASE" | tr ' ' '\n' | sort -V)
 fi
 
 # Convert to MIDI if requested
-if [ "$CONVERT_MIDI" = true ] && [ -n "$JSON_FILE" ] && [ -f "$JSON_FILE" ]; then
+if [ "$CONVERT_MIDI" = true ] && [ ${#JSON_FILES[@]} -gt 0 ]; then
     echo ""
-    echo "Converting $JSON_FILE to MIDI..."
-    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_writer.py" "$JSON_FILE"
+    if [ ${#JSON_FILES[@]} -gt 1 ]; then
+        echo "Converting ${#JSON_FILES[@]} JSON files to MIDI..."
+    fi
 
-    # Play if requested
+    for JSON_FILE in "${JSON_FILES[@]}"; do
+        if [ -f "$JSON_FILE" ]; then
+            echo "Converting $JSON_FILE to MIDI..."
+            "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_writer.py" "$JSON_FILE"
+        fi
+    done
+
+    # Play first MIDI file if requested
     if [ "$PLAY_MIDI" = true ]; then
-        MIDI_FILE="${JSON_FILE%.json}.mid"
+        FIRST_JSON="${JSON_FILES[0]}"
+        MIDI_FILE="${FIRST_JSON%.json}.mid"
         if [ -f "$MIDI_FILE" ] && command -v timidity &> /dev/null; then
             echo "Playing $MIDI_FILE..."
             timidity "$MIDI_FILE" --output-16bit
@@ -168,31 +224,47 @@ if [ "$CONVERT_MIDI" = true ] && [ -n "$JSON_FILE" ] && [ -f "$JSON_FILE" ]; the
 fi
 
 # Convert to LilyPond if requested
-if [ "$CONVERT_LILYPOND" = true ] && [ -n "$JSON_FILE" ] && [ -f "$JSON_FILE" ]; then
+if [ "$CONVERT_LILYPOND" = true ] && [ ${#JSON_FILES[@]} -gt 0 ]; then
     echo ""
-    echo "Converting $JSON_FILE to LilyPond..."
-    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/lilypond_writer.py" "$JSON_FILE"
-
-    LY_FILE="${JSON_FILE%.json}.ly"
-    if [ -f "$LY_FILE" ]; then
-        echo "LilyPond file created: $LY_FILE"
-        echo "To generate PDF: lilypond $LY_FILE"
+    if [ ${#JSON_FILES[@]} -gt 1 ]; then
+        echo "Converting ${#JSON_FILES[@]} JSON files to LilyPond..."
     fi
+
+    for JSON_FILE in "${JSON_FILES[@]}"; do
+        if [ -f "$JSON_FILE" ]; then
+            echo "Converting $JSON_FILE to LilyPond..."
+            "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/lilypond_writer.py" "$JSON_FILE"
+
+            LY_FILE="${JSON_FILE%.json}.ly"
+            if [ -f "$LY_FILE" ]; then
+                echo "LilyPond file created: $LY_FILE"
+            fi
+        fi
+    done
+    echo "To generate PDFs: lilypond *.ly"
 fi
 
 # Convert to sampler format if requested
-if [ "$CONVERT_SAMPLER" = true ] && [ -n "$JSON_FILE" ] && [ -f "$JSON_FILE" ]; then
+if [ "$CONVERT_SAMPLER" = true ] && [ ${#JSON_FILES[@]} -gt 0 ]; then
     echo ""
-    echo "Converting $JSON_FILE to sampler format..."
-    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/sampler_writer.py" \
-        "$JSON_FILE" --format midi_cc --library "$SAMPLER_LIBRARY"
+    if [ ${#JSON_FILES[@]} -gt 1 ]; then
+        echo "Converting ${#JSON_FILES[@]} JSON files to sampler format..."
+    fi
+
+    for JSON_FILE in "${JSON_FILES[@]}"; do
+        if [ -f "$JSON_FILE" ]; then
+            echo "Converting $JSON_FILE to sampler format..."
+            "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/sampler_writer.py" \
+                "$JSON_FILE" --format midi_cc --library "$SAMPLER_LIBRARY"
+        fi
+    done
 fi
 
 # Report if no JSON file found for post-processing
 if [ "$CONVERT_MIDI" = true ] || [ "$CONVERT_LILYPOND" = true ] || [ "$CONVERT_SAMPLER" = true ]; then
-    if [ -z "$JSON_FILE" ] || [ ! -f "$JSON_FILE" ]; then
+    if [ ${#JSON_FILES[@]} -eq 0 ]; then
         echo ""
         echo "Warning: No JSON output file found for conversion"
-        echo "Expected: session.json or session.json"
+        echo "Expected: session.json or session_*.json"
     fi
 fi
