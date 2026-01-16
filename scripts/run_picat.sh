@@ -26,6 +26,7 @@ CONVERT_LILYPOND=false
 CONVERT_SAMPLER=false
 SAMPLER_LIBRARY="spitfire"
 OUTPUT_NAME=""
+MIDI_PLAYER=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -54,6 +55,10 @@ while [[ $# -gt 0 ]]; do
             OUTPUT_NAME="$2"
             shift 2
             ;;
+        --player)
+            MIDI_PLAYER="$2"
+            shift 2
+            ;;
         --all)
             CONVERT_MIDI=true
             CONVERT_LILYPOND=true
@@ -65,6 +70,87 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Function to find available MIDI player
+find_midi_player() {
+    # Check in order of preference
+    local players=("timidity" "fluidsynth" "vlc" "mpv" "aplay")
+    for player in "${players[@]}"; do
+        if command -v "$player" &> /dev/null; then
+            echo "$player"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Function to play MIDI file with available player
+play_midi() {
+    local midi_file="$1"
+    local player="${MIDI_PLAYER:-}"
+
+    # If no player specified, find one
+    if [ -z "$player" ]; then
+        player=$(find_midi_player) || {
+            echo "Error: No MIDI player found. Install one of: timidity, fluidsynth, vlc, mpv"
+            echo ""
+            echo "Installation suggestions:"
+            echo "  Ubuntu/Debian: sudo apt install timidity"
+            echo "  Fedora: sudo dnf install timidity++"
+            echo "  macOS: brew install timidity"
+            echo "  Or use --player to specify a custom player"
+            return 1
+        }
+    fi
+
+    echo "Playing $midi_file with $player..."
+
+    case "$player" in
+        timidity)
+            timidity "$midi_file" --output-16bit
+            ;;
+        fluidsynth)
+            # FluidSynth requires a soundfont
+            local soundfont=""
+            # Try common soundfont locations
+            for sf in /usr/share/soundfonts/default.sf2 \
+                      /usr/share/sounds/sf2/FluidR3_GM.sf2 \
+                      /usr/share/soundfonts/FluidR3_GM.sf2 \
+                      /usr/local/share/soundfonts/default.sf2; do
+                if [ -f "$sf" ]; then
+                    soundfont="$sf"
+                    break
+                fi
+            done
+            if [ -z "$soundfont" ]; then
+                echo "Warning: No soundfont found for fluidsynth"
+                echo "Install a soundfont package or set SOUNDFONT environment variable"
+                return 1
+            fi
+            fluidsynth -a alsa -m alsa_seq -l -i "$soundfont" "$midi_file"
+            ;;
+        vlc)
+            vlc --play-and-exit "$midi_file" 2>/dev/null
+            ;;
+        mpv)
+            mpv "$midi_file"
+            ;;
+        aplay)
+            # aplay can't play MIDI directly, needs conversion
+            echo "Error: aplay cannot play MIDI files directly"
+            return 1
+            ;;
+        *)
+            # Try running the specified player directly
+            if command -v "$player" &> /dev/null; then
+                "$player" "$midi_file"
+            else
+                echo "Error: Player '$player' not found"
+                return 1
+            fi
+            ;;
+    esac
+}
 
 # Check if Picat is installed
 if ! command -v picat &> /dev/null; then
@@ -86,13 +172,14 @@ if [ $# -eq 0 ]; then
     echo "Usage: $0 [options] <picat_file.pi> [args...]"
     echo ""
     echo "Options:"
-    echo "  --midi           Convert output JSON to MIDI after running"
-    echo "  --play           Convert to MIDI and play with timidity"
-    echo "  --lilypond       Generate LilyPond score (.ly) for sheet music"
-    echo "  --sampler        Generate sampler-ready MIDI with CC automation"
-    echo "  --library <lib>  Sampler library style: spitfire, eastwest, generic"
-    echo "  --all            Generate all outputs (MIDI, LilyPond, sampler)"
-    echo "  --output <name>  Output file base name (default: derived from args)"
+    echo "  --midi             Convert output JSON to MIDI after running"
+    echo "  --play             Convert to MIDI and play with available player"
+    echo "  --player <player>  Specify MIDI player: timidity, fluidsynth, vlc, mpv, afplay"
+    echo "  --lilypond         Generate LilyPond score (.ly) for sheet music"
+    echo "  --sampler          Generate sampler-ready MIDI with CC automation"
+    echo "  --library <lib>    Sampler library style: spitfire, eastwest, generic"
+    echo "  --all              Generate all outputs (MIDI, LilyPond, sampler)"
+    echo "  --output <name>    Output file base name (default: derived from args)"
     echo ""
     echo "Examples:"
     echo "  $0 picat/companion.pi demo"
@@ -212,13 +299,10 @@ if [ "$CONVERT_MIDI" = true ] && [ ${#JSON_FILES[@]} -gt 0 ]; then
     if [ "$PLAY_MIDI" = true ]; then
         FIRST_JSON="${JSON_FILES[0]}"
         MIDI_FILE="${FIRST_JSON%.json}.mid"
-        if [ -f "$MIDI_FILE" ] && command -v timidity &> /dev/null; then
-            echo "Playing $MIDI_FILE..."
-            timidity "$MIDI_FILE" --output-16bit
-        elif [ ! -f "$MIDI_FILE" ]; then
-            echo "Warning: MIDI file not found: $MIDI_FILE"
+        if [ -f "$MIDI_FILE" ]; then
+            play_midi "$MIDI_FILE"
         else
-            echo "Warning: timidity not installed, cannot play MIDI"
+            echo "Warning: MIDI file not found: $MIDI_FILE"
         fi
     fi
 fi

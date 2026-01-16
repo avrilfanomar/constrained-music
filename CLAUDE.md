@@ -24,7 +24,8 @@ Constraint-based music generation system using Picat. Generates melodies using c
 
 # Generate MIDI output
 ./scripts/run_picat.sh --midi picat/companion.pi demo       # Creates demo.mid
-./scripts/run_picat.sh --play picat/companion.pi demo       # Creates and plays with timidity
+./scripts/run_picat.sh --play picat/companion.pi demo       # Creates and plays with auto-detected player
+./scripts/run_picat.sh --play --player vlc picat/companion.pi demo  # Use specific player
 
 # Run tests
 ./scripts/run_picat.sh picat/test_music_types.pi
