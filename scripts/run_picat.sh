@@ -239,10 +239,25 @@ cd "$PROJECT_ROOT"
 # Clean compiled files to ensure fresh compilation
 rm -f "$PROJECT_ROOT/picat/"*.qi
 
-echo "Running: picat $FILE $*"
+# Check if output= is already in the args
+HAS_OUTPUT_ARG=false
+for arg in "$@"; do
+    if [[ "$arg" == output=* ]]; then
+        HAS_OUTPUT_ARG=true
+        break
+    fi
+done
+
+# If we determined an OUTPUT_NAME and output= is not in args, pass it to Picat
+PICAT_ARGS=("$@")
+if [ -n "$OUTPUT_NAME" ] && [ "$HAS_OUTPUT_ARG" = false ]; then
+    PICAT_ARGS+=("output=${OUTPUT_NAME}.json")
+fi
+
+echo "Running: picat $FILE ${PICAT_ARGS[*]}"
 echo "PICATPATH: $PICATPATH"
 echo ""
-picat "$FILE" "$@"
+picat "$FILE" "${PICAT_ARGS[@]}"
 
 # Find JSON files for post-processing
 # Supports multiple outputs from count=N option (session_1.json, session_2.json, etc.)
@@ -268,9 +283,19 @@ find_json_files() {
 }
 
 # Determine base name for output files
+# First try the expected output name, then fall back to session.json
 OUTPUT_BASE=""
 if [ -n "$OUTPUT_NAME" ]; then
+    # Check if files with OUTPUT_NAME were actually created
     OUTPUT_BASE="${OUTPUT_NAME%.json}"  # Remove .json if present
+    if [ ! -f "${OUTPUT_BASE}.json" ] && ! ls "${OUTPUT_BASE}"_*.json &>/dev/null 2>&1; then
+        # Expected output not found, check for session.json (preset functions may hard-code this)
+        if [ -f "session.json" ] || ls session_*.json &>/dev/null 2>&1; then
+            OUTPUT_BASE="session"
+        else
+            OUTPUT_BASE=""  # No output found
+        fi
+    fi
 elif [ -f "session.json" ] || ls session_*.json &>/dev/null 2>&1; then
     OUTPUT_BASE="session"
 fi

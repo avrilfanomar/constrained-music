@@ -405,6 +405,86 @@ constraint_def(
 ).
 
 % ==============================================================================
+% MELODIC MOTION CONSTRAINTS (Added for interval dynamics)
+% ==============================================================================
+
+constraint_def(
+    prefer_smaller_intervals,
+    melodic,
+    soft,
+    60,
+    [classical_period, baroque, folk_traditional, children_songs, sacred_chant],
+    "Penalize intervals proportionally to size beyond stepwise"
+).
+
+constraint_def(
+    no_repetitive_intervals,
+    melodic,
+    soft,
+    65,
+    [classical_period, baroque, romantic, traditional_jazz],
+    "Avoid consecutive identical intervals (same direction and size)"
+).
+
+constraint_def(
+    large_leap_recovery,
+    melodic,
+    soft,
+    75,
+    [classical_period, baroque, folk_traditional],
+    "Large leaps (8+ semitones) require stepwise motion on both sides"
+).
+
+constraint_def(
+    consonant_leaps_only,
+    melodic,
+    soft,
+    85,
+    [classical_period, baroque, folk_traditional, children_songs],
+    "Leaps should be consonant (3rds, 4ths, 5ths, 6ths, octaves)"
+).
+
+constraint_def(
+    peak_approach_exit,
+    melodic,
+    soft,
+    70,
+    [classical_period, baroque, folk_traditional],
+    "Peak approached from below, left by descending step"
+).
+
+% ==============================================================================
+% CLASSICAL PERIOD CONSTRAINTS (Phase 2)
+% ==============================================================================
+
+constraint_def(
+    opening_gesture,
+    phrase_structure,
+    soft,
+    60,
+    [classical_period],
+    "Opening follows common Classical patterns (ascending/descending from tonic)"
+).
+
+constraint_def(
+    phrase_arch_contour,
+    phrase_structure,
+    soft,
+    65,
+    [classical_period, folk_traditional],
+    "Peak in middle third, ascending first half, descending second half"
+).
+
+constraint_def(
+    cadential_descent,
+    phrase_structure,
+    soft,
+    70,
+    [classical_period, baroque],
+    "Final portion descends stepwise toward tonic"
+).
+
+% ==============================================================================
 % REGISTRY QUERY FUNCTIONS
 % ==============================================================================
 

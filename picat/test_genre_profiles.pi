@@ -154,9 +154,9 @@ test_hard_constraints =>
     HardBaroque = genre_profiles.hard_constraints(baroque),
     assert_member(no_augmented_seconds, HardBaroque, "baroque has no_augmented_seconds"),
 
-    % Contemporary has no hard constraints
+    % Contemporary has only max_consecutive_repeats (minimal restrictions)
     HardContemporary = genre_profiles.hard_constraints(contemporary),
-    assert_eq(HardContemporary, [], "contemporary has no hard constraints"),
+    assert_eq(HardContemporary, [max_consecutive_repeats], "contemporary has only max_consecutive_repeats"),
 
     % Children songs have ends_on_tonic
     HardChildren = genre_profiles.hard_constraints(children_songs),

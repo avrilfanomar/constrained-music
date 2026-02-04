@@ -290,6 +290,110 @@ count_windows_with_tonic(Pitches, TonicPC, NumWindows) = Count =>
         membchk(TonicPC, WindowPCs)
     ]).
 
+% Score prefer smaller intervals violations
+% Returns sum of (interval_size - threshold) for intervals exceeding threshold
+score_prefer_smaller_intervals(Pitches, Threshold) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Violations = 0
+    else
+        Violations = sum([max(0, abs(Pitches[I+1] - Pitches[I]) - Threshold) : I in 1..Len-1])
+    end.
+
+% Score no repetitive intervals violations
+% Counts runs of MaxConsecutive+1 identical intervals (same size AND direction)
+score_no_repetitive_intervals(Pitches, MaxConsecutive) = Violations =>
+    Len = length(Pitches),
+    if Len < MaxConsecutive + 2 then
+        Violations = 0
+    else
+        Intervals = [Pitches[I+1] - Pitches[I] : I in 1..Len-1],
+        Violations = count_repetitive_runs(Intervals, MaxConsecutive)
+    end.
+
+% Helper: count runs of consecutive identical values exceeding max allowed
+count_repetitive_runs(Intervals, MaxConsecutive) = Count =>
+    Len = length(Intervals),
+    Count = 0,
+    I = 1,
+    while (I =< Len - MaxConsecutive)
+        AllSame = true,
+        foreach(J in 1..MaxConsecutive, AllSame == true)
+            if Intervals[I+J] != Intervals[I] then
+                AllSame := false
+            end
+        end,
+        if AllSame then
+            Count := Count + 1
+        end,
+        I := I + 1
+    end.
+
+% Score large leap recovery violations
+% A large leap (>= Threshold) needs stepwise motion on the other side
+score_large_leap_recovery(Pitches, Threshold) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then
+        Violations = 0
+    else
+        Count = 0,
+        foreach(I in 2..Len-1)
+            IntervalIn = abs(Pitches[I] - Pitches[I-1]),
+            IntervalOut = abs(Pitches[I+1] - Pitches[I]),
+            % Violation if large leap in AND non-stepwise out, OR large leap out AND non-stepwise in
+            if (IntervalIn >= Threshold, IntervalOut > 2) ; (IntervalOut >= Threshold, IntervalIn > 2) then
+                Count := Count + 1
+            end
+        end,
+        Violations = Count
+    end.
+
+% Score consonant leaps only violations
+% Dissonant leaps: 6 (tritone), 10 (m7), 11 (M7), >12 (beyond octave)
+score_consonant_leaps_only(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Violations = 0
+    else
+        Count = 0,
+        foreach(I in 1..Len-1)
+            Interval = abs(Pitches[I+1] - Pitches[I]),
+            % It's a leap (>2) and dissonant (6, 10, 11, or >12)
+            if Interval > 2, (Interval == 6 ; Interval == 10 ; Interval == 11 ; Interval > 12) then
+                Count := Count + 1
+            end
+        end,
+        Violations = Count
+    end.
+
+% Score peak approach and exit violations
+% Peak should be approached from below and left by descending step (1-2 semitones down)
+score_peak_approach_exit(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then
+        Violations = 0
+    else
+        MaxPitch = max(Pitches),
+        ApproachViolations = 0,
+        ExitViolations = 0,
+        foreach(I in 1..Len)
+            if Pitches[I] == MaxPitch then
+                % Check approach (should come from below)
+                if I > 1, Pitches[I-1] >= Pitches[I] then
+                    ApproachViolations := ApproachViolations + 1
+                end,
+                % Check exit (should descend by step: 1-2 semitones)
+                if I < Len then
+                    Descent = Pitches[I] - Pitches[I+1],
+                    if Descent < 1 ; Descent > 2 then
+                        ExitViolations := ExitViolations + 1
+                    end
+                end
+            end
+        end,
+        Violations = ApproachViolations + ExitViolations
+    end.
+
 % ==============================================================================
 % VOICE LEADING SCORERS (for SATB)
 % ==============================================================================

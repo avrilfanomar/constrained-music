@@ -1,0 +1,286 @@
+% test_melodic_motion.pi - Unit tests for melodic motion soft constraints
+% Tests the 5 constraints: prefer_smaller_intervals, no_repetitive_intervals,
+% large_leap_recovery, consonant_leaps_only, peak_approach_exit
+%
+% Run with: ./scripts/run_picat.sh picat/test_melodic_motion.pi
+
+module test_melodic_motion.
+
+import test_constraint_validation.
+import pieces_folk.
+import pieces_mozart.
+import pieces_bach.
+import piece_utils.
+
+main(Args) =>
+    main.
+
+main =>
+    println("=== Melodic Motion Constraints Test Suite ==="),
+    println(""),
+
+    PassCount = 0,
+    FailCount = 0,
+
+    % Run all test categories
+    (test_prefer_smaller_intervals() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_no_repetitive_intervals() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_large_leap_recovery() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_consonant_leaps_only() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_peak_approach_exit() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_against_masterpieces() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+
+    println(""),
+    println("=== Test Summary ==="),
+    printf("Passed: %d%n", PassCount),
+    printf("Failed: %d%n", FailCount),
+    if FailCount == 0 then
+        println("All tests passed!")
+    else
+        println("Some tests failed."),
+        fail
+    end.
+
+% ==============================================================================
+% PREFER SMALLER INTERVALS TESTS
+% ==============================================================================
+
+test_prefer_smaller_intervals =>
+    println("Testing prefer_smaller_intervals..."),
+
+    % Test 1: All stepwise motion = 0 violations with threshold 2
+    StepwiseMelody = [60, 62, 64, 65, 67, 65, 64, 62, 60],  % C-D-E-F-G-F-E-D-C
+    V1 = test_constraint_validation.score_prefer_smaller_intervals(StepwiseMelody, 2),
+    assert_eq(V1, 0, "all stepwise = 0 violations"),
+
+    % Test 2: One leap of 5 semitones with threshold 2 = 3 violation points
+    LeapMelody = [60, 65, 67],  % C-F-G (leap of 5, then step of 2)
+    V2 = test_constraint_validation.score_prefer_smaller_intervals(LeapMelody, 2),
+    assert_eq(V2, 3, "leap of 5 above threshold 2 = 3"),
+
+    % Test 3: Octave leap (12 semitones) with threshold 2 = 10 points
+    OctaveMelody = [60, 72, 74],  % C4-C5-D5
+    V3 = test_constraint_validation.score_prefer_smaller_intervals(OctaveMelody, 2),
+    assert_eq(V3, 10, "octave leap = 10 points excess"),
+
+    % Test 4: Multiple leaps accumulate
+    MultiLeap = [60, 67, 60, 67],  % C-G-C-G (two P5 leaps)
+    V4 = test_constraint_validation.score_prefer_smaller_intervals(MultiLeap, 2),
+    assert_eq(V4, 15, "two P5 leaps + one P5 = 15 points"),  % 5+5+5=15
+
+    % Test 5: Empty/single note cases
+    V5 = test_constraint_validation.score_prefer_smaller_intervals([60], 2),
+    assert_eq(V5, 0, "single note = 0"),
+
+    println("  prefer_smaller_intervals: OK").
+
+% ==============================================================================
+% NO REPETITIVE INTERVALS TESTS
+% ==============================================================================
+
+test_no_repetitive_intervals =>
+    println("Testing no_repetitive_intervals..."),
+
+    % Test 1: Varied intervals = 0 violations
+    VariedMelody = [60, 62, 65, 64, 67],  % +2, +3, -1, +3 (all different)
+    V1 = test_constraint_validation.score_no_repetitive_intervals(VariedMelody, 2),
+    assert_eq(V1, 0, "varied intervals = 0"),
+
+    % Test 2: Scale run has 3+ consecutive +2 intervals (MaxConsecutive=2 means 3 in a row is violation)
+    ScaleRun = [60, 62, 64, 66, 68],  % C-D-E-F#-G# all +2
+    V2 = test_constraint_validation.score_no_repetitive_intervals(ScaleRun, 2),
+    assert_true(V2 > 0, "scale run should have violations"),
+
+    % Test 3: Two consecutive same = OK with MaxConsecutive=2
+    TwoSame = [60, 62, 64, 67],  % +2, +2, +3
+    V3 = test_constraint_validation.score_no_repetitive_intervals(TwoSame, 2),
+    assert_eq(V3, 0, "two same consecutive = OK with max 2"),
+
+    % Test 4: Arpeggio pattern (+4, +4, +4) should violate
+    Arpeggio = [60, 64, 68, 72],  % C-E-G#-C all +4
+    V4 = test_constraint_validation.score_no_repetitive_intervals(Arpeggio, 2),
+    assert_true(V4 > 0, "arpeggio of M3s should violate"),
+
+    % Test 5: Short melody below threshold
+    V5 = test_constraint_validation.score_no_repetitive_intervals([60, 62], 2),
+    assert_eq(V5, 0, "melody too short = 0"),
+
+    println("  no_repetitive_intervals: OK").
+
+% ==============================================================================
+% LARGE LEAP RECOVERY TESTS
+% ==============================================================================
+
+test_large_leap_recovery =>
+    println("Testing large_leap_recovery..."),
+
+    % Test 1: Large leap followed by step = OK
+    GoodRecovery = [60, 62, 72, 71],  % step, octave leap, step down
+    V1 = test_constraint_validation.score_large_leap_recovery(GoodRecovery, 8),
+    assert_eq(V1, 0, "large leap with step recovery = 0"),
+
+    % Test 2: Large leap followed by another leap = violation
+    BadRecovery = [60, 62, 72, 67],  % step, octave leap, P5 leap down
+    V2 = test_constraint_validation.score_large_leap_recovery(BadRecovery, 8),
+    assert_true(V2 > 0, "large leap without step recovery = violation"),
+
+    % Test 3: Step into large leap, then step out = OK
+    StepBothSides = [60, 62, 72, 70],  % step, octave, step
+    V3 = test_constraint_validation.score_large_leap_recovery(StepBothSides, 8),
+    assert_eq(V3, 0, "step on both sides of large leap = OK"),
+
+    % Test 4: Leap into position, then large leap out = violation
+    LeapIn = [60, 67, 77, 75],  % P5 in, m6 out, step
+    V4 = test_constraint_validation.score_large_leap_recovery(LeapIn, 8),
+    assert_true(V4 > 0, "leap in + large leap out = violation"),
+
+    % Test 5: Below threshold = not considered large
+    SmallLeaps = [60, 65, 60, 65],  % P4 leaps (5 semitones)
+    V5 = test_constraint_validation.score_large_leap_recovery(SmallLeaps, 8),
+    assert_eq(V5, 0, "P4 leaps below threshold = OK"),
+
+    println("  large_leap_recovery: OK").
+
+% ==============================================================================
+% CONSONANT LEAPS ONLY TESTS
+% ==============================================================================
+
+test_consonant_leaps_only =>
+    println("Testing consonant_leaps_only..."),
+
+    % Test 1: All stepwise = 0 violations (no leaps at all)
+    Stepwise = [60, 62, 64, 65, 67],
+    V1 = test_constraint_validation.score_consonant_leaps_only(Stepwise),
+    assert_eq(V1, 0, "stepwise = 0"),
+
+    % Test 2: Consonant leaps (m3, M3, P4, P5, m6, M6, P8) = 0 violations
+    ConsonantLeaps = [60, 63, 67, 72, 79, 72],  % m3, P4, P5, m6 down, m6 down
+    V2 = test_constraint_validation.score_consonant_leaps_only(ConsonantLeaps),
+    assert_eq(V2, 0, "consonant leaps = 0"),
+
+    % Test 3: Tritone (6 semitones) = violation
+    TritoneLeap = [60, 66, 67],  % C to F#, then step up to G
+    V3 = test_constraint_validation.score_consonant_leaps_only(TritoneLeap),
+    assert_eq(V3, 1, "tritone = 1 violation"),
+
+    % Test 4: Minor 7th (10 semitones) = violation
+    Minor7th = [60, 70, 72],  % C to Bb
+    V4 = test_constraint_validation.score_consonant_leaps_only(Minor7th),
+    assert_eq(V4, 1, "minor 7th = 1 violation"),
+
+    % Test 5: Major 7th (11 semitones) = violation
+    Major7th = [60, 71, 72],  % C to B
+    V5 = test_constraint_validation.score_consonant_leaps_only(Major7th),
+    assert_eq(V5, 1, "major 7th = 1 violation"),
+
+    % Test 6: Beyond octave (>12) = violation
+    Beyond = [60, 74, 72],  % C4 to D5 (14 semitones)
+    V6 = test_constraint_validation.score_consonant_leaps_only(Beyond),
+    assert_eq(V6, 1, "beyond octave = 1 violation"),
+
+    % Test 7: Multiple dissonant leaps
+    MultiDissonant = [60, 66, 76, 87],  % tritone, m7, M7
+    V7 = test_constraint_validation.score_consonant_leaps_only(MultiDissonant),
+    assert_eq(V7, 3, "multiple dissonant leaps = 3"),
+
+    println("  consonant_leaps_only: OK").
+
+% ==============================================================================
+% PEAK APPROACH/EXIT TESTS
+% ==============================================================================
+
+test_peak_approach_exit =>
+    println("Testing peak_approach_exit..."),
+
+    % Test 1: Peak approached from below, left by step down = 0 violations
+    GoodPeak = [60, 64, 67, 65],  % ascending to peak at 67, step down to 65
+    V1 = test_constraint_validation.score_peak_approach_exit(GoodPeak),
+    assert_eq(V1, 0, "good peak approach/exit = 0"),
+
+    % Test 2: Peak approached from above = approach violation
+    ApproachFromAbove = [60, 70, 67, 65],  % descend to peak, step down
+    V2 = test_constraint_validation.score_peak_approach_exit(ApproachFromAbove),
+    assert_true(V2 > 0, "approach from above = violation"),
+
+    % Test 3: Peak left by same pitch (not descending step) = exit violation
+    % Peak is 72, followed by same pitch 72 - descent of 0 is not a "step down"
+    SameExit = [60, 70, 72, 72, 70],  % peak at 72, followed by 72 (descent = 0)
+    V3 = test_constraint_validation.score_peak_approach_exit(SameExit),
+    assert_true(V3 > 0, "same pitch exit = violation"),
+
+    % Test 4: Peak left by large descent (>2) = exit violation
+    LargeDescent = [60, 64, 67, 62],  % peak at 67, drop of 5
+    V4 = test_constraint_validation.score_peak_approach_exit(LargeDescent),
+    assert_true(V4 > 0, "large descent from peak = violation"),
+
+    % Test 5: Peak at first note = can only check exit
+    PeakFirst = [72, 70, 68],  % starts at peak, descends by steps
+    V5 = test_constraint_validation.score_peak_approach_exit(PeakFirst),
+    assert_eq(V5, 0, "peak at start with step exit = OK"),
+
+    % Test 6: Peak at last note = can only check approach
+    PeakLast = [60, 64, 72],  % ascending to peak at end
+    V6 = test_constraint_validation.score_peak_approach_exit(PeakLast),
+    assert_eq(V6, 0, "peak at end with ascending approach = OK"),
+
+    println("  peak_approach_exit: OK").
+
+% ==============================================================================
+% VALIDATION AGAINST MASTERPIECES
+% ==============================================================================
+
+test_against_masterpieces =>
+    println("Testing constraints against masterpieces..."),
+
+    % Mozart K.545 - should have reasonable scores
+    K545 = pieces_mozart.k545_first_phrase(),
+    K545Pitches = piece_utils.get_melody(K545),
+
+    % Mozart is expected to have mostly consonant leaps
+    K545Consonant = test_constraint_validation.score_consonant_leaps_only(K545Pitches),
+    printf("  K.545 consonant_leaps_only: %d violations%n", K545Consonant),
+    assert_true(K545Consonant =< 2, "K.545 should have few dissonant leaps"),
+
+    % Mozart uses balanced, not excessive intervals
+    K545Intervals = test_constraint_validation.score_prefer_smaller_intervals(K545Pitches, 2),
+    printf("  K.545 prefer_smaller_intervals: %d cost%n", K545Intervals),
+    % Mozart does have some leaps, so some cost is expected
+
+    % Large leap recovery
+    K545LeapRecovery = test_constraint_validation.score_large_leap_recovery(K545Pitches, 8),
+    printf("  K.545 large_leap_recovery: %d violations%n", K545LeapRecovery),
+    assert_true(K545LeapRecovery =< 3, "K.545 should recover from large leaps"),
+
+    % Peak handling
+    K545Peak = test_constraint_validation.score_peak_approach_exit(K545Pitches),
+    printf("  K.545 peak_approach_exit: %d violations%n", K545Peak),
+
+    % Twinkle Twinkle - very simple, should score well on all
+    TT = pieces_folk.twinkle_twinkle(),
+    TTPitches = piece_utils.get_melody(TT),
+
+    TTConsonant = test_constraint_validation.score_consonant_leaps_only(TTPitches),
+    printf("  Twinkle consonant_leaps_only: %d violations%n", TTConsonant),
+    assert_eq(TTConsonant, 0, "Twinkle should have no dissonant leaps"),
+
+    TTIntervals = test_constraint_validation.score_prefer_smaller_intervals(TTPitches, 2),
+    printf("  Twinkle prefer_smaller_intervals: %d cost%n", TTIntervals),
+    % Twinkle has P5 leaps (C-G), so expect some cost
+
+    println("  masterpiece validation: OK").
+
+% ==============================================================================
+% HELPER ASSERTIONS
+% ==============================================================================
+
+assert_eq(Actual, Expected, Msg) =>
+    if Actual != Expected then
+        printf("FAIL: %s - expected %w, got %w%n", Msg, Expected, Actual),
+        fail
+    end.
+
+assert_true(Condition, Msg) =>
+    if not Condition then
+        printf("FAIL: %s%n", Msg),
+        fail
+    end.

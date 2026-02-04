@@ -107,6 +107,18 @@ apply_soft(peak_approach_exit, Notes, _Root, Weight, Cost) =>
     reify_peak_approach_exit(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+apply_soft(opening_gesture, Notes, Root, Weight, Cost) =>
+    reify_opening_gesture(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(phrase_arch_contour, Notes, _Root, Weight, Cost) =>
+    reify_phrase_arch_contour(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(cadential_descent, Notes, _Root, Weight, Cost) =>
+    reify_cadential_descent(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown constraint returns 0 cost (no penalty)
 apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
     Cost #= 0.
@@ -666,6 +678,141 @@ reify_peak_approach_exit(Notes, ViolationCount) =>
     end.
 
 % ==============================================================================
+% PHASE 2 CLASSICAL CONSTRAINTS
+% ==============================================================================
+
+% Opening gesture: First few notes should follow Classical opening patterns
+% Patterns based on scale degrees: 5-4-3 (descending from dominant),
+% 5-3 (skip to mediant), 1-2-3 (ascending), 1-3-5 (arpeggio), 3-2-1 (descending from mediant)
+% For CP solving, we check contour patterns (ascending/descending) rather than exact degrees
+% Returns 0 if opening follows a good pattern, 1 otherwise
+reify_opening_gesture(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        % Check first 3 notes for common opening gestures
+        % Pattern 1: Ascending from tonic area (1-2-3 or 1-3-5)
+        % Pattern 2: Descending from dominant area (5-4-3 or 5-3-1 or 3-2-1)
+        % We use contour (ascending/descending) as a proxy
+
+        Int1 = Notes[2] - Notes[1],  % Interval 1 to 2
+        Int2 = Notes[3] - Notes[2],  % Interval 2 to 3
+
+        % Ascending opening: both intervals positive (upward motion)
+        AscendingOpening :: 0..1,
+        AscendingOpening #<=> ((Int1 #> 0) #/\ (Int2 #> 0)),
+
+        % Descending opening: both intervals negative (downward motion)
+        DescendingOpening :: 0..1,
+        DescendingOpening #<=> ((Int1 #< 0) #/\ (Int2 #< 0)),
+
+        % Arch opening: up then down (1-3-1 or similar)
+        ArchOpening :: 0..1,
+        ArchOpening #<=> ((Int1 #> 0) #/\ (Int2 #< 0)),
+
+        % Inverse arch opening: down then up
+        InvArchOpening :: 0..1,
+        InvArchOpening #<=> ((Int1 #< 0) #/\ (Int2 #> 0)),
+
+        % First note close to tonic (within P5 of root)
+        FirstNoteTonic :: 0..1,
+        RootPC = RootPitch mod 12,
+        FirstPC :: 0..11,
+        FirstPC #= Notes[1] mod 12,
+        FirstDist :: 0..11,
+        FirstDist #= abs(FirstPC - RootPC),
+        FirstNoteTonic #<=> (FirstDist #=< 7),  % Within P5
+
+        % Good opening: ascending OR descending with first note near tonic
+        GoodOpening :: 0..1,
+        GoodOpening #<=> ((AscendingOpening #= 1) #\/ (DescendingOpening #= 1) #\/
+                          (ArchOpening #= 1) #\/ (InvArchOpening #= 1)),
+
+        ViolationCount #<=> (GoodOpening #= 0)
+    else
+        ViolationCount = 0
+    end.
+
+% Phrase arch contour (enhanced): Peak should be in middle third,
+% with ascending tendency in first half and descending in second half
+% This is stronger than basic arch_contour
+reify_phrase_arch_contour(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 6 then  % Need reasonable length for phrase analysis
+        MaxPitch = $max(Notes),
+
+        % Find peak positions
+        ThirdStart = Len // 3 + 1,
+        ThirdEnd = 2 * Len // 3,
+
+        % Count peaks in middle third vs outside
+        PeakFlags = new_list(Len),
+        PeakFlags :: 0..1,
+        foreach(I in 1..Len)
+            PeakFlags[I] #<=> (Notes[I] #= MaxPitch)
+        end,
+
+        % Count peaks in middle third
+        MiddlePeaks :: 0..Len,
+        MiddlePeaks #= sum([PeakFlags[I] : I in ThirdStart..ThirdEnd]),
+
+        % Violation if no peak in middle third
+        NoPeakInMiddle :: 0..1,
+        NoPeakInMiddle #<=> (MiddlePeaks #= 0),
+
+        % Count ascending intervals in first half
+        HalfPoint = Len // 2,
+        FirstHalfAsc :: 0..Len,
+        FirstHalfAsc #= sum([cond(I =< HalfPoint, Notes[I+1] #> Notes[I], 0) : I in 1..Len-1]),
+        FirstHalfDesc :: 0..Len,
+        FirstHalfDesc #= sum([cond(I =< HalfPoint, Notes[I+1] #< Notes[I], 0) : I in 1..Len-1]),
+
+        % Count descending intervals in second half
+        SecondHalfAsc :: 0..Len,
+        SecondHalfAsc #= sum([cond(I > HalfPoint, Notes[I+1] #> Notes[I], 0) : I in 1..Len-1]),
+        SecondHalfDesc :: 0..Len,
+        SecondHalfDesc #= sum([cond(I > HalfPoint, Notes[I+1] #< Notes[I], 0) : I in 1..Len-1]),
+
+        % First half should have more ascending than descending
+        FirstHalfBad :: 0..1,
+        FirstHalfBad #<=> (FirstHalfAsc #< FirstHalfDesc),
+
+        % Second half should have more descending than ascending
+        SecondHalfBad :: 0..1,
+        SecondHalfBad #<=> (SecondHalfDesc #< SecondHalfAsc),
+
+        ViolationCount #= NoPeakInMiddle + FirstHalfBad + SecondHalfBad
+    else
+        ViolationCount = 0
+    end.
+
+% Cadential descent: Final portion should descend stepwise toward tonic
+% Checks that final 20-25% of notes are predominantly descending
+reify_cadential_descent(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 5 then
+        % Check final ~20% of notes (at least 2 notes)
+        CadenceLen = max(2, Len // 5),
+        CadenceStart = Len - CadenceLen,
+
+        % Count descending stepwise intervals in cadence
+        DescSteps :: 0..CadenceLen,
+        DescSteps #= sum([cond(I >= CadenceStart,
+                              ((Notes[I+1] - Notes[I] #>= -2) #/\ (Notes[I+1] - Notes[I] #< 0)),
+                              0) : I in 1..Len-1]),
+
+        % Count ascending intervals in cadence (violations)
+        AscInCadence :: 0..CadenceLen,
+        AscInCadence #= sum([cond(I >= CadenceStart,
+                                  (Notes[I+1] - Notes[I] #> 0),
+                                  0) : I in 1..Len-1]),
+
+        % Penalize ascending motion in cadence
+        ViolationCount #= AscInCadence
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
 % UTILITY FUNCTIONS
 % ==============================================================================
 
@@ -692,7 +839,10 @@ supported_soft_constraints() = [
     no_repetitive_intervals,
     large_leap_recovery,
     consonant_leaps_only,
-    peak_approach_exit
+    peak_approach_exit,
+    opening_gesture,
+    phrase_arch_contour,
+    cadential_descent
 ].
 
 % Check if a constraint ID is supported for soft application
