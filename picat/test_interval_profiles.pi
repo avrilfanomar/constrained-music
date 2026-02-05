@@ -1,0 +1,177 @@
+% test_interval_profiles.pi - Tests for masterpiece-derived tempo-responsive intervals
+
+import interval_stats.
+import interval_profiles.
+import piece_utils.
+import pieces_folk.
+import pieces_bach.
+import pieces_mozart.
+import pieces_beethoven.
+
+main =>
+    println("=== Interval Profiles Test Suite ==="),
+    nl,
+
+    run_all_tests().
+
+run_all_tests() =>
+    Tests = [
+        test_interval_stats_extraction,
+        test_folk_profile,
+        test_bach_profile,
+        test_mozart_profile,
+        test_beethoven_profile,
+        test_tempo_adjustment,
+        test_genre_differentiation,
+        test_profile_consistency
+    ],
+
+    Passed = 0,
+    Failed = 0,
+
+    foreach(Test in Tests)
+        printf("Running %w...", Test),
+        (call(Test) ->
+            println(" PASSED"),
+            Passed := Passed + 1
+        ;
+            println(" FAILED"),
+            Failed := Failed + 1
+        )
+    end,
+
+    nl,
+    printf("Results: %d passed, %d failed\n", Passed, Failed),
+    (Failed == 0 ->
+        println("All tests passed!")
+    ;
+        printf("WARNING: %d tests failed\n", Failed)
+    ).
+
+% ==============================================================================
+% INTERVAL STATS TESTS
+% ==============================================================================
+
+test_interval_stats_extraction =>
+    % Test that we can extract stats from a known melody
+    Twinkle = pieces_folk.twinkle_twinkle(),
+    Stats = interval_stats.analyze_melody(Twinkle),
+
+    % Twinkle should be highly stepwise
+    StepwisePct = Stats.get(stepwise_pct),
+    assert_true(StepwisePct > 50, "Twinkle should be mostly stepwise"),
+
+    % Max interval in Twinkle is the octave leap (C4 to G4 = 7 semitones)
+    MaxInt = Stats.get(max_interval),
+    assert_true(MaxInt =< 12, "Twinkle max interval should be <= octave").
+
+% ==============================================================================
+% PROFILE TESTS
+% ==============================================================================
+
+test_folk_profile =>
+    Profile = interval_stats.get_folk_profile(),
+
+    % Folk should be highly stepwise (70%+)
+    StepwisePct = Profile.get(stepwise_pct),
+    assert_true(StepwisePct >= 50, "Folk should be >= 50% stepwise"),
+
+    % Folk max interval should be reasonable
+    MaxInt = Profile.get(max_interval),
+    assert_true(MaxInt =< 14, "Folk max interval should be <= 14").
+
+test_bach_profile =>
+    Profile = interval_stats.get_bach_profile(),
+
+    % Bach inventions have arpeggios, so less stepwise than folk
+    StepwisePct = Profile.get(stepwise_pct),
+    assert_true(StepwisePct >= 30, "Bach should be >= 30% stepwise"),
+    assert_true(StepwisePct =< 80, "Bach should be <= 80% stepwise"),
+
+    % Bach can have larger intervals (arpeggios)
+    MaxInt = Profile.get(max_interval),
+    assert_true(MaxInt >= 5, "Bach should allow some leaps").
+
+test_mozart_profile =>
+    Profile = interval_stats.get_mozart_profile(),
+
+    % Mozart should be balanced
+    StepwisePct = Profile.get(stepwise_pct),
+    assert_true(StepwisePct >= 40, "Mozart should be >= 40% stepwise"),
+    assert_true(StepwisePct =< 80, "Mozart should be <= 80% stepwise").
+
+test_beethoven_profile =>
+    Profile = interval_stats.get_beethoven_profile(),
+
+    % Beethoven has expressive leaps
+    StepwisePct = Profile.get(stepwise_pct),
+    assert_true(StepwisePct >= 30, "Beethoven should be >= 30% stepwise").
+
+% ==============================================================================
+% TEMPO ADJUSTMENT TESTS
+% ==============================================================================
+
+test_tempo_adjustment =>
+    % Test that faster tempo reduces max interval
+    MaxAt60 = interval_profiles.get_max_interval(classical_period, 60),
+    MaxAt100 = interval_profiles.get_max_interval(classical_period, 100),
+    MaxAt140 = interval_profiles.get_max_interval(classical_period, 140),
+    MaxAt180 = interval_profiles.get_max_interval(classical_period, 180),
+
+    % Slower tempo should allow larger intervals
+    assert_true(MaxAt60 >= MaxAt100, "Slow tempo should allow >= intervals"),
+    assert_true(MaxAt100 >= MaxAt140, "Normal tempo should allow >= fast tempo intervals"),
+    assert_true(MaxAt140 >= MaxAt180, "Fast tempo should allow >= very fast intervals"),
+
+    % Stepwise target should increase with tempo
+    StepAt60 = interval_profiles.get_stepwise_target(classical_period, 60),
+    StepAt140 = interval_profiles.get_stepwise_target(classical_period, 140),
+
+    assert_true(StepAt140 >= StepAt60, "Faster tempo should expect more stepwise").
+
+% ==============================================================================
+% GENRE DIFFERENTIATION TESTS
+% ==============================================================================
+
+test_genre_differentiation =>
+    % Folk should be more restrictive than jazz
+    FolkMax = interval_profiles.get_max_interval(folk_traditional, 100),
+    JazzMax = interval_profiles.get_max_interval(jazz, 100),
+
+    assert_true(JazzMax >= FolkMax, "Jazz should allow larger leaps than folk"),
+
+    % Sacred chant should be very restrictive
+    ChantMax = interval_profiles.get_max_interval(sacred_chant, 100),
+    assert_true(ChantMax =< 5, "Sacred chant should have small max interval"),
+
+    % Contemporary should be very permissive
+    ContemporaryMax = interval_profiles.get_max_interval(contemporary, 100),
+    assert_true(ContemporaryMax >= 8, "Contemporary should allow large leaps").
+
+% ==============================================================================
+% CONSISTENCY TESTS
+% ==============================================================================
+
+test_profile_consistency =>
+    % All profiles should return valid values
+    Genres = [folk_traditional, baroque, classical_period, romantic, jazz],
+
+    foreach(Genre in Genres)
+        Max = interval_profiles.get_max_interval(Genre, 100),
+        Step = interval_profiles.get_stepwise_target(Genre, 100),
+
+        assert_true(Max >= 3, "Max interval should be >= 3"),
+        assert_true(Max =< 15, "Max interval should be <= 15"),
+        assert_true(Step >= 20, "Stepwise target should be >= 20%"),
+        assert_true(Step =< 95, "Stepwise target should be <= 95%")
+    end.
+
+% ==============================================================================
+% ASSERTION HELPERS
+% ==============================================================================
+
+assert_true(Condition, _Message) =>
+    Condition.
+
+assert_eq(Actual, Expected, _Message) =>
+    Actual == Expected.

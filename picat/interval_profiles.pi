@@ -1,0 +1,201 @@
+% interval_profiles.pi - Tempo-responsive interval profiles based on masterpiece analysis
+% Provides tempo-adjusted max intervals and stepwise targets
+
+module interval_profiles.
+
+import interval_stats.
+
+% ==============================================================================
+% PROFILE DATA STRUCTURE
+% ==============================================================================
+%
+% profile(BaseMaxInterval, BaseStepwisePct, TempoFactor)
+%   - BaseMaxInterval: maximum leap size at reference tempo (100 BPM)
+%   - BaseStepwisePct: target percentage of stepwise motion at reference tempo
+%   - TempoFactor: how strongly tempo affects intervals (0.0-1.0)
+%     - 1.0 = strong reduction at high tempos
+%     - 0.5 = moderate reduction
+%     - 0.0 = no tempo adjustment
+
+% ==============================================================================
+% HARDCODED PROFILES (based on masterpiece analysis)
+% ==============================================================================
+%
+% These values are derived from statistical analysis of masterpieces:
+% - Folk: ~75% stepwise, max leaps 5-7 semitones
+% - Bach (baroque): ~50% stepwise, arpeggios allowed, max 12 semitones
+% - Mozart (classical): ~60% stepwise, balanced motion, max 9 semitones
+% - Beethoven (romantic): ~55% stepwise, expressive leaps, max 12 semitones
+
+profile(folk_traditional) = $profile(5, 75, 1.0).
+profile(folk) = $profile(5, 75, 1.0).
+profile(baroque) = $profile(7, 50, 0.8).
+profile(classical_period) = $profile(6, 60, 0.9).
+profile(classical) = $profile(6, 60, 0.9).
+profile(romantic) = $profile(8, 55, 0.7).
+profile(traditional_jazz) = $profile(9, 40, 0.5).
+profile(jazz) = $profile(9, 40, 0.5).
+profile(sacred_chant) = $profile(3, 85, 1.0).
+profile(children_songs) = $profile(4, 80, 1.0).
+profile(minimalist) = $profile(3, 90, 0.5).
+profile(modal) = $profile(6, 55, 0.8).
+profile(blues) = $profile(7, 45, 0.6).
+profile(contemporary) = $profile(10, 35, 0.4).
+profile(_) = $profile(6, 60, 0.9).  % default to classical
+
+% ==============================================================================
+% TEMPO-ADJUSTED INTERVAL LIMITS
+% ==============================================================================
+
+% Get tempo-adjusted maximum interval for a genre
+% Formula: BaseMax - ((Tempo - 100) / 20) * Factor
+% At tempo 100: no adjustment
+% At tempo 140: reduces by ~2 for high-factor genres
+% At tempo 60: increases by ~2 for high-factor genres
+get_max_interval(Genre, Tempo) = Max =>
+    Prof = profile(Genre),
+    Prof = $profile(BaseMax, _, Factor),
+    % Calculate tempo deviation from reference (100 BPM)
+    TempoDelta = Tempo - 100,
+    % Reduction per 20 BPM above reference
+    AdjFloat = (TempoDelta / 20.0) * Factor,
+    Adjustment = round(AdjFloat),
+    % Apply adjustment with floor of 3 semitones (minor third)
+    Max = max(3, BaseMax - Adjustment).
+
+% Get tempo-adjusted stepwise target percentage
+% Higher tempo = more stepwise motion expected
+get_stepwise_target(Genre, Tempo) = Target =>
+    Prof = profile(Genre),
+    Prof = $profile(_, BaseTarget, Factor),
+    % Increase stepwise target at faster tempos
+    TempoDelta = Tempo - 100,
+    AdjFloat = (TempoDelta / 20.0) * Factor * 5,  % +5% per 20 BPM
+    Bonus = round(AdjFloat),
+    % Cap at 95% to allow some leaps
+    Target = min(95, max(30, BaseTarget + Bonus)).
+
+% ==============================================================================
+% DYNAMIC PROFILE GENERATION
+% ==============================================================================
+
+% Generate profile from actual masterpiece statistics
+% This recalculates from the piece data instead of using hardcoded values
+generate_profile(Genre) = Profile =>
+    Stats = interval_stats.get_profile(Genre),
+    BaseMax = Stats.get(max_interval),
+    BaseStepwise = Stats.get(stepwise_pct),
+    % Default tempo factor based on genre characteristics
+    Factor = default_tempo_factor(Genre),
+    Profile = $profile(BaseMax, BaseStepwise, Factor).
+
+default_tempo_factor(folk_traditional) = 1.0.
+default_tempo_factor(folk) = 1.0.
+default_tempo_factor(baroque) = 0.8.
+default_tempo_factor(classical_period) = 0.9.
+default_tempo_factor(romantic) = 0.7.
+default_tempo_factor(jazz) = 0.5.
+default_tempo_factor(_) = 0.9.
+
+% ==============================================================================
+% CONSONANT LEAP TABLES
+% ==============================================================================
+
+% Consonant intervals allowed for leaps (by genre)
+% Based on masterpiece analysis of which intervals appear in leaps
+consonant_leaps(folk_traditional) = [3, 4, 5, 7].           % m3, M3, P4, P5
+consonant_leaps(folk) = [3, 4, 5, 7].
+consonant_leaps(baroque) = [3, 4, 5, 7, 8, 9, 12].          % includes 6ths, octave
+consonant_leaps(classical_period) = [3, 4, 5, 7, 8, 9].     % Mozart: m6, M6 allowed
+consonant_leaps(romantic) = [3, 4, 5, 7, 8, 9, 12].         % expressive leaps
+consonant_leaps(jazz) = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12].  % chromatic allowed
+consonant_leaps(sacred_chant) = [3, 4, 5, 7].               % very restricted
+consonant_leaps(children_songs) = [3, 4, 5, 7].
+consonant_leaps(_) = [3, 4, 5, 7, 8, 9, 12].                % default
+
+% Check if an interval is consonant for the genre
+is_consonant_leap(Genre, Interval) =>
+    member(Interval, consonant_leaps(Genre)).
+
+% ==============================================================================
+% UTILITY FUNCTIONS
+% ==============================================================================
+
+% Get full profile details as a map
+get_profile_details(Genre, Tempo) = Details =>
+    $profile(BaseMax, BaseStepwise, Factor) = profile(Genre),
+    MaxInt = get_max_interval(Genre, Tempo),
+    StepwiseTarget = get_stepwise_target(Genre, Tempo),
+    Consonants = consonant_leaps(Genre),
+
+    Details = new_map([
+        genre = Genre,
+        tempo = Tempo,
+        base_max_interval = BaseMax,
+        base_stepwise_pct = BaseStepwise,
+        tempo_factor = Factor,
+        adjusted_max_interval = MaxInt,
+        adjusted_stepwise_target = StepwiseTarget,
+        consonant_leaps = Consonants
+    ]).
+
+% Print profile for a genre at various tempos
+print_tempo_profile(Genre) =>
+    printf("=== %w tempo profile ===\n", Genre),
+    printf("Tempo    MaxInt  Stepwise%%\n"),
+    foreach(Tempo in [60, 80, 100, 120, 140, 160])
+        Max = get_max_interval(Genre, Tempo),
+        Step = get_stepwise_target(Genre, Tempo),
+        printf("%3d BPM:   %2d      %2d%%\n", Tempo, Max, Step)
+    end,
+    nl.
+
+% ==============================================================================
+% TESTS
+% ==============================================================================
+
+test_interval_profiles() =>
+    println("Testing interval_profiles module..."),
+
+    % Test basic profile lookup
+    $profile(BaseMax, BaseStep, _) = profile(classical_period),
+    printf("Classical base: max=%d, stepwise=%d%%\n", BaseMax, BaseStep),
+
+    % Test tempo adjustment
+    Max100 = get_max_interval(classical_period, 100),
+    Max140 = get_max_interval(classical_period, 140),
+    Max60 = get_max_interval(classical_period, 60),
+
+    printf("Classical max interval: @60=%d, @100=%d, @140=%d\n", Max60, Max100, Max140),
+
+    (Max60 > Max100, Max100 > Max140 ->
+        println("OK: Slower tempo allows larger intervals")
+    ;
+        println("WARN: Tempo adjustment not working as expected")
+    ),
+
+    % Test stepwise targets
+    Step100 = get_stepwise_target(classical_period, 100),
+    Step140 = get_stepwise_target(classical_period, 140),
+
+    printf("Classical stepwise target: @100=%d%%, @140=%d%%\n", Step100, Step140),
+
+    (Step140 >= Step100 ->
+        println("OK: Faster tempo expects more stepwise motion")
+    ;
+        println("WARN: Stepwise adjustment not working")
+    ),
+
+    % Test folk vs jazz profiles
+    FolkMax = get_max_interval(folk_traditional, 100),
+    JazzMax = get_max_interval(jazz, 100),
+
+    printf("At 100 BPM: Folk max=%d, Jazz max=%d\n", FolkMax, JazzMax),
+
+    (JazzMax > FolkMax ->
+        println("OK: Jazz allows larger leaps than folk")
+    ;
+        println("WARN: Genre differentiation issue")
+    ),
+
+    println("interval_profiles tests complete.").

@@ -1,0 +1,177 @@
+% interval_stats.pi - Extract interval statistics from masterpieces
+% Used to derive empirical interval profiles for different composers/genres
+
+module interval_stats.
+
+import piece_utils.
+import pieces_folk.
+import pieces_bach.
+import pieces_mozart.
+import pieces_beethoven.
+
+% ==============================================================================
+% SINGLE MELODY ANALYSIS
+% ==============================================================================
+
+% Extract comprehensive statistics from a single melody
+analyze_melody(Excerpt) = Stats =>
+    Pitches = get_melody(Excerpt),
+    analyze_pitches(Pitches) = Stats.
+
+% Analyze raw pitch list
+analyze_pitches(Pitches) = Stats =>
+    Intervals = get_abs_intervals(Pitches),
+    Len = length(Intervals),
+
+    if Len == 0 then
+        Stats = new_map([
+            stepwise_pct = 100,
+            leap_pct = 0,
+            max_interval = 0,
+            avg_interval = 0.0,
+            interval_histogram = new_map()
+        ])
+    else
+        StepwiseCount = length([I : I in Intervals, I =< 2]),
+        LeapCount = length([I : I in Intervals, I >= 4]),
+        MaxInt = max(Intervals),
+        AvgInt = sum(Intervals) / Len,
+        Histogram = build_histogram(Intervals),
+
+        Stats = new_map([
+            stepwise_pct = (StepwiseCount * 100) // Len,
+            leap_pct = (LeapCount * 100) // Len,
+            max_interval = MaxInt,
+            avg_interval = AvgInt,
+            interval_histogram = Histogram
+        ])
+    end.
+
+% Build histogram of interval frequencies
+build_histogram(Intervals) = Hist =>
+    Hist = new_map(),
+    foreach(I in Intervals)
+        Hist.put(I, Hist.get(I, 0) + 1)
+    end.
+
+% ==============================================================================
+% AGGREGATE STATISTICS
+% ==============================================================================
+
+% Aggregate multiple stats into a profile
+aggregate_stats(StatsList) = Agg =>
+    if StatsList == [] then
+        Agg = new_map([
+            stepwise_pct = 0,
+            leap_pct = 0,
+            max_interval = 0,
+            avg_interval = 0.0,
+            min_stepwise_pct = 0,
+            max_stepwise_pct = 0
+        ])
+    else
+        N = length(StatsList),
+
+        StepwiseVals = [S.get(stepwise_pct) : S in StatsList],
+        LeapVals = [S.get(leap_pct) : S in StatsList],
+        MaxIntVals = [S.get(max_interval) : S in StatsList],
+        AvgIntVals = [S.get(avg_interval) : S in StatsList],
+
+        Agg = new_map([
+            stepwise_pct = sum(StepwiseVals) // N,
+            leap_pct = sum(LeapVals) // N,
+            max_interval = max(MaxIntVals),
+            avg_interval = sum(AvgIntVals) / N,
+            min_stepwise_pct = min(StepwiseVals),
+            max_stepwise_pct = max(StepwiseVals)
+        ])
+    end.
+
+% ==============================================================================
+% COMPOSER/GENRE PROFILES
+% ==============================================================================
+
+% Get aggregated profile for folk music
+get_folk_profile() = Profile =>
+    Pieces = pieces_folk.all_folk_pieces(),
+    Stats = [analyze_melody(P) : P in Pieces],
+    Profile = aggregate_stats(Stats).
+
+% Get aggregated profile for Bach melodies (not SATB)
+get_bach_profile() = Profile =>
+    Pieces = pieces_bach.all_bach_melodies(),
+    Stats = [analyze_melody(P) : P in Pieces],
+    Profile = aggregate_stats(Stats).
+
+% Get aggregated profile for Mozart
+get_mozart_profile() = Profile =>
+    Pieces = pieces_mozart.all_mozart_pieces(),
+    Stats = [analyze_melody(P) : P in Pieces],
+    Profile = aggregate_stats(Stats).
+
+% Get aggregated profile for Beethoven
+get_beethoven_profile() = Profile =>
+    Pieces = pieces_beethoven.all_beethoven_pieces(),
+    Stats = [analyze_melody(P) : P in Pieces],
+    Profile = aggregate_stats(Stats).
+
+% Get profile by name
+get_profile(folk) = get_folk_profile().
+get_profile(folk_traditional) = get_folk_profile().
+get_profile(bach) = get_bach_profile().
+get_profile(baroque) = get_bach_profile().
+get_profile(mozart) = get_mozart_profile().
+get_profile(classical_period) = get_mozart_profile().
+get_profile(beethoven) = get_beethoven_profile().
+get_profile(romantic) = get_beethoven_profile().
+get_profile(_) = get_mozart_profile().  % default to classical
+
+% ==============================================================================
+% PRINT UTILITIES (for debugging/documentation)
+% ==============================================================================
+
+% Print profile summary
+print_profile(Name) =>
+    Profile = get_profile(Name),
+    printf("=== %w Profile ===\n", Name),
+    printf("  Stepwise: %d%% (range: %d-%d%%)\n",
+           Profile.get(stepwise_pct),
+           Profile.get(min_stepwise_pct),
+           Profile.get(max_stepwise_pct)),
+    printf("  Leaps: %d%%\n", Profile.get(leap_pct)),
+    printf("  Max interval: %d semitones\n", Profile.get(max_interval)),
+    printf("  Avg interval: %.2f semitones\n", Profile.get(avg_interval)),
+    nl.
+
+% Print all profiles
+print_all_profiles() =>
+    foreach(Name in [folk, bach, mozart, beethoven])
+        print_profile(Name)
+    end.
+
+% ==============================================================================
+% TESTS
+% ==============================================================================
+
+% Run self-tests
+test_interval_stats() =>
+    println("Testing interval_stats module..."),
+
+    % Test single analysis
+    Twinkle = pieces_folk.twinkle_twinkle(),
+    TwinkleStats = analyze_melody(Twinkle),
+    printf("Twinkle stepwise: %d%%\n", TwinkleStats.get(stepwise_pct)),
+
+    % Test aggregation
+    FolkProfile = get_folk_profile(),
+    printf("Folk profile stepwise: %d%%\n", FolkProfile.get(stepwise_pct)),
+
+    % Verify folk is more stepwise than Bach (arpeggio-based)
+    BachProfile = get_bach_profile(),
+    (FolkProfile.get(stepwise_pct) >= BachProfile.get(stepwise_pct) ->
+        println("OK: Folk is more stepwise than Bach")
+    ;
+        println("UNEXPECTED: Bach more stepwise than folk")
+    ),
+
+    println("interval_stats tests complete.").

@@ -427,6 +427,26 @@ style_context(Style) = Context =>
 style_mood_context(Style, Mood) = Context =>
     Context = new_map([style=Style, mood=Mood]).
 
+% Create context from genre and tempo (used by melody.pi)
+% Maps genre names to interval style names
+make_context_with_tempo(Genre, Tempo) = Context =>
+    Style = genre_to_style(Genre),
+    Context = new_map([style=Style, tempo=Tempo]).
+
+% Map genre names to interval style names
+genre_to_style(folk_traditional) = folk.
+genre_to_style(baroque) = baroque.
+genre_to_style(classical_period) = classical.
+genre_to_style(romantic) = romantic.
+genre_to_style(traditional_jazz) = jazz.
+genre_to_style(sacred_chant) = chant.
+genre_to_style(children_songs) = children.
+genre_to_style(minimalist) = minimalist.
+genre_to_style(modal) = modal.
+genre_to_style(blues) = blues.
+genre_to_style(contemporary) = contemporary.
+genre_to_style(_) = classical.  % default
+
 % ==============================================================================
 % DEBUGGING/INSPECTION
 % ==============================================================================

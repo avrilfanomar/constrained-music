@@ -18,6 +18,7 @@ import constraint_selector.
 import soft_constraints.
 import genre_profiles.
 import diagnostics.
+import interval_profiles.
 
 % ==============================================================================
 % MAIN MELODY GENERATION
@@ -352,7 +353,8 @@ generate_segment_melody(MusicParams, KeyRoot, NumBars, Melody) =>
     % Extract parameters from mood mapping
     Mode = get_mode(MusicParams),
     Density = get_note_density(MusicParams),
-    MaxInterval = get_max_interval(MusicParams),
+    MoodMaxInterval = get_max_interval(MusicParams),
+    Tempo = get_tempo(MusicParams),
     Voice = get_voice(MusicParams),
     VelBase = get_velocity_base(MusicParams),
     VelVar = get_velocity_var(MusicParams),
@@ -367,12 +369,19 @@ generate_segment_melody(MusicParams, KeyRoot, NumBars, Melody) =>
     % Get valid scale notes within voice range
     ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
 
+    % Get tempo-adjusted max interval (defaults to classical profile when no genre specified)
+    ProfileMaxInterval = interval_profiles.get_max_interval(classical_period, Tempo),
+    MaxInterval = min(MoodMaxInterval, ProfileMaxInterval),
+
+    % Create tempo-aware context
+    Context = intervals.make_context_with_tempo(classical_period, Tempo),
+
     % Create constraint variables for pitches
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
-    % Apply mood-aware constraints
-    apply_mood_constraints(Pitches, KeyRoot, Mode, MaxInterval, ScaleNotes),
+    % Apply mood-aware constraints with tempo context
+    apply_mood_constraints_ctx(Pitches, KeyRoot, Mode, MaxInterval, ScaleNotes, Context),
 
     % Solve with options based on randomness level, with timeout for safety
     SolveOpts = solve_options_for_randomness(Randomness),
@@ -985,6 +994,40 @@ apply_base_melodic_constraints(Pitches, Root, MaxInterval, ScaleNotes) =>
     nvalue(N, Pitches),
     N #>= min(3, Len // 2).
 
+% Apply base melodic constraints with tempo-aware context
+% Uses context for dynamic leap threshold
+apply_base_melodic_constraints_ctx(Pitches, Root, MaxInterval, ScaleNotes, Context) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+
+    % Maximum interval constraint
+    foreach(I in 1..Len-1)
+        $abs(Pitches[I+1] - Pitches[I]) #=< MaxInterval
+    end,
+
+    % Start on stable tones
+    StablePitchClasses = [RootClass, (RootClass + 4) mod 12, (RootClass + 7) mod 12],
+    ValidStartNotes = [N : N in ScaleNotes, member(N mod 12, StablePitchClasses)],
+    Pitches[1] :: ValidStartNotes,
+
+    % End on tonic
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    Pitches[Len] :: ValidEndNotes,
+
+    % Tempo-aware leap recovery: use context for dynamic threshold
+    LeapThreshold = intervals.leap_threshold(Context),
+    foreach(I in 1..Len-2)
+        ($abs(Pitches[I+1] - Pitches[I]) #>= LeapThreshold) #=>
+            ((Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) #=< 0)
+    end,
+
+    % No more than 2 consecutive repeated notes
+    max_consecutive_repeats(Pitches, 2),
+
+    % Minimum variety
+    nvalue(N, Pitches),
+    N #>= min(3, Len // 2).
+
 % Apply hard constraints from genre profile
 apply_genre_hard_constraints(Pitches, Root, ConstraintSet) =>
     ConstraintSet = $constraints(hard=HardList, soft=_, params=Params),
@@ -1091,6 +1134,7 @@ solve_genre_melody(Pitches, TotalCost, Randomness) =>
 generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Preferences, Melody) =>
     Mode = get_mode(MusicParams),
     Density = get_note_density(MusicParams),
+    Tempo = get_tempo(MusicParams),
     Voice = get_voice(MusicParams),
     VelBase = get_velocity_base(MusicParams),
     VelVar = get_velocity_var(MusicParams),
@@ -1105,10 +1149,20 @@ generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Prefere
 
     % Get constraints for genre
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
-    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+    GenreMaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
 
-    % Apply constraints
-    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    % Get tempo-adjusted max interval from masterpiece profiles
+    % Faster tempo = smaller intervals (based on masterpiece analysis)
+    ProfileMaxInterval = interval_profiles.get_max_interval(Genre, Tempo),
+
+    % Use the more restrictive of genre and tempo-adjusted limits
+    MaxInterval = min(GenreMaxInterval, ProfileMaxInterval),
+
+    % Create tempo-aware context for leap threshold calculation
+    Context = intervals.make_context_with_tempo(Genre, Tempo),
+
+    % Apply constraints with tempo-aware context
+    apply_base_melodic_constraints_ctx(Pitches, KeyRoot, MaxInterval, ScaleNotes, Context),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     TotalCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
 
@@ -1126,6 +1180,7 @@ generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Prefere
 generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Preferences, Melody) =>
     Mode = get_mode(MusicParams),
     Density = get_note_density(MusicParams),
+    Tempo = get_tempo(MusicParams),
     Voice = get_voice(MusicParams),
     VelBase = get_velocity_base(MusicParams),
     VelVar = get_velocity_var(MusicParams),
@@ -1146,10 +1201,17 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
 
     % Get constraints for genre
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
-    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+    GenreMaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
 
-    % Apply pitch constraints
-    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    % Get tempo-adjusted max interval from masterpiece profiles
+    ProfileMaxInterval = interval_profiles.get_max_interval(Genre, Tempo),
+    MaxInterval = min(GenreMaxInterval, ProfileMaxInterval),
+
+    % Create tempo-aware context
+    Context = intervals.make_context_with_tempo(Genre, Tempo),
+
+    % Apply pitch constraints with tempo-aware context
+    apply_base_melodic_constraints_ctx(Pitches, KeyRoot, MaxInterval, ScaleNotes, Context),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
 
