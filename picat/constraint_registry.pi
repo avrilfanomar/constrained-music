@@ -454,7 +454,7 @@ constraint_def(
 ).
 
 % ==============================================================================
-% CLASSICAL PERIOD CONSTRAINTS (Phase 2)
+% CLASSICAL PERIOD CONSTRAINTS
 % ==============================================================================
 
 constraint_def(
@@ -482,6 +482,139 @@ constraint_def(
     70,
     [classical_period, baroque],
     "Final portion descends stepwise toward tonic"
+).
+
+constraint_def(
+    chord_tone_on_strong_beats,
+    harmonic,
+    soft,
+    70,
+    [classical_period, baroque, folk_traditional],
+    "Notes on strong beats (1, 3) should be chord tones (root, 3rd, 5th)"
+).
+
+constraint_def(
+    salient_climax,
+    melodic,
+    soft,
+    55,
+    [classical_period, romantic],
+    "Highest note should be at least 3 semitones above second-highest"
+).
+
+constraint_def(
+    registral_return,
+    phrase_structure,
+    soft,
+    50,
+    [classical_period, folk_traditional, children_songs],
+    "First and last notes should be within an octave for balance"
+).
+
+% ==============================================================================
+% CADENCE CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    authentic_cadence_melody,
+    phrase_structure,
+    soft,
+    75,
+    [classical_period, baroque],
+    "Phrase ends with 2-1 or 7-1 melodic cadence pattern"
+).
+
+constraint_def(
+    half_cadence_melody,
+    phrase_structure,
+    soft,
+    65,
+    [classical_period],
+    "Antecedent phrases end on scale degree 2, 5, or 7"
+).
+
+constraint_def(
+    phrase_rhyme,
+    phrase_structure,
+    soft,
+    60,
+    [classical_period, folk_traditional],
+    "Consequent phrase opens similarly to antecedent (melodic rhyme)"
+).
+
+% ==============================================================================
+% INTERVAL CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    octave_leap_recovery,
+    melodic,
+    soft,
+    80,
+    [classical_period, baroque],
+    "Octave leaps (12+ semitones) require stepwise motion on both sides"
+).
+
+constraint_def(
+    no_melodic_parallel_fifths,
+    melodic,
+    soft,
+    65,
+    [classical_period, baroque],
+    "Avoid consecutive perfect fifths outlined in the melody"
+).
+
+% ==============================================================================
+% MOTIVIC CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    motivic_repetition,
+    motivic,
+    soft,
+    55,
+    [classical_period, baroque, folk_traditional],
+    "Encourage recurring interval patterns for melodic coherence"
+).
+
+% ==============================================================================
+% RHYTHMIC CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    opening_note_duration,
+    rhythmic,
+    soft,
+    65,
+    [classical_period, baroque, folk_traditional],
+    "First note should be at least a quarter note for clear thematic opening"
+).
+
+constraint_def(
+    rhythmic_acceleration,
+    rhythmic,
+    soft,
+    55,
+    [classical_period, baroque],
+    "Note density increases toward cadence (shorter notes in second half)"
+).
+
+constraint_def(
+    strong_phrase_start,
+    rhythmic,
+    soft,
+    70,
+    [classical_period, baroque, folk_traditional, children_songs],
+    "First note has substantial duration (at or above average)"
+).
+
+constraint_def(
+    rhythmic_cadence,
+    rhythmic,
+    soft,
+    60,
+    [classical_period, baroque, folk_traditional],
+    "Final note longer than average to signal closure"
 ).
 
 % ==============================================================================

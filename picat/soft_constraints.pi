@@ -119,6 +119,46 @@ apply_soft(cadential_descent, Notes, _Root, Weight, Cost) =>
     reify_cadential_descent(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+% Classical Constraints
+apply_soft(chord_tone_on_strong_beats, Notes, Root, Weight, Cost) =>
+    reify_chord_tone_on_strong_beats(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(salient_climax, Notes, _Root, Weight, Cost) =>
+    reify_salient_climax(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(registral_return, Notes, _Root, Weight, Cost) =>
+    reify_registral_return(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Cadence Constraints
+apply_soft(authentic_cadence_melody, Notes, Root, Weight, Cost) =>
+    reify_authentic_cadence_melody(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(half_cadence_melody, Notes, Root, Weight, Cost) =>
+    reify_half_cadence_melody(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(phrase_rhyme, Notes, _Root, Weight, Cost) =>
+    reify_phrase_rhyme(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Interval Constraints
+apply_soft(octave_leap_recovery, Notes, _Root, Weight, Cost) =>
+    reify_octave_leap_recovery(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(no_melodic_parallel_fifths, Notes, _Root, Weight, Cost) =>
+    reify_no_melodic_parallel_fifths(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Motivic Constraints
+apply_soft(motivic_repetition, Notes, _Root, Weight, Cost) =>
+    reify_motivic_repetition(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown constraint returns 0 cost (no penalty)
 apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
     Cost #= 0.
@@ -678,24 +718,60 @@ reify_peak_approach_exit(Notes, ViolationCount) =>
     end.
 
 % ==============================================================================
-% PHASE 2 CLASSICAL CONSTRAINTS
+% CLASSICAL CONSTRAINTS
 % ==============================================================================
 
 % Opening gesture: First few notes should follow Classical opening patterns
 % Patterns based on scale degrees: 5-4-3 (descending from dominant),
 % 5-3 (skip to mediant), 1-2-3 (ascending), 1-3-5 (arpeggio), 3-2-1 (descending from mediant)
-% For CP solving, we check contour patterns (ascending/descending) rather than exact degrees
+% Enhanced with specific Classical scale degree pattern detection
 % Returns 0 if opening follows a good pattern, 1 otherwise
 reify_opening_gesture(Notes, RootPitch, ViolationCount) =>
     Len = length(Notes),
     if Len >= 3 then
-        % Check first 3 notes for common opening gestures
-        % Pattern 1: Ascending from tonic area (1-2-3 or 1-3-5)
-        % Pattern 2: Descending from dominant area (5-4-3 or 5-3-1 or 3-2-1)
-        % We use contour (ascending/descending) as a proxy
+        RootPC = RootPitch mod 12,
 
-        Int1 = Notes[2] - Notes[1],  % Interval 1 to 2
-        Int2 = Notes[3] - Notes[2],  % Interval 2 to 3
+        % Get pitch classes of first 3 notes
+        PC1 :: 0..11, Q1 :: 0..10, Notes[1] #= 12 * Q1 + PC1,
+        PC2 :: 0..11, Q2 :: 0..10, Notes[2] #= 12 * Q2 + PC2,
+        PC3 :: 0..11, Q3 :: 0..10, Notes[3] #= 12 * Q3 + PC3,
+
+        % Scale degrees (as pitch class distances from root)
+        Deg2 = (RootPC + 2) mod 12,   % Scale degree 2
+        Deg3 = (RootPC + 4) mod 12,   % Scale degree 3 (major)
+        Deg5 = (RootPC + 7) mod 12,   % Scale degree 5
+
+        % Classical opening patterns (scale degrees):
+        % Pattern 5-4-3: dominant descending to mediant
+        Pattern543 :: 0..1,
+        Pattern543 #<=> ((PC1 #= Deg5) #/\ (PC3 #= Deg3) #/\ (Notes[2] #< Notes[1]) #/\ (Notes[3] #< Notes[2])),
+
+        % Pattern 5-3: skip from dominant to mediant
+        Pattern53 :: 0..1,
+        Pattern53 #<=> ((PC1 #= Deg5) #/\ (PC2 #= Deg3)),
+
+        % Pattern 1-2-3: ascending from tonic
+        Pattern123 :: 0..1,
+        Pattern123 #<=> ((PC1 #= RootPC) #/\ (PC2 #= Deg2) #/\ (PC3 #= Deg3)),
+
+        % Pattern 1-3-5: ascending arpeggio
+        Pattern135 :: 0..1,
+        Pattern135 #<=> ((PC1 #= RootPC) #/\ (PC2 #= Deg3) #/\ (PC3 #= Deg5)),
+
+        % Pattern 3-2-1: descending from mediant
+        Pattern321 :: 0..1,
+        Pattern321 #<=> ((PC1 #= Deg3) #/\ (PC2 #= Deg2) #/\ (PC3 #= RootPC)),
+
+        % Any specific Classical pattern matches
+        ClassicalPattern :: 0..1,
+        ClassicalPattern #<=> (Pattern543 #\/ Pattern53 #\/ Pattern123 #\/ Pattern135 #\/ Pattern321),
+
+        % Fallback: contour-based patterns
+        % Use constraint variables for intervals since Notes are CP variables
+        Int1 :: -24..24,
+        Int1 #= Notes[2] - Notes[1],  % Interval 1 to 2
+        Int2 :: -24..24,
+        Int2 #= Notes[3] - Notes[2],  % Interval 2 to 3
 
         % Ascending opening: both intervals positive (upward motion)
         AscendingOpening :: 0..1,
@@ -705,27 +781,20 @@ reify_opening_gesture(Notes, RootPitch, ViolationCount) =>
         DescendingOpening :: 0..1,
         DescendingOpening #<=> ((Int1 #< 0) #/\ (Int2 #< 0)),
 
-        % Arch opening: up then down (1-3-1 or similar)
+        % Arch opening: up then down
         ArchOpening :: 0..1,
         ArchOpening #<=> ((Int1 #> 0) #/\ (Int2 #< 0)),
 
-        % Inverse arch opening: down then up
-        InvArchOpening :: 0..1,
-        InvArchOpening #<=> ((Int1 #< 0) #/\ (Int2 #> 0)),
+        % First note on scale degree 1, 3, or 5 (stable opening)
+        StableStart :: 0..1,
+        StableStart #<=> ((PC1 #= RootPC) #\/ (PC1 #= Deg3) #\/ (PC1 #= Deg5)),
 
-        % First note close to tonic (within P5 of root)
-        FirstNoteTonic :: 0..1,
-        RootPC = RootPitch mod 12,
-        FirstPC :: 0..11,
-        FirstPC #= Notes[1] mod 12,
-        FirstDist :: 0..11,
-        FirstDist #= abs(FirstPC - RootPC),
-        FirstNoteTonic #<=> (FirstDist #=< 7),  % Within P5
-
-        % Good opening: ascending OR descending with first note near tonic
+        % Good opening: specific Classical pattern OR (contour pattern AND stable start)
         GoodOpening :: 0..1,
-        GoodOpening #<=> ((AscendingOpening #= 1) #\/ (DescendingOpening #= 1) #\/
-                          (ArchOpening #= 1) #\/ (InvArchOpening #= 1)),
+        GoodOpening #<=> (
+            (ClassicalPattern #= 1) #\/
+            ((AscendingOpening #\/ DescendingOpening #\/ ArchOpening) #/\ StableStart)
+        ),
 
         ViolationCount #<=> (GoodOpening #= 0)
     else
@@ -759,18 +828,44 @@ reify_phrase_arch_contour(Notes, ViolationCount) =>
         NoPeakInMiddle :: 0..1,
         NoPeakInMiddle #<=> (MiddlePeaks #= 0),
 
-        % Count ascending intervals in first half
+        % Count ascending/descending in first half using reified variables
         HalfPoint = Len // 2,
+        FirstHalfAscFlags = new_list(Len-1),
+        FirstHalfAscFlags :: 0..1,
+        FirstHalfDescFlags = new_list(Len-1),
+        FirstHalfDescFlags :: 0..1,
+        foreach(I in 1..Len-1)
+            if I =< HalfPoint then
+                FirstHalfAscFlags[I] #<=> (Notes[I+1] #> Notes[I]),
+                FirstHalfDescFlags[I] #<=> (Notes[I+1] #< Notes[I])
+            else
+                FirstHalfAscFlags[I] = 0,
+                FirstHalfDescFlags[I] = 0
+            end
+        end,
         FirstHalfAsc :: 0..Len,
-        FirstHalfAsc #= sum([cond(I =< HalfPoint, Notes[I+1] #> Notes[I], 0) : I in 1..Len-1]),
+        FirstHalfAsc #= sum(FirstHalfAscFlags),
         FirstHalfDesc :: 0..Len,
-        FirstHalfDesc #= sum([cond(I =< HalfPoint, Notes[I+1] #< Notes[I], 0) : I in 1..Len-1]),
+        FirstHalfDesc #= sum(FirstHalfDescFlags),
 
-        % Count descending intervals in second half
+        % Count ascending/descending in second half using reified variables
+        SecondHalfAscFlags = new_list(Len-1),
+        SecondHalfAscFlags :: 0..1,
+        SecondHalfDescFlags = new_list(Len-1),
+        SecondHalfDescFlags :: 0..1,
+        foreach(I in 1..Len-1)
+            if I > HalfPoint then
+                SecondHalfAscFlags[I] #<=> (Notes[I+1] #> Notes[I]),
+                SecondHalfDescFlags[I] #<=> (Notes[I+1] #< Notes[I])
+            else
+                SecondHalfAscFlags[I] = 0,
+                SecondHalfDescFlags[I] = 0
+            end
+        end,
         SecondHalfAsc :: 0..Len,
-        SecondHalfAsc #= sum([cond(I > HalfPoint, Notes[I+1] #> Notes[I], 0) : I in 1..Len-1]),
+        SecondHalfAsc #= sum(SecondHalfAscFlags),
         SecondHalfDesc :: 0..Len,
-        SecondHalfDesc #= sum([cond(I > HalfPoint, Notes[I+1] #< Notes[I], 0) : I in 1..Len-1]),
+        SecondHalfDesc #= sum(SecondHalfDescFlags),
 
         % First half should have more ascending than descending
         FirstHalfBad :: 0..1,
@@ -794,20 +889,378 @@ reify_cadential_descent(Notes, ViolationCount) =>
         CadenceLen = max(2, Len // 5),
         CadenceStart = Len - CadenceLen,
 
-        % Count descending stepwise intervals in cadence
-        DescSteps :: 0..CadenceLen,
-        DescSteps #= sum([cond(I >= CadenceStart,
-                              ((Notes[I+1] - Notes[I] #>= -2) #/\ (Notes[I+1] - Notes[I] #< 0)),
-                              0) : I in 1..Len-1]),
+        % Create reified flags for each interval
+        AscFlags = new_list(Len-1),
+        AscFlags :: 0..1,
+        foreach(I in 1..Len-1)
+            if I >= CadenceStart then
+                % In cadence section: check if ascending
+                AscFlags[I] #<=> (Notes[I+1] - Notes[I] #> 0)
+            else
+                % Not in cadence section: no violation
+                AscFlags[I] = 0
+            end
+        end,
 
         % Count ascending intervals in cadence (violations)
         AscInCadence :: 0..CadenceLen,
-        AscInCadence #= sum([cond(I >= CadenceStart,
-                                  (Notes[I+1] - Notes[I] #> 0),
-                                  0) : I in 1..Len-1]),
+        AscInCadence #= sum(AscFlags),
 
         % Penalize ascending motion in cadence
         ViolationCount #= AscInCadence
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
+% RHYTHMIC CONSTRAINTS
+% ==============================================================================
+
+% Opening note duration: first note should be at least a quarter note (4 ticks)
+% This establishes clear thematic character at phrase start
+apply_soft_rhythm(opening_note_duration, Durations, Weight, Cost) =>
+    reify_opening_note_duration(Durations, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft_rhythm(rhythmic_acceleration, Durations, Weight, Cost) =>
+    reify_rhythmic_acceleration(Durations, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft_rhythm(strong_phrase_start, Durations, Weight, Cost) =>
+    reify_strong_phrase_start(Durations, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft_rhythm(rhythmic_cadence, Durations, Weight, Cost) =>
+    reify_rhythmic_cadence(Durations, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Default: unknown rhythm constraint returns 0 cost
+apply_soft_rhythm(_UnknownId, _Durations, _Weight, Cost) =>
+    Cost #= 0.
+
+% Opening note duration: first note should be at least a quarter note (4 ticks)
+% Violation = 1 if Duration[1] < 4
+reify_opening_note_duration(Durations, ViolationCount) =>
+    Len = length(Durations),
+    if Len >= 1 then
+        B :: 0..1,
+        B #<=> (Durations[1] #< 4),  % Less than quarter note
+        ViolationCount #= B
+    else
+        ViolationCount = 0
+    end.
+
+% Rhythmic acceleration: second half should have shorter average duration
+% Classical music often accelerates note density toward cadence
+reify_rhythmic_acceleration(Durations, ViolationCount) =>
+    Len = length(Durations),
+    if Len >= 4 then
+        Half = Len // 2,
+        FirstHalfSum #= sum([Durations[I] : I in 1..Half]),
+        SecondHalfSum #= sum([Durations[I] : I in Half+1..Len]),
+        FirstHalfLen = Half,
+        SecondHalfLen = Len - Half,
+        % Compare averages: FirstHalfSum/FirstHalfLen vs SecondHalfSum/SecondHalfLen
+        % Multiply to avoid division: FirstHalfSum * SecondHalfLen vs SecondHalfSum * FirstHalfLen
+        % Violation if second half is NOT shorter on average
+        B :: 0..1,
+        B #<=> (SecondHalfSum * FirstHalfLen #>= FirstHalfSum * SecondHalfLen),
+        ViolationCount #= B
+    else
+        ViolationCount = 0
+    end.
+
+% Strong phrase start: first note should have substantial duration (>= average)
+% Ensures phrase begins with weight and emphasis
+reify_strong_phrase_start(Durations, ViolationCount) =>
+    Len = length(Durations),
+    if Len >= 2 then
+        TotalDur #= sum(Durations),
+        % AvgDur * Len = TotalDur, so check Durations[1] * Len >= TotalDur
+        B :: 0..1,
+        B #<=> (Durations[1] * Len #< TotalDur),  % First note below average
+        ViolationCount #= B
+    else
+        ViolationCount = 0
+    end.
+
+% Rhythmic cadence: final note should be longer than average (signals closure)
+reify_rhythmic_cadence(Durations, ViolationCount) =>
+    Len = length(Durations),
+    if Len >= 2 then
+        TotalDur #= sum(Durations),
+        % Check Durations[Len] * Len >= TotalDur (last note >= average)
+        B :: 0..1,
+        B #<=> (Durations[Len] * Len #< TotalDur),  % Last note below average
+        ViolationCount #= B
+    else
+        ViolationCount = 0
+    end.
+
+% List of supported rhythmic constraints
+supported_rhythm_constraints() = [
+    opening_note_duration,
+    rhythmic_acceleration,
+    strong_phrase_start,
+    rhythmic_cadence
+].
+
+% ==============================================================================
+% CLASSICAL CONSTRAINTS
+% ==============================================================================
+
+% Chord tone on strong beats: notes on beats 1 and 3 (strong beats in 4/4)
+% should predominantly be chord tones (root, 3rd, 5th of the key)
+% We approximate strong beats as notes at positions 1, 3, 5, 7... (odd indices for 4/4)
+% Returns count of non-chord-tone notes on strong beat positions exceeding 25% threshold
+reify_chord_tone_on_strong_beats(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        % Chord tones: root, major third (4 semitones), perfect fifth (7 semitones)
+        RootPC = RootPitch mod 12,
+        ThirdPC = (RootPitch + 4) mod 12,
+        FifthPC = (RootPitch + 7) mod 12,
+
+        % Check notes at odd positions (1, 3, 5, ...) as "strong beats"
+        % This approximates beat 1 and 3 in 4/4 when notes_per_bar = 4
+        StrongBeatFlags = new_list(Len),
+        StrongBeatFlags :: 0..1,
+        foreach(I in 1..Len)
+            NotePC :: 0..11,
+            Q :: 0..10,
+            Notes[I] #= 12 * Q + NotePC,
+            IsChordTone :: 0..1,
+            IsChordTone #<=> ((NotePC #= RootPC) #\/ (NotePC #= ThirdPC) #\/ (NotePC #= FifthPC)),
+            % Violation if on strong beat (odd position) AND not chord tone
+            IsStrongBeat = cond(I mod 2 == 1, 1, 0),
+            StrongBeatFlags[I] #<=> ((IsStrongBeat #= 1) #/\ (IsChordTone #= 0))
+        end,
+        ViolationCount #= sum(StrongBeatFlags)
+    else
+        ViolationCount = 0
+    end.
+
+% Salient climax: highest note should be notably higher than other notes
+% Violation if max pitch is less than 3 semitones above second-highest
+reify_salient_climax(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        MaxPitch = max(Notes),
+        % Find second highest by checking all notes
+        % A note is "second highest" if it's the max among notes that aren't max
+        SecondHighestCandidates = new_list(Len),
+        SecondHighestCandidates :: 0..127,
+        foreach(I in 1..Len)
+            % If this note is less than max, it's a candidate for second highest
+            (Notes[I] #< MaxPitch) #=> (SecondHighestCandidates[I] #= Notes[I]),
+            (Notes[I] #>= MaxPitch) #=> (SecondHighestCandidates[I] #= 0)
+        end,
+        SecondMax #= max(SecondHighestCandidates),
+
+        % Violation if gap < 3 semitones (not salient enough)
+        Gap :: 0..127,
+        Gap #= MaxPitch - SecondMax,
+        NotSalient :: 0..1,
+        NotSalient #<=> (Gap #< 3),
+        ViolationCount #= NotSalient
+    else
+        ViolationCount = 0
+    end.
+
+% Registral return: first and last notes should be within an octave
+% Creates sense of completion and balance
+reify_registral_return(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Diff = $abs(Notes[Len] - Notes[1]),
+        NotReturned :: 0..1,
+        NotReturned #<=> (Diff #> 12),  % More than octave apart
+        ViolationCount #= NotReturned
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
+% CADENCE & STRUCTURE CONSTRAINTS
+% ==============================================================================
+
+% Authentic cadence melody: phrase ends with 2→1 or 7→1 (scale degrees)
+% This is the standard melodic cadence pattern in Classical music
+reify_authentic_cadence_melody(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        RootPC = RootPitch mod 12,
+        SecondDegree = (RootPitch + 2) mod 12,  % Scale degree 2
+        LeadingTone = (RootPitch + 11) mod 12,  % Scale degree 7
+
+        % Get pitch classes of last two notes
+        LastPC :: 0..11,
+        PenultPC :: 0..11,
+        Q1 :: 0..10,
+        Q2 :: 0..10,
+        Notes[Len] #= 12 * Q1 + LastPC,
+        Notes[Len-1] #= 12 * Q2 + PenultPC,
+
+        % Valid cadence: last note is tonic AND penultimate is 2 or 7
+        ValidCadence :: 0..1,
+        ValidCadence #<=> (
+            (LastPC #= RootPC) #/\
+            ((PenultPC #= SecondDegree) #\/ (PenultPC #= LeadingTone))
+        ),
+        ViolationCount #= 1 - ValidCadence
+    else
+        ViolationCount = 0
+    end.
+
+% Half cadence melody: for antecedent phrases, end on scale degree 2 or 7
+% Creates incomplete feeling requiring continuation
+reify_half_cadence_melody(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 1 then
+        SecondDegree = (RootPitch + 2) mod 12,
+        LeadingTone = (RootPitch + 11) mod 12,
+        DominantPC = (RootPitch + 7) mod 12,  % Scale degree 5 also acceptable
+
+        LastPC :: 0..11,
+        Q :: 0..10,
+        Notes[Len] #= 12 * Q + LastPC,
+
+        % Valid half cadence: ends on 2, 5, or 7
+        ValidHalfCadence :: 0..1,
+        ValidHalfCadence #<=> (
+            (LastPC #= SecondDegree) #\/
+            (LastPC #= DominantPC) #\/
+            (LastPC #= LeadingTone)
+        ),
+        ViolationCount #= 1 - ValidHalfCadence
+    else
+        ViolationCount = 0
+    end.
+
+% Phrase rhyme: consequent phrase should open similarly to antecedent
+% Compare interval patterns of first portion with middle portion
+% For an 8-bar phrase: bars 1-2 should match bars 5-6 in contour
+reify_phrase_rhyme(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 8 then
+        % Compare first quarter intervals with third quarter intervals
+        QuarterLen = Len // 4,
+        ThirdQuarterStart = Len // 2 + 1,
+
+        % Count matching directions in corresponding positions
+        Mismatches = new_list(QuarterLen - 1),
+        Mismatches :: 0..1,
+        foreach(I in 1..QuarterLen-1)
+            % Direction in first quarter
+            Dir1 :: -1..1,
+            (Notes[I+1] #> Notes[I]) #=> (Dir1 #= 1),
+            (Notes[I+1] #= Notes[I]) #=> (Dir1 #= 0),
+            (Notes[I+1] #< Notes[I]) #=> (Dir1 #= -1),
+            % Direction in third quarter (corresponding position)
+            J = ThirdQuarterStart + I - 1,
+            Dir2 :: -1..1,
+            (Notes[J+1] #> Notes[J]) #=> (Dir2 #= 1),
+            (Notes[J+1] #= Notes[J]) #=> (Dir2 #= 0),
+            (Notes[J+1] #< Notes[J]) #=> (Dir2 #= -1),
+            % Mismatch if directions differ
+            Mismatches[I] #<=> (Dir1 #!= Dir2)
+        end,
+        ViolationCount #= sum(Mismatches)
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
+% INTERVAL REFINEMENT CONSTRAINTS
+% ==============================================================================
+
+% Octave leap recovery: octave leaps (12+ semitones) require stepwise motion
+% on BOTH sides (before AND after) - stricter than large_leap_recovery
+reify_octave_leap_recovery(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 5 then
+        % Check positions 3..Len-2 (need I-2 and I+1 to be valid)
+        NumPositions = Len - 4,
+        Violations = new_list(NumPositions),
+        Violations :: 0..1,
+        foreach(I in 3..Len-2)
+            % Intervals around position I
+            IntervalBefore = $abs(Notes[I] - Notes[I-1]),
+            IntervalAfter = $abs(Notes[I+1] - Notes[I]),
+            % Previous interval (for checking stepwise approach)
+            IntervalTwoBefore = $abs(Notes[I-1] - Notes[I-2]),
+
+            % Violation: octave leap into I without stepwise before,
+            % OR octave leap out of I without stepwise after
+            Violations[I-2] #<=> (
+                ((IntervalBefore #>= 12) #/\ (IntervalTwoBefore #> 2)) #\/
+                ((IntervalAfter #>= 12) #/\ (IntervalBefore #> 2))
+            )
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% No melodic parallel fifths: avoid consecutive perfect fifths outlined in melody
+% Check if notes I and I+2 outline a P5, AND notes I+1 and I+3 also outline P5
+reify_no_melodic_parallel_fifths(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 4 then
+        Violations = new_list(Len - 3),
+        Violations :: 0..1,
+        foreach(I in 1..Len-3)
+            % Interval class of notes I to I+2 (mod 12 for pitch class interval)
+            Int1 = $abs(Notes[I+2] - Notes[I]),
+            Int1Class :: 0..11,
+            Int1Class #= Int1 mod 12,
+            % Interval class of notes I+1 to I+3
+            Int2 = $abs(Notes[I+3] - Notes[I+1]),
+            Int2Class :: 0..11,
+            Int2Class #= Int2 mod 12,
+            % Violation: both are perfect fifths (7 semitones)
+            Violations[I] #<=> ((Int1Class #= 7) #/\ (Int2Class #= 7))
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
+% MOTIVIC CONSTRAINTS
+% ==============================================================================
+
+% Motivic repetition: reward if 2-3 note interval patterns repeat
+% This encourages melodic coherence through recurring motives
+% Returns 0 if ANY 2-note interval pattern appears at least twice, else 1
+reify_motivic_repetition(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 5 then
+        % Extract all 2-note interval patterns (signed intervals)
+        NumPatterns = Len - 1,
+        Intervals = new_list(NumPatterns),
+        Intervals :: -24..24,
+        foreach(I in 1..NumPatterns)
+            Intervals[I] #= Notes[I+1] - Notes[I]
+        end,
+
+        % Check if any interval repeats at least once (anywhere in sequence)
+        HasRepeat = new_list(NumPatterns - 1),
+        HasRepeat :: 0..1,
+        foreach(I in 1..NumPatterns-1)
+            % Check if Intervals[I] appears again later
+            LaterMatches = new_list(NumPatterns - I),
+            LaterMatches :: 0..1,
+            foreach(J in I+1..NumPatterns)
+                LaterMatches[J-I] #<=> (Intervals[J] #= Intervals[I])
+            end,
+            MatchCount #= sum(LaterMatches),
+            HasRepeat[I] #<=> (MatchCount #>= 1)
+        end,
+        TotalRepeats #= sum(HasRepeat),
+        NoMotivicRepetition :: 0..1,
+        NoMotivicRepetition #<=> (TotalRepeats #= 0),
+        ViolationCount #= NoMotivicRepetition
     else
         ViolationCount = 0
     end.
@@ -842,7 +1295,16 @@ supported_soft_constraints() = [
     peak_approach_exit,
     opening_gesture,
     phrase_arch_contour,
-    cadential_descent
+    cadential_descent,
+    chord_tone_on_strong_beats,
+    salient_climax,
+    registral_return,
+    authentic_cadence_melody,
+    half_cadence_melody,
+    phrase_rhyme,
+    octave_leap_recovery,
+    no_melodic_parallel_fifths,
+    motivic_repetition
 ].
 
 % Check if a constraint ID is supported for soft application

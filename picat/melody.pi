@@ -1,5 +1,4 @@
 % melody.pi - Constraint-based melody generation
-% Phase 1: Core melody generator using Picat's CP module
 % Extended for Music Companion with mood-aware generation
 
 module melody.
@@ -1117,6 +1116,178 @@ generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Prefere
     solve_genre_melody(Pitches, TotalCost, Randomness),
 
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% ==============================================================================
+% RHYTHM-AWARE GENERATION
+% ==============================================================================
+
+% Generate segment melody with genre AND variable rhythm
+% This is an enhanced version that solves for both pitches and durations
+generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Preferences, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    % Pitch variables (same as before)
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Duration variables (NEW)
+    % Duration values in "ticks": 1=sixteenth, 2=eighth, 3=dotted-eighth, 4=quarter, 6=dotted-quarter, 8=half
+    Durations = new_list(TotalNotes),
+    Durations :: [2, 3, 4, 6, 8],  % Eighth note to half note range
+
+    % Get constraints for genre
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    % Apply pitch constraints
+    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
+    PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+
+    % Apply rhythm constraints (NEW)
+    RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
+
+    % Combined cost
+    TotalCost #= PitchCost + RhythmCost,
+
+    % Solve for both pitches and durations
+    solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness),
+
+    % Build melody with variable durations
+    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% Apply rhythm soft constraints and return total cost
+apply_rhythm_soft_constraints(Durations, Genre) = TotalCost =>
+    % Get rhythm constraints for genre with default weights
+    RhythmConstraints = [
+        (opening_note_duration, 65),
+        (rhythmic_acceleration, 55),
+        (strong_phrase_start, 70),
+        (rhythmic_cadence, 60)
+    ],
+
+    % Apply weights based on genre (classical gets full weight, others reduced)
+    WeightMod = cond(member(Genre, [classical_period, baroque]), 1.0, 0.5),
+
+    NumConstraints = length(RhythmConstraints),
+    Costs = new_list(NumConstraints),
+    Costs :: 0..10000,  % Cost domain
+    foreach(I in 1..NumConstraints)
+        (CId, BaseWeight) = RhythmConstraints[I],
+        Weight = round(BaseWeight * WeightMod),
+        soft_constraints.apply_soft_rhythm(CId, Durations, Weight, Costs[I])
+    end,
+    TotalCost :: 0..40000,
+    TotalCost #= sum(Costs).
+
+% Solve for pitches and durations together
+solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness) =>
+    Vars = Pitches ++ Durations ++ [TotalCost],
+    SolveOpts = constraint_selector.picat_solve_options(Randomness),
+
+    % Try optimization with timeout, fallback to satisficing
+    if time_out(solve($[min(TotalCost)|SolveOpts], Vars), 3000, Status), Status == success then
+        true
+    else
+        % Fallback: solve without optimization
+        solve(SolveOpts, Pitches ++ Durations)
+    end.
+
+% Build melody with variable durations
+build_melody_with_durations(Pitches, Durations, _NumBars, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Melody =>
+    Len = length(Pitches),
+    Melody = [build_note_with_duration(Pitches[I], Durations[I], I, NotesPerBar, VoiceId, VelBase, VelVar, Randomness)
+              : I in 1..Len].
+
+% Build a single note with variable duration
+build_note_with_duration(MidiPitch, DurationTicks, Index, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Note =>
+    Octave = MidiPitch // 12 - 1,
+    Bar = ((Index - 1) // NotesPerBar) + 1,
+    Beat = ((Index - 1) mod NotesPerBar) + 1,
+
+    % Convert ticks to duration fraction
+    % Ticks: 1=1/16, 2=1/8, 3=3/16, 4=1/4, 6=3/8, 8=1/2
+    Duration = ticks_to_duration(DurationTicks),
+
+    % Velocity variation
+    VelOffset = cond(Beat == 1, VelVar // 2, -VelVar // 4),
+    RandomPerturbation = round((rand01() - 0.5) * 2 * 15 * Randomness),
+    Velocity = max(40, min(127, VelBase + VelOffset + RandomPerturbation)),
+
+    Note = $note(
+        $pitch(midi, MidiPitch, Octave),
+        Duration,
+        $time_pos(Bar, Beat, 0),
+        VoiceId,
+        Velocity
+    ).
+
+% Convert duration ticks to fraction
+% Base unit: 16 ticks = whole note
+ticks_to_duration(1) = $duration(1, 16).   % Sixteenth
+ticks_to_duration(2) = $duration(1, 8).    % Eighth
+ticks_to_duration(3) = $duration(3, 16).   % Dotted eighth
+ticks_to_duration(4) = $duration(1, 4).    % Quarter
+ticks_to_duration(6) = $duration(3, 8).    % Dotted quarter
+ticks_to_duration(8) = $duration(1, 2).    % Half
+ticks_to_duration(12) = $duration(3, 4).   % Dotted half
+ticks_to_duration(16) = $duration(1, 1).   % Whole
+ticks_to_duration(_) = $duration(1, 4).    % Default: quarter note
+
+% ==============================================================================
+% CONNECTED SEGMENT WITH RHYTHM
+% ==============================================================================
+
+% Generate connected segment with genre AND rhythm
+generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    Durations = new_list(TotalNotes),
+    Durations :: [2, 3, 4, 6, 8],
+
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
+    PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
+
+    % Connection constraint
+    ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
+    if ValidConnectionNotes != [] then
+        Pitches[1] :: ValidConnectionNotes
+    end,
+
+    TotalCost #= PitchCost + RhythmCost,
+    solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness),
+
+    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% ==============================================================================
+% ORIGINAL CONNECTED SEGMENT (without rhythm)
+% ==============================================================================
 
 % Generate connected segment with genre
 generate_connected_segment_with_genre(MusicParams, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, Melody) =>
