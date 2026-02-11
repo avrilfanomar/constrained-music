@@ -382,8 +382,8 @@ constraint_def(
     idiomatic,
     soft,
     55,
-    [sacred_chant, minimalist],
-    "Limit large register jumps"
+    [classical_period, baroque, folk_traditional, sacred_chant, children_songs, minimalist],
+    "Penalize consecutive intervals exceeding an octave"
 ).
 
 constraint_def(
@@ -577,6 +577,15 @@ constraint_def(
     "Encourage recurring interval patterns for melodic coherence"
 ).
 
+constraint_def(
+    motivic_fragmentation,
+    motivic,
+    soft,
+    50,
+    [classical_period, baroque],
+    "First-quarter interval patterns should reappear in second half (sentence fragmentation)"
+).
+
 % ==============================================================================
 % RHYTHMIC CONSTRAINTS
 % ==============================================================================
@@ -615,6 +624,15 @@ constraint_def(
     60,
     [classical_period, baroque, folk_traditional],
     "Final note longer than average to signal closure"
+).
+
+constraint_def(
+    no_short_note_isolation,
+    rhythmic,
+    soft,
+    55,
+    [classical_period, baroque, folk_traditional, children_songs],
+    "Penalize isolated short notes surrounded by longer notes"
 ).
 
 % ==============================================================================
@@ -680,7 +698,7 @@ all_categories() = [melodic, harmonic, voice_leading, phrase_structure, motivic,
 all_genres() = [
     classical_period, baroque, romantic, traditional_jazz,
     folk_traditional, contemporary, sacred_chant, children_songs,
-    minimalist, modal, blues
+    minimalist, modal, blues, galant, high_classical, sturm_und_drang
 ].
 
 % Print constraint summary

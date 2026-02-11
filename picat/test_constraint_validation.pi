@@ -467,6 +467,38 @@ score_motivic_repetition(Pitches) = Violations =>
         Violations = cond(HasRepeat, 0, 1)
     end.
 
+% Score register consistency violations
+% Counts consecutive intervals > 12 semitones (octave)
+score_register_consistency(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Violations = 0
+    else
+        Violations = length([I : I in 1..Len-1, abs(Pitches[I+1] - Pitches[I]) > 12])
+    end.
+
+% Score motivic fragmentation violations
+% Returns 0 if any first-quarter interval appears in second half, 1 otherwise
+score_motivic_fragmentation(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 8 then
+        Violations = 0
+    else
+        Intervals = [Pitches[I+1] - Pitches[I] : I in 1..Len-1],
+        QuarterLen = Len // 4,
+        SecondHalfStart = Len // 2 + 1,
+        NumIntervals = Len - 1,
+        HasMatch = false,
+        foreach(I in 1..QuarterLen-1, HasMatch == false)
+            foreach(J in SecondHalfStart..NumIntervals, HasMatch == false)
+                if Intervals[I] == Intervals[J] then
+                    HasMatch := true
+                end
+            end
+        end,
+        Violations = cond(HasMatch, 0, 1)
+    end.
+
 % Score peak approach and exit violations
 % Peak should be approached from below and left by descending step (1-2 semitones down)
 score_peak_approach_exit(Pitches) = Violations =>
@@ -763,6 +795,63 @@ test_phase2_structural_constraints =>
     println("  Phase 2 structural constraints: OK").
 
 % ==============================================================================
+% PHASE 3 STRUCTURAL CONSTRAINT TESTS
+% Validates Phase 3 constraints against masterpieces:
+%   register_consistency, motivic_fragmentation
+% ==============================================================================
+
+test_phase3_structural_constraints =>
+    println("Testing Phase 3 structural constraints..."),
+
+    % --- Register Consistency ---
+    % Folk melodies should have very few large register jumps
+    TwinklePitches = get_melody(twinkle_twinkle()),
+    TwinkleRC = score_register_consistency(TwinklePitches),
+    printf("  Twinkle register consistency violations: %d%n", TwinkleRC),
+    assert_violation_count_below("register_consistency", TwinkleRC, 0, twinkle_twinkle),
+
+    % Mary Had a Little Lamb - very narrow range, no jumps
+    MaryPitches = get_melody(mary_had_a_little_lamb()),
+    MaryRC = score_register_consistency(MaryPitches),
+    printf("  Mary register consistency violations: %d%n", MaryRC),
+    assert_violation_count_below("register_consistency", MaryRC, 0, mary_had_a_little_lamb),
+
+    % Mozart K545 - classical, mostly stepwise with occasional leaps
+    K545Pitches = get_melody(k545_theme()),
+    K545RC = score_register_consistency(K545Pitches),
+    printf("  K545 register consistency violations: %d%n", K545RC),
+    assert_violation_count_below("register_consistency", K545RC, 2, mozart_k545_theme),
+
+    % Ode to Joy - very stepwise
+    OdePitches = get_melody(ode_to_joy()),
+    OdeRC = score_register_consistency(OdePitches),
+    printf("  Ode to Joy register consistency violations: %d%n", OdeRC),
+    assert_violation_count_below("register_consistency", OdeRC, 0, ode_to_joy),
+
+    % --- Motivic Fragmentation ---
+    % Classical pieces should reuse interval patterns
+    K545Frag = score_motivic_fragmentation(K545Pitches),
+    printf("  K545 motivic fragmentation violations: %d%n", K545Frag),
+    assert_violation_count_below("motivic_fragmentation", K545Frag, 0, mozart_k545_theme),
+
+    K331Pitches = get_melody(k331_theme()),
+    K331Frag = score_motivic_fragmentation(K331Pitches),
+    printf("  K331 motivic fragmentation violations: %d%n", K331Frag),
+    assert_violation_count_below("motivic_fragmentation", K331Frag, 0, mozart_k331_theme),
+
+    OdeFrag = score_motivic_fragmentation(OdePitches),
+    printf("  Ode to Joy motivic fragmentation violations: %d%n", OdeFrag),
+    assert_violation_count_below("motivic_fragmentation", OdeFrag, 0, ode_to_joy),
+
+    % Bach Invention 1 - should have motivic continuity
+    Inv1Pitches = get_melody(invention1_bars1_4()),
+    Inv1Frag = score_motivic_fragmentation(Inv1Pitches),
+    printf("  Invention 1 motivic fragmentation violations: %d%n", Inv1Frag),
+    assert_violation_count_below("motivic_fragmentation", Inv1Frag, 1, invention1_bars1_4),
+
+    println("  Phase 3 structural constraints: OK").
+
+% ==============================================================================
 % MAIN ENTRY POINT
 % ==============================================================================
 
@@ -785,6 +874,7 @@ main =>
     (test_beethoven_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_soft_constraint_baselines() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_phase2_structural_constraints() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_phase3_structural_constraints() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_masterpiece_integration() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
 
     println(""),

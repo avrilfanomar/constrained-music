@@ -1234,7 +1234,8 @@ apply_rhythm_soft_constraints(Durations, Genre) = TotalCost =>
         (opening_note_duration, 65),
         (rhythmic_acceleration, 55),
         (strong_phrase_start, 70),
-        (rhythmic_cadence, 60)
+        (rhythmic_cadence, 60),
+        (no_short_note_isolation, 55)
     ],
 
     % Apply weights based on genre (classical gets full weight, others reduced)

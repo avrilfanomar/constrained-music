@@ -252,6 +252,28 @@ Genre-specific weights:
 - Jazz, contemporary: Low weights (20-40) for bebop lines and modern idioms
 - Sacred chant, children's songs: High weights (60-90) for simple, singable melodies
 
+### Refinement Constraints
+
+1. **`register_consistency`**: Penalizes consecutive intervals > 12 semitones (octave). Large register jumps break melodic coherence. Applied to classical_period(55), baroque(45), folk(60), sacred_chant(70), children_songs(70), minimalist(65).
+
+2. **`no_short_note_isolation`**: Rhythmic constraint that penalizes isolated short notes (≤2 ticks) surrounded by longer notes (≥4 ticks). Prevents choppy mid-phrase articulations. Simplified alternative to true rest placement.
+
+3. **`motivic_fragmentation`**: Checks if interval patterns from the first quarter of the melody appear in the second half (sentence-style fragmentation). Returns 0 violations if ANY first-quarter interval is reused, 1 otherwise. Complements `rhythmic_acceleration` and `motivic_repetition`.
+
+### Style Packages
+
+Three Classical sub-style genre profiles:
+
+- **`galant`**: Early Classical. Very high stepwise (90), high consonant leaps (85), max_interval=4, max_range=12. Light, decorative melodies.
+- **`high_classical`**: Mature Mozart/Haydn. Maximum structural constraints — antecedent_consequent(75), phrase_rhyme(75), phrase_arch_contour(75), motivic_fragmentation(60). max_interval=5.
+- **`sturm_und_drang`**: Dramatic passages. Reduced stepwise (55), lower register_consistency (40), no `no_augmented_seconds` hard constraint. max_interval=7. Wider intervals and more expressive freedom.
+
+```bash
+./scripts/run_picat.sh picat/companion.pi demo genre=galant
+./scripts/run_picat.sh picat/companion.pi demo genre=high_classical
+./scripts/run_picat.sh picat/companion.pi demo genre=sturm_und_drang
+```
+
 ### File Organization
 
 The piece files (`pieces_bach.pi`, `pieces_mozart.pi`, etc.) are in `picat/` and imported directly.

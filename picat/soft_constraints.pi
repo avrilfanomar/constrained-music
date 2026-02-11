@@ -163,6 +163,15 @@ apply_soft(motivic_repetition, Notes, _Root, Weight, Cost) =>
     reify_motivic_repetition(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+apply_soft(motivic_fragmentation, Notes, _Root, Weight, Cost) =>
+    reify_motivic_fragmentation(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Register Constraints
+apply_soft(register_consistency, Notes, _Root, Weight, Cost) =>
+    reify_register_consistency(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown constraint returns 0 cost (no penalty)
 apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
     Cost #= 0.
@@ -938,6 +947,10 @@ apply_soft_rhythm(rhythmic_cadence, Durations, Weight, Cost) =>
     reify_rhythmic_cadence(Durations, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+apply_soft_rhythm(no_short_note_isolation, Durations, Weight, Cost) =>
+    reify_no_short_note_isolation(Durations, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown rhythm constraint returns 0 cost
 apply_soft_rhythm(_UnknownId, _Durations, _Weight, Cost) =>
     Cost #= 0.
@@ -1001,12 +1014,33 @@ reify_rhythmic_cadence(Durations, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% No short note isolation: penalize isolated short notes (2 ticks)
+% surrounded by longer notes (>= 4 ticks), preventing choppy mid-phrase articulations
+reify_no_short_note_isolation(Durations, ViolationCount) =>
+    Len = length(Durations),
+    if Len >= 3 then
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 2..Len-1)
+            % Violation: this note is short (<=2) AND both neighbors are long (>=4)
+            Violations[I-1] #<=> (
+                (Durations[I] #=< 2) #/\
+                (Durations[I-1] #>= 4) #/\
+                (Durations[I+1] #>= 4)
+            )
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
 % List of supported rhythmic constraints
 supported_rhythm_constraints() = [
     opening_note_duration,
     rhythmic_acceleration,
     strong_phrase_start,
-    rhythmic_cadence
+    rhythmic_cadence,
+    no_short_note_isolation
 ].
 
 % ==============================================================================
@@ -1304,6 +1338,63 @@ reify_motivic_repetition(Notes, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% Motivic fragmentation: checks if interval patterns from first quarter
+% appear in the second half (sentence-style fragmentation)
+% Returns 0 if ANY first-quarter interval is reused in second half, 1 otherwise
+reify_motivic_fragmentation(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 8 then
+        % Extract intervals
+        NumIntervals = Len - 1,
+        Intervals = new_list(NumIntervals),
+        Intervals :: -24..24,
+        foreach(I in 1..NumIntervals)
+            Intervals[I] #= Notes[I+1] - Notes[I]
+        end,
+
+        % First quarter interval count
+        QuarterLen = Len // 4,
+        % Second half starts at
+        SecondHalfStart = Len // 2 + 1,
+        SecondHalfIntervals = NumIntervals - SecondHalfStart + 1,
+
+        % Check if any first-quarter interval appears in second half
+        MatchFlags = new_list(QuarterLen - 1),
+        MatchFlags :: 0..1,
+        foreach(I in 1..QuarterLen-1)
+            % Check if Intervals[I] appears anywhere in second half intervals
+            SecondHalfMatches = new_list(SecondHalfIntervals),
+            SecondHalfMatches :: 0..1,
+            foreach(J in SecondHalfStart..NumIntervals)
+                SecondHalfMatches[J - SecondHalfStart + 1] #<=> (Intervals[J] #= Intervals[I])
+            end,
+            MatchCount #= sum(SecondHalfMatches),
+            MatchFlags[I] #<=> (MatchCount #>= 1)
+        end,
+        TotalMatches #= sum(MatchFlags),
+        NoFragmentation :: 0..1,
+        NoFragmentation #<=> (TotalMatches #= 0),
+        ViolationCount #= NoFragmentation
+    else
+        ViolationCount = 0
+    end.
+
+% Register consistency: penalizes consecutive intervals > 12 semitones (octave)
+% Large register jumps break melodic coherence
+reify_register_consistency(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            Interval = $abs(Notes[I+1] - Notes[I]),
+            Violations[I] #<=> (Interval #> 12)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
 % ==============================================================================
 % UTILITY FUNCTIONS
 % ==============================================================================
@@ -1344,7 +1435,9 @@ supported_soft_constraints() = [
     octave_leap_recovery,
     no_melodic_parallel_fifths,
     motivic_repetition,
-    antecedent_consequent
+    motivic_fragmentation,
+    antecedent_consequent,
+    register_consistency
 ].
 
 % Check if a constraint ID is supported for soft application

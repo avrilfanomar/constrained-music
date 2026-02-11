@@ -48,6 +48,8 @@ genre_profile(
         (leave_climax_contrary, 55),
         (salient_climax, 55),
         (motivic_repetition, 55),
+        (register_consistency, 55),
+        (motivic_fragmentation, 50),
         (single_climax, 50),
         (registral_return, 50)
     ],
@@ -70,6 +72,8 @@ genre_profile(
         (no_consecutive_same_direction_leaps, 65),
         (prefer_smaller_intervals, 55),
         (peak_approach_exit, 55),
+        (motivic_fragmentation, 45),
+        (register_consistency, 45),
         (no_repetitive_intervals, 40)
     ],
     [max_interval=6, tempo_range=(60,120)]
@@ -129,6 +133,7 @@ genre_profile(
         (prefer_smaller_intervals, 70),
         (large_leap_recovery, 70),
         (peak_approach_exit, 65),
+        (register_consistency, 60),
         (antecedent_consequent, 55),
         (arch_contour, 55),
         (no_repetitive_intervals, 50),
@@ -169,6 +174,7 @@ genre_profile(
         (no_leading_tone_emphasis, 80),
         (prefer_smaller_intervals, 80),
         (no_consecutive_same_direction_leaps, 75),
+        (register_consistency, 70),
         (phrase_ends_stable, 70),
         (peak_approach_exit, 60),
         (no_repetitive_intervals, 35)
@@ -189,6 +195,7 @@ genre_profile(
         (large_leap_recovery, 80),
         (leap_recovery, 75),
         (prefer_smaller_intervals, 75),
+        (register_consistency, 70),
         (peak_approach_exit, 65),
         (arch_contour, 60),
         (tonic_anchoring, 55),
@@ -208,6 +215,7 @@ genre_profile(
         (prefer_smaller_intervals, 75),
         (consonant_leaps_only, 75),
         (large_leap_recovery, 70),
+        (register_consistency, 65),
         (peak_approach_exit, 40),
         (no_immediate_repeat, 30),
         (no_repetitive_intervals, 25)   % low weight - repetition is the style!
@@ -254,6 +262,109 @@ genre_profile(
 ).
 
 % ==============================================================================
+% CLASSICAL STYLE PACKAGES
+% ==============================================================================
+
+% GALANT (Early Classical)
+% Light, decorative, very high stepwise motion, simple consonant leaps
+genre_profile(
+    galant,
+    classical,
+    [no_augmented_seconds, no_tritone_outline, max_consecutive_repeats, max_range],
+    [
+        (mostly_stepwise, 90),
+        (consonant_leaps_only, 85),
+        (leading_tone_resolution, 80),
+        (prefer_smaller_intervals, 80),
+        (phrase_ends_stable, 75),
+        (leap_recovery, 75),
+        (register_consistency, 70),
+        (large_leap_recovery, 70),
+        (peak_approach_exit, 65),
+        (chord_tone_on_strong_beats, 65),
+        (cadential_descent, 60),
+        (opening_gesture, 60),
+        (balanced_motion, 55),
+        (no_repetitive_intervals, 55),
+        (motivic_repetition, 50),
+        (registral_return, 50)
+    ],
+    [max_interval=4, tempo_range=(80,130), max_range=12]
+).
+
+% HIGH CLASSICAL (Mature Mozart/Haydn)
+% Maximum structural constraints, balanced phrases, clear form
+genre_profile(
+    high_classical,
+    classical,
+    [no_augmented_seconds, no_tritone_outline, max_consecutive_repeats],
+    [
+        (no_parallel_fifths_single, 90),
+        (consonant_leaps_only, 85),
+        (leading_tone_resolution, 85),
+        (octave_leap_recovery, 80),
+        (leap_recovery, 80),
+        (phrase_ends_stable, 80),
+        (authentic_cadence_melody, 75),
+        (antecedent_consequent, 75),
+        (phrase_rhyme, 75),
+        (phrase_arch_contour, 75),
+        (large_leap_recovery, 75),
+        (mostly_stepwise, 75),
+        (chord_tone_on_strong_beats, 70),
+        (cadential_descent, 70),
+        (peak_approach_exit, 70),
+        (max_octave_leaps, 70),
+        (half_cadence_melody, 65),
+        (no_melodic_parallel_fifths, 65),
+        (balanced_motion, 65),
+        (no_repetitive_intervals, 65),
+        (opening_gesture, 65),
+        (prefer_smaller_intervals, 60),
+        (motivic_fragmentation, 60),
+        (approach_climax_by_step, 60),
+        (register_consistency, 55),
+        (leave_climax_contrary, 55),
+        (salient_climax, 55),
+        (motivic_repetition, 55),
+        (single_climax, 50),
+        (registral_return, 50)
+    ],
+    [max_interval=5, tempo_range=(80,140)]
+).
+
+% STURM UND DRANG (Dramatic passages)
+% Wider intervals, minor mode, reduced stepwise requirements, more expressive
+genre_profile(
+    sturm_und_drang,
+    classical,
+    [no_tritone_outline, max_consecutive_repeats],
+    [
+        (leading_tone_resolution, 85),
+        (consonant_leaps_only, 75),
+        (phrase_ends_stable, 75),
+        (no_parallel_fifths_single, 70),
+        (leap_recovery, 65),
+        (large_leap_recovery, 60),
+        (cadential_descent, 60),
+        (mostly_stepwise, 55),
+        (peak_approach_exit, 55),
+        (antecedent_consequent, 55),
+        (min_unique_pitches, 55),
+        (phrase_arch_contour, 50),
+        (no_repetitive_intervals, 50),
+        (no_melodic_parallel_fifths, 50),
+        (chord_tone_on_strong_beats, 50),
+        (prefer_smaller_intervals, 45),
+        (register_consistency, 40),
+        (motivic_repetition, 40),
+        (single_climax, 35),
+        (registral_return, 35)
+    ],
+    [max_interval=7, tempo_range=(70,160)]
+).
+
+% ==============================================================================
 % GENRE QUERY FUNCTIONS
 % ==============================================================================
 
@@ -261,7 +372,7 @@ genre_profile(
 all_genres() = [
     classical_period, baroque, romantic, traditional_jazz,
     folk_traditional, contemporary, sacred_chant, children_songs,
-    minimalist, modal, blues
+    minimalist, modal, blues, galant, high_classical, sturm_und_drang
 ].
 
 % Get genre profile by ID
@@ -341,6 +452,12 @@ genre_description(modal) =
     "Modal/Impressionist (Debussy): Parallel motion, color over function".
 genre_description(blues) =
     "Blues: Blue notes, call-response, expressive bends".
+genre_description(galant) =
+    "Galant (Early Classical): Light, decorative, high stepwise motion".
+genre_description(high_classical) =
+    "High Classical (Mozart/Haydn mature): Maximum structural constraints, balanced phrases".
+genre_description(sturm_und_drang) =
+    "Sturm und Drang: Dramatic, wider intervals, expressive intensity".
 genre_description(_) = "Unknown genre".
 
 % Print all genre summaries

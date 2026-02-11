@@ -25,6 +25,7 @@ main =>
     (test_genre_descriptions() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_intensity_modifiers() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_genre_param_values() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_style_packages() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
 
     println(""),
     println("=== Test Summary ==="),
@@ -45,7 +46,7 @@ test_all_genres_exist =>
     println("Testing all genres exist..."),
 
     Genres = genre_profiles.all_genres(),
-    assert_true(length(Genres) >= 11, "at least 11 genres defined"),
+    assert_true(length(Genres) >= 14, "at least 14 genres defined"),
 
     % Test each genre exists
     foreach(GenreId in Genres)
@@ -350,6 +351,100 @@ test_genre_param_values =>
     assert_true(ContemporaryInt >= 8, "contemporary max_interval >= 8"),
 
     println("  Genre param values: OK").
+
+% ==============================================================================
+% STYLE PACKAGES TESTS
+% ==============================================================================
+
+test_style_packages =>
+    println("Testing style packages..."),
+
+    % Galant exists and has correct base style
+    (genre_profiles.genre_exists(galant) -> true ; println("FAIL: galant missing"), fail),
+    GalantStyle = genre_profiles.base_style(galant),
+    assert_eq(GalantStyle, classical, "galant base style is classical"),
+
+    % Galant has smaller max_interval than classical_period
+    GalantInt = genre_profiles.max_interval(galant),
+    assert_eq(GalantInt, 4, "galant max_interval = 4"),
+
+    % Galant has mostly_stepwise with high weight
+    GalantSoft = genre_profiles.soft_constraints(galant),
+    (find_weight(mostly_stepwise, GalantSoft, GalantStepW) ->
+        assert_true(GalantStepW >= 85, "galant mostly_stepwise weight >= 85")
+    ;
+        println("FAIL: galant missing mostly_stepwise"), fail
+    ),
+
+    % Galant has max_range hard constraint
+    GalantHard = genre_profiles.hard_constraints(galant),
+    assert_member(max_range, GalantHard, "galant has max_range hard constraint"),
+
+    % High Classical exists and has correct base style
+    (genre_profiles.genre_exists(high_classical) -> true ; println("FAIL: high_classical missing"), fail),
+    HighClassStyle = genre_profiles.base_style(high_classical),
+    assert_eq(HighClassStyle, classical, "high_classical base style is classical"),
+
+    % High Classical has maximum structural constraints
+    HighClassSoft = genre_profiles.soft_constraints(high_classical),
+    (find_weight(antecedent_consequent, HighClassSoft, HCAC) ->
+        assert_true(HCAC >= 70, "high_classical antecedent_consequent >= 70")
+    ;
+        println("FAIL: high_classical missing antecedent_consequent"), fail
+    ),
+    (find_weight(phrase_rhyme, HighClassSoft, HCPR) ->
+        assert_true(HCPR >= 70, "high_classical phrase_rhyme >= 70")
+    ;
+        println("FAIL: high_classical missing phrase_rhyme"), fail
+    ),
+    (find_weight(phrase_arch_contour, HighClassSoft, HCPA) ->
+        assert_true(HCPA >= 70, "high_classical phrase_arch_contour >= 70")
+    ;
+        println("FAIL: high_classical missing phrase_arch_contour"), fail
+    ),
+
+    % High Classical max_interval = 5
+    HighClassInt = genre_profiles.max_interval(high_classical),
+    assert_eq(HighClassInt, 5, "high_classical max_interval = 5"),
+
+    % Sturm und Drang exists and has correct base style
+    (genre_profiles.genre_exists(sturm_und_drang) -> true ; println("FAIL: sturm_und_drang missing"), fail),
+    SUDStyle = genre_profiles.base_style(sturm_und_drang),
+    assert_eq(SUDStyle, classical, "sturm_und_drang base style is classical"),
+
+    % Sturm und Drang has wider max_interval
+    SUDInt = genre_profiles.max_interval(sturm_und_drang),
+    assert_eq(SUDInt, 7, "sturm_und_drang max_interval = 7"),
+
+    % Sturm und Drang does NOT have no_augmented_seconds hard constraint
+    SUDHard = genre_profiles.hard_constraints(sturm_und_drang),
+    (not member_check(no_augmented_seconds, SUDHard) -> true
+    ; println("FAIL: sturm_und_drang should not have no_augmented_seconds"), fail),
+
+    % Sturm und Drang has lower mostly_stepwise weight
+    SUDSoft = genre_profiles.soft_constraints(sturm_und_drang),
+    (find_weight(mostly_stepwise, SUDSoft, SUDStepW) ->
+        assert_true(SUDStepW =< 60, "sturm_und_drang mostly_stepwise <= 60")
+    ;
+        println("FAIL: sturm_und_drang missing mostly_stepwise"), fail
+    ),
+
+    % Sturm und Drang has lower register_consistency weight
+    (find_weight(register_consistency, SUDSoft, SUDRC) ->
+        assert_true(SUDRC =< 45, "sturm_und_drang register_consistency <= 45")
+    ;
+        println("FAIL: sturm_und_drang missing register_consistency"), fail
+    ),
+
+    % All new genres have descriptions
+    GalantDesc = genre_profiles.genre_description(galant),
+    assert_true(length(GalantDesc) > 10, "galant has description"),
+    HighClassDesc = genre_profiles.genre_description(high_classical),
+    assert_true(length(HighClassDesc) > 10, "high_classical has description"),
+    SUDDesc = genre_profiles.genre_description(sturm_und_drang),
+    assert_true(length(SUDDesc) > 10, "sturm_und_drang has description"),
+
+    println("  Style packages: OK").
 
 % ==============================================================================
 % ASSERTION HELPERS
