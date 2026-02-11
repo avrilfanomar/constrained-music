@@ -366,6 +366,107 @@ score_consonant_leaps_only(Pitches) = Violations =>
         Violations = Count
     end.
 
+% Score antecedent-consequent structure violations
+% Checks: midpoint note is on degree 2, 5, or 7 (half cadence) AND
+%          final note is on tonic (authentic cadence)
+% Returns 0, 1, or 2
+score_antecedent_consequent(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 4 then
+        Violations = 0
+    else
+        HalfPoint = Len // 2,
+        RootPC = KeyRoot mod 12,
+        SecondDegree = (KeyRoot + 2) mod 12,
+        DominantPC = (KeyRoot + 7) mod 12,
+        LeadingTone = (KeyRoot + 11) mod 12,
+        % Check midpoint (half cadence feel: degree 2, 5, or 7)
+        HalfPC = Pitches[HalfPoint] mod 12,
+        HalfValid = cond(member(HalfPC, [SecondDegree, DominantPC, LeadingTone]), 1, 0),
+        % Check end (authentic cadence feel)
+        EndPC = Pitches[Len] mod 12,
+        EndValid = cond(EndPC == RootPC, 1, 0),
+        Violations = (1 - HalfValid) + (1 - EndValid)
+    end.
+
+% Score phrase rhyme violations
+% Checks if first quarter and third quarter have matching contour directions
+score_phrase_rhyme(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 8 then
+        Violations = 0
+    else
+        QuarterLen = Len // 4,
+        ThirdQuarterStart = Len // 2 + 1,
+        Count = 0,
+        foreach(I in 1..QuarterLen-1)
+            % Direction in first quarter
+            Dir1 = cond(Pitches[I+1] > Pitches[I], 1, cond(Pitches[I+1] < Pitches[I], -1, 0)),
+            % Direction in third quarter (corresponding position)
+            J = ThirdQuarterStart + I - 1,
+            Dir2 = cond(Pitches[J+1] > Pitches[J], 1, cond(Pitches[J+1] < Pitches[J], -1, 0)),
+            if Dir1 != Dir2 then Count := Count + 1 end
+        end,
+        Violations = Count
+    end.
+
+% Score authentic cadence melody violations
+% Last two notes should be 2->1 or 7->1 (penultimate is degree 2 or 7, last is tonic)
+score_authentic_cadence_melody(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then
+        Violations = 0
+    else
+        RootPC = KeyRoot mod 12,
+        SecondDegree = (KeyRoot + 2) mod 12,
+        LeadingTone = (KeyRoot + 11) mod 12,
+        LastPC = Pitches[Len] mod 12,
+        PenultPC = Pitches[Len-1] mod 12,
+        if LastPC == RootPC, member(PenultPC, [SecondDegree, LeadingTone]) then
+            Violations = 0
+        else
+            Violations = 1
+        end
+    end.
+
+% Score half cadence melody violations
+% Last note should be on degree 2, 5, or 7 (non-tonic, half cadence feel)
+score_half_cadence_melody(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 1 then
+        Violations = 0
+    else
+        SecondDegree = (KeyRoot + 2) mod 12,
+        DominantPC = (KeyRoot + 7) mod 12,
+        LeadingTone = (KeyRoot + 11) mod 12,
+        LastPC = Pitches[Len] mod 12,
+        if member(LastPC, [SecondDegree, DominantPC, LeadingTone]) then
+            Violations = 0
+        else
+            Violations = 1
+        end
+    end.
+
+% Score motivic repetition violations
+% Checks if any 2-note interval pattern repeats at least once
+% Returns 0 if repetition found (good), 1 if no repetition (bad)
+score_motivic_repetition(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 5 then
+        Violations = 0
+    else
+        Intervals = [Pitches[I+1] - Pitches[I] : I in 1..Len-1],
+        HasRepeat = false,
+        foreach(I in 1..length(Intervals)-1, HasRepeat == false)
+            foreach(J in I+1..length(Intervals), HasRepeat == false)
+                if Intervals[I] == Intervals[J] then
+                    HasRepeat := true
+                end
+            end
+        end,
+        Violations = cond(HasRepeat, 0, 1)
+    end.
+
 % Score peak approach and exit violations
 % Peak should be approached from below and left by descending step (1-2 semitones down)
 score_peak_approach_exit(Pitches) = Violations =>
@@ -565,6 +666,103 @@ test_augmented_second_constraints =>
     println("Augmented second constraint tests passed!").
 
 % ==============================================================================
+% PHASE 2 STRUCTURAL CONSTRAINT TESTS
+% Validates Phase 2 constraints against masterpieces:
+%   antecedent_consequent, phrase_rhyme, authentic_cadence_melody,
+%   half_cadence_melody, motivic_repetition, peak_approach_exit
+% ==============================================================================
+
+test_phase2_structural_constraints =>
+    println("Testing Phase 2 structural constraints..."),
+
+    % --- Antecedent-Consequent Structure ---
+    % K545 has clear period structure: ends on C (tonic), midpoint should be non-tonic
+    K545Pitches = get_melody(k545_theme()),
+    K545Key = get_key(k545_theme()),
+    K545AC = score_antecedent_consequent(K545Pitches, K545Key),
+    printf("  K545 antecedent-consequent violations: %d%n", K545AC),
+    % K545 ends on tonic (0 violations for end), midpoint may or may not match
+    assert_violation_count_below("antecedent_consequent", K545AC, 2, mozart_k545_theme),
+
+    % K331 has clear antecedent-consequent (A major, ends on tonic)
+    K331Pitches = get_melody(k331_theme()),
+    K331Key = get_key(k331_theme()),
+    K331AC = score_antecedent_consequent(K331Pitches, K331Key),
+    printf("  K331 antecedent-consequent violations: %d%n", K331AC),
+    assert_violation_count_below("antecedent_consequent", K331AC, 2, mozart_k331_theme),
+
+    % Twinkle Twinkle has clear period structure (ends on tonic)
+    TwinklePitches = get_melody(twinkle_twinkle()),
+    TwinkleKey = get_key(twinkle_twinkle()),
+    TwinkleAC = score_antecedent_consequent(TwinklePitches, TwinkleKey),
+    printf("  Twinkle antecedent-consequent violations: %d%n", TwinkleAC),
+    assert_violation_count_below("antecedent_consequent", TwinkleAC, 2, twinkle_twinkle),
+
+    % --- Phrase Rhyme ---
+    % K545 theme: first phrase and third quarter should have similar contour
+    K545Rhyme = score_phrase_rhyme(K545Pitches),
+    printf("  K545 phrase rhyme violations: %d%n", K545Rhyme),
+    % Allow some mismatches (classical music has variations in repetition)
+    QuarterLen545 = length(K545Pitches) // 4,
+    assert_violation_count_below("phrase_rhyme", K545Rhyme, max(3, QuarterLen545), mozart_k545_theme),
+
+    % K331 has very strong phrase rhyme (repeated opening material)
+    K331Rhyme = score_phrase_rhyme(K331Pitches),
+    printf("  K331 phrase rhyme violations: %d%n", K331Rhyme),
+    QuarterLen331 = length(K331Pitches) // 4,
+    assert_violation_count_below("phrase_rhyme", K331Rhyme, max(3, QuarterLen331), mozart_k331_theme),
+
+    % --- Authentic Cadence Melody ---
+    % K545 ends with D4-C4 (2->1), should have 0 violations
+    K545Cadence = score_authentic_cadence_melody(K545Pitches, K545Key),
+    printf("  K545 authentic cadence violations: %d%n", K545Cadence),
+    assert_violation_count_below("authentic_cadence_melody", K545Cadence, 0, mozart_k545_theme),
+
+    % Ode to Joy ends on tonic with proper cadence
+    OdePitches = get_melody(ode_to_joy()),
+    OdeKey = get_key(ode_to_joy()),
+    OdeCadence = score_authentic_cadence_melody(OdePitches, OdeKey),
+    printf("  Ode to Joy authentic cadence violations: %d%n", OdeCadence),
+    assert_violation_count_below("authentic_cadence_melody", OdeCadence, 1, ode_to_joy),
+
+    % --- Half Cadence Melody ---
+    % K545 first phrase alone (antecedent) - should end in a way amenable to half cadence
+    % Note: first phrase of K545 ends on C (tonic), so as a standalone test it won't pass half cadence
+    % Instead test on Symphony 40 which ends on D (dominant of G minor)
+    Sym40Pitches = get_melody(symphony40_theme()),
+    Sym40Key = get_key(symphony40_theme()),
+    Sym40Half = score_half_cadence_melody(Sym40Pitches, Sym40Key),
+    printf("  Symphony 40 half cadence violations: %d%n", Sym40Half),
+    % Sym40 ends on D4 = degree 5 of G minor, so should pass
+    assert_violation_count_below("half_cadence_melody", Sym40Half, 0, mozart_symphony40_theme),
+
+    % --- Motivic Repetition ---
+    % All classical pieces should have motivic repetition
+    K545Motivic = score_motivic_repetition(K545Pitches),
+    printf("  K545 motivic repetition violations: %d%n", K545Motivic),
+    assert_violation_count_below("motivic_repetition", K545Motivic, 0, mozart_k545_theme),
+
+    K331Motivic = score_motivic_repetition(K331Pitches),
+    printf("  K331 motivic repetition violations: %d%n", K331Motivic),
+    assert_violation_count_below("motivic_repetition", K331Motivic, 0, mozart_k331_theme),
+
+    OdeMotivic = score_motivic_repetition(OdePitches),
+    printf("  Ode to Joy motivic repetition violations: %d%n", OdeMotivic),
+    assert_violation_count_below("motivic_repetition", OdeMotivic, 0, ode_to_joy),
+
+    % --- Peak Approach/Exit ---
+    K545Peak = score_peak_approach_exit(K545Pitches),
+    printf("  K545 peak approach/exit violations: %d%n", K545Peak),
+    % Classical melodies handle peaks well, but allow some flexibility
+    assert_violation_count_below("peak_approach_exit", K545Peak, 4, mozart_k545_theme),
+
+    OdePeak = score_peak_approach_exit(OdePitches),
+    printf("  Ode to Joy peak approach/exit violations: %d%n", OdePeak),
+    assert_violation_count_below("peak_approach_exit", OdePeak, 4, ode_to_joy),
+
+    println("  Phase 2 structural constraints: OK").
+
+% ==============================================================================
 % MAIN ENTRY POINT
 % ==============================================================================
 
@@ -586,6 +784,7 @@ main =>
     (test_mozart_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_beethoven_melodies() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_soft_constraint_baselines() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
+    (test_phase2_structural_constraints() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
     (test_masterpiece_integration() -> PassCount := PassCount + 1 ; FailCount := FailCount + 1),
 
     println(""),

@@ -163,6 +163,7 @@ The **constraint validation test suite** (`test_constraint_validation.pi`) valid
 - Tests Bach, Mozart, and Beethoven melodies for period-appropriate constraints
 - Reports soft constraint violation baselines for comparison with generated music
 - Tests the context-aware augmented second constraint
+- Tests structural constraints (antecedent-consequent, phrase rhyme, cadences, motivic repetition, peak approach/exit) against masterpieces
 
 ### Augmented Second Constraints
 

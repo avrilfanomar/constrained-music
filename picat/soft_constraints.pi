@@ -145,6 +145,10 @@ apply_soft(phrase_rhyme, Notes, _Root, Weight, Cost) =>
     reify_phrase_rhyme(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+apply_soft(antecedent_consequent, Notes, Root, Weight, Cost) =>
+    reify_antecedent_consequent(Notes, Root, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Interval Constraints
 apply_soft(octave_leap_recovery, Notes, _Root, Weight, Cost) =>
     reify_octave_leap_recovery(Notes, ViolationCount),
@@ -1170,6 +1174,41 @@ reify_phrase_rhyme(Notes, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% Antecedent-consequent period structure:
+% Midpoint (half phrase) ends on non-tonic (half cadence feel: degree 2, 5, or 7)
+% Full phrase ends on tonic (authentic cadence feel)
+reify_antecedent_consequent(Notes, RootPitch, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 4 then
+        HalfPoint = Len // 2,
+        RootPC = RootPitch mod 12,
+        SecondDegree = (RootPitch + 2) mod 12,
+        DominantPC = (RootPitch + 7) mod 12,
+        LeadingTone = (RootPitch + 11) mod 12,
+
+        % Midpoint pitch class (half cadence: ends on 2, 5, or 7)
+        HalfPC :: 0..11,
+        Q1 :: 0..10,
+        Notes[HalfPoint] #= 12 * Q1 + HalfPC,
+        ValidHalf :: 0..1,
+        ValidHalf #<=> (
+            (HalfPC #= SecondDegree) #\/
+            (HalfPC #= DominantPC) #\/
+            (HalfPC #= LeadingTone)
+        ),
+
+        % End pitch class (authentic cadence: ends on tonic)
+        EndPC :: 0..11,
+        Q2 :: 0..10,
+        Notes[Len] #= 12 * Q2 + EndPC,
+        ValidEnd :: 0..1,
+        ValidEnd #<=> (EndPC #= RootPC),
+
+        ViolationCount #= (1 - ValidHalf) + (1 - ValidEnd)
+    else
+        ViolationCount = 0
+    end.
+
 % ==============================================================================
 % INTERVAL REFINEMENT CONSTRAINTS
 % ==============================================================================
@@ -1304,7 +1343,8 @@ supported_soft_constraints() = [
     phrase_rhyme,
     octave_leap_recovery,
     no_melodic_parallel_fifths,
-    motivic_repetition
+    motivic_repetition,
+    antecedent_consequent
 ].
 
 % Check if a constraint ID is supported for soft application

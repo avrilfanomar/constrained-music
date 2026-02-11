@@ -41,6 +41,7 @@ genre_profile(
         (balanced_motion, 65),
         (no_repetitive_intervals, 65),
         (phrase_rhyme, 60),
+        (antecedent_consequent, 60),
         (opening_gesture, 60),
         (prefer_smaller_intervals, 60),
         (approach_climax_by_step, 60),
@@ -128,6 +129,7 @@ genre_profile(
         (prefer_smaller_intervals, 70),
         (large_leap_recovery, 70),
         (peak_approach_exit, 65),
+        (antecedent_consequent, 55),
         (arch_contour, 55),
         (no_repetitive_intervals, 50),
         (tonic_anchoring, 50)
