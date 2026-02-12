@@ -19,6 +19,7 @@ import soft_constraints.
 import genre_profiles.
 import diagnostics.
 import interval_profiles.
+import motif.
 
 % ==============================================================================
 % MAIN MELODY GENERATION
@@ -1169,6 +1170,90 @@ generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Prefere
     % Solve
     solve_genre_melody(Pitches, TotalCost, Randomness),
 
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% ==============================================================================
+% MOTIF-AWARE GENRE GENERATION
+% ==============================================================================
+
+% Generate segment with genre AND motif reference constraint
+% MotifIntervals: list of signed intervals from opening motif (or [] for first segment)
+% MotifWeight: weight for motif constraint (typically 40-60)
+generate_segment_melody_with_motif(MusicParams, KeyRoot, NumBars, Genre, Preferences, MotifIntervals, MotifWeight, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    Tempo = get_tempo(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+    GenreMaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+    ProfileMaxInterval = interval_profiles.get_max_interval(Genre, Tempo),
+    MaxInterval = min(GenreMaxInterval, ProfileMaxInterval),
+    Context = intervals.make_context_with_tempo(Genre, Tempo),
+
+    apply_base_melodic_constraints_ctx(Pitches, KeyRoot, MaxInterval, ScaleNotes, Context),
+    apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
+    PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+
+    % Apply motif constraint if motif is provided
+    if MotifIntervals != [], not constraint_selector.skip_soft_optimization(Randomness) then
+        motif.apply_contour_constraint(Pitches, MotifIntervals, MotifWeight, MotifCost),
+        TotalCost #= PitchCost + MotifCost
+    else
+        TotalCost = PitchCost
+    end,
+
+    solve_genre_melody(Pitches, TotalCost, Randomness),
+    Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% Connected segment with motif
+generate_connected_segment_with_motif(MusicParams, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, MotifIntervals, MotifWeight, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
+    PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+
+    % Connection constraint
+    ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
+    if ValidConnectionNotes != [] then
+        Pitches[1] :: ValidConnectionNotes
+    end,
+
+    % Motif constraint
+    if MotifIntervals != [], not constraint_selector.skip_soft_optimization(Randomness) then
+        motif.apply_contour_constraint(Pitches, MotifIntervals, MotifWeight, MotifCost),
+        TotalCost #= PitchCost + MotifCost
+    else
+        TotalCost = PitchCost
+    end,
+
+    solve_genre_melody(Pitches, TotalCost, Randomness),
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
 % ==============================================================================

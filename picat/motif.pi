@@ -1,0 +1,137 @@
+% motif.pi - Motif extraction, storage, and constraint application
+%
+% Extracts opening motifs from melodies and constrains later segments
+% to reference them, providing cross-segment coherence.
+
+module motif.
+
+import music_types.
+import cp.
+
+% ==============================================================================
+% MOTIF EXTRACTION
+% ==============================================================================
+
+% Extract the opening motif as an interval pattern from a melody
+% Returns a list of signed intervals (e.g., [2, -1, 3, -2] for a 5-note motif)
+% MotifLen: number of intervals (notes - 1)
+extract_motif(Melody, MotifLen) = Intervals =>
+    Pitches = [P : $note($pitch(midi, P, _), _, _, _, _) in Melody],
+    Len = length(Pitches),
+    ActualLen = min(MotifLen, Len - 1),
+    if ActualLen >= 2 then
+        Intervals = [Pitches[I+1] - Pitches[I] : I in 1..ActualLen]
+    else
+        Intervals = []
+    end.
+
+% Default motif length: 4 intervals (5 notes)
+default_motif_length() = 4.
+
+% ==============================================================================
+% MOTIF CONSTRAINT APPLICATION (CP)
+% ==============================================================================
+
+% Apply motif reference constraint as a soft constraint on CP pitch variables
+% Pitches: CP variables (not yet solved)
+% MotifIntervals: ground list of signed intervals from first segment
+% Weight: soft constraint weight
+% Returns Cost CP variable
+%
+% Strategy: Check every possible starting position in the melody for a
+% transposed occurrence of the motif. Reward (cost=0) if found at least once.
+% Cost = Weight if motif not found anywhere.
+apply_motif_constraint(Pitches, MotifIntervals, Weight, Cost) =>
+    Len = length(Pitches),
+    MotifLen = length(MotifIntervals),
+    if MotifLen < 2 ; Len < MotifLen + 1 then
+        Cost #= 0
+    else
+        NumPositions = Len - MotifLen,
+        % For each starting position, check if the motif interval pattern matches
+        MatchFlags = new_list(NumPositions),
+        MatchFlags :: 0..1,
+        foreach(StartPos in 1..NumPositions)
+            % Check if intervals starting at StartPos match the motif
+            IntervalMatches = new_list(MotifLen),
+            IntervalMatches :: 0..1,
+            foreach(J in 1..MotifLen)
+                ActualInterval :: -24..24,
+                ActualInterval #= Pitches[StartPos + J] - Pitches[StartPos + J - 1],
+                IntervalMatches[J] #<=> (ActualInterval #= MotifIntervals[J])
+            end,
+            AllMatch #= sum(IntervalMatches),
+            MatchFlags[StartPos] #<=> (AllMatch #= MotifLen)
+        end,
+        TotalMatches #= sum(MatchFlags),
+        % Cost = Weight if no match found, 0 if at least one match
+        FoundMotif :: 0..1,
+        FoundMotif #<=> (TotalMatches #>= 1),
+        Cost #= Weight * (1 - FoundMotif)
+    end.
+
+% Apply contour-matching constraint (softer version)
+% Instead of exact intervals, matches direction pattern (up/down/same)
+% This allows transposition AND some interval variation
+apply_contour_constraint(Pitches, MotifIntervals, Weight, Cost) =>
+    Len = length(Pitches),
+    MotifLen = length(MotifIntervals),
+    if MotifLen < 2 ; Len < MotifLen + 1 then
+        Cost #= 0
+    else
+        % Convert motif intervals to contour directions: 1=up, -1=down, 0=same
+        MotifContour = [sign(I) : I in MotifIntervals],
+
+        NumPositions = Len - MotifLen,
+        MatchFlags = new_list(NumPositions),
+        MatchFlags :: 0..1,
+        foreach(StartPos in 1..NumPositions)
+            ContourMatches = new_list(MotifLen),
+            ContourMatches :: 0..1,
+            foreach(J in 1..MotifLen)
+                Interval :: -24..24,
+                Interval #= Pitches[StartPos + J] - Pitches[StartPos + J - 1],
+                Dir = MotifContour[J],
+                if Dir > 0 then
+                    ContourMatches[J] #<=> (Interval #> 0)
+                elseif Dir < 0 then
+                    ContourMatches[J] #<=> (Interval #< 0)
+                else
+                    ContourMatches[J] #<=> (Interval #= 0)
+                end
+            end,
+            AllMatch #= sum(ContourMatches),
+            MatchFlags[StartPos] #<=> (AllMatch #= MotifLen)
+        end,
+        TotalMatches #= sum(MatchFlags),
+        FoundContour :: 0..1,
+        FoundContour #<=> (TotalMatches #>= 1),
+        Cost #= Weight * (1 - FoundContour)
+    end.
+
+% ==============================================================================
+% UTILITY
+% ==============================================================================
+
+% Sign function
+sign(X) = S =>
+    if X > 0 then S = 1
+    elseif X < 0 then S = -1
+    else S = 0
+    end.
+
+% Print motif info
+print_motif(MotifIntervals) =>
+    if MotifIntervals != [] then
+        printf("  Opening motif: %w%n", MotifIntervals),
+        Contour = [sign(I) : I in MotifIntervals],
+        ContourStr = [cond(C > 0, "↑", cond(C < 0, "↓", "→")) : C in Contour],
+        printf("  Contour: %w%n", join_list(ContourStr, " "))
+    else
+        println("  No motif extracted (too few notes)")
+    end.
+
+% Join list into string with separator
+join_list([], _) = "".
+join_list([X], _) = X.
+join_list([X|Rest], Sep) = X ++ Sep ++ join_list(Rest, Sep).
