@@ -274,6 +274,28 @@ Three Classical sub-style genre profiles:
 ./scripts/run_picat.sh picat/companion.pi demo genre=sturm_und_drang
 ```
 
+### Phase 4: Expression & Polish Modules
+
+Phase 4 adds post-processing and analysis features that improve output quality without changing the CP solver.
+
+**Expression (Post-Processing):**
+- `humanize.pi` - Performance humanization (D4) and dynamic velocity curves (D1)
+  - `humanize_notes(Notes, Intensity)` - Adds ±timing jitter (less on downbeats) and ±velocity variation. Intensity 0.0=identity, 1.0=maximum.
+  - `apply_velocity_curves(Notes, VelBase, VelVar)` - Parabolic velocity arch peaking at climax (highest pitch), with cadential diminuendo in last 20%.
+  - `humanize_with_dynamics(Notes, VelBase, VelVar, Intensity)` - Combined: curves first, then micro-humanization.
+
+**Motif Memory (Cross-Segment Coherence):**
+- `motif.pi` - Extracts and applies motif patterns across segments (C1)
+  - `extract_motif(Melody, MotifLen)` - Extracts signed interval pattern from opening notes (default 4 intervals = 5 notes).
+  - `apply_contour_constraint(Pitches, MotifIntervals, Weight, Cost)` - CP constraint matching direction pattern (up/down/same), allowing transposition.
+  - Integrated into genre and form generation loops: first segment's motif is extracted and passed to subsequent segments.
+
+**Analysis:**
+- `visualizer.pi` - Constraint violation visualizer (G1)
+  - `score_all_constraints(Pitches, Root)` - Returns list of 26 (constraint_name, violation_count) tuples.
+  - `print_violation_report(Pitches, Root, GenreId)` - Formatted report with categories (Melodic Motion, Contour & Structure, Tonal & Harmonic, Cadence & Period, Motivic). Indicators: `[.]`=clean, `[*]`=1-2 violations, `[!]`=3+ violations.
+  - Automatically printed after genre-based generation.
+
 ### File Organization
 
 The piece files (`pieces_bach.pi`, `pieces_mozart.pi`, etc.) are in `picat/` and imported directly.
