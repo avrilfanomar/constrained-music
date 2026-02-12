@@ -18,6 +18,9 @@ import genre_profiles.
 import constraint_selector.
 import form.
 import validation.
+import humanize.
+import motif.
+import visualizer.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -73,12 +76,21 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
     AllNotes = generate_all_segments(Segments, KeyRoot),
     printf("  Generated %d total notes%n%n", length(AllNotes)),
 
+    % Apply velocity curves (phrase-level dynamics per segment)
+    println("Applying expression..."),
+    ExpressiveNotes = apply_segment_expression(AllNotes, Segments),
+
+    % Apply humanization (micro-timing and velocity jitter)
+    HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
+    FinalNotes = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
+
     % Collect tempo changes for MIDI export
     TempoChanges = collect_tempo_changes(Segments),
 
     % Export to JSON (for Python MIDI writer)
     println("Exporting to JSON..."),
-    export_session_json(AllNotes, TempoChanges, OutputPath),
+    export_session_json(FinalNotes, TempoChanges, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     println("Done! Run midi_writer.py to convert to MIDI."),
@@ -212,50 +224,79 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     AllNotes = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
     printf("  Generated %d total notes%n%n", length(AllNotes)),
 
+    % Apply velocity curves (phrase-level dynamics per segment)
+    println("Applying expression..."),
+    ExpressiveNotes = apply_segment_expression(AllNotes, Segments),
+
+    % Apply humanization
+    HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
+    FinalNotes = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
+
     % Collect tempo changes
     TempoChanges = collect_tempo_changes(Segments),
 
     % Export to JSON
     println("Exporting to JSON..."),
-    export_session_json(AllNotes, TempoChanges, OutputPath),
+    export_session_json(FinalNotes, TempoChanges, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
+
+    % Print constraint violation report
+    visualizer.print_violation_report(AllNotes, KeyRoot, Genre),
 
     println("Done! Run midi_writer.py to convert to MIDI."),
     nl.
 
-% Generate segments with genre-based constraints
+% Generate segments with genre-based constraints (with motif memory)
 generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences) = AllNotes =>
-    AllNotes = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, []).
+    AllNotes = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, [], []).
 
-generate_segments_genre_helper([], _, _, _, _, _, Acc) = flatten(reverse(Acc)).
-generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc) = Result =>
+generate_segments_genre_helper([], _, _, _, _, _, Acc, _MotifIntervals) = flatten(reverse(Acc)).
+generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc, MotifIntervals) = Result =>
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
+    MotifWeight = 50,  % Default motif reference weight
 
-    % Generate melody with genre constraints
+    % Generate melody with genre constraints + motif memory
     if Acc == [] then
-        % First segment
+        % First segment: no motif constraint
         once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, Preferences, SegmentMelody))
     else
-        % Connect to previous segment
+        % Connect to previous segment with motif reference
         PrevMelody = head(Acc),
         PrevLastPitch = melody.last_pitch(PrevMelody),
-        if once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody0)) then
+        if MotifIntervals != [],
+           once(melody.generate_connected_segment_with_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, MotifIntervals, MotifWeight, SegmentMelody0)) then
             SegmentMelody = SegmentMelody0
+        elseif once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody1)) then
+            SegmentMelody = SegmentMelody1
         else
             % Fallback: generate without connection
             once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, Preferences, SegmentMelody))
         end
     end,
 
-    printf("  Segment %2d: bars %3d-%3d, tempo=%3d, genre=%w%n",
-           SegIndex, CurrentBar + 1, CurrentBar + NumBars,
-           get_tempo(Params), Genre),
+    % Extract motif from first segment
+    NewMotifIntervals = cond(MotifIntervals == [],
+        motif.extract_motif(SegmentMelody, motif.default_motif_length()),
+        MotifIntervals),
+
+    % Print motif info on first segment
+    if Acc == [], NewMotifIntervals != [] then
+        printf("  Segment %2d: bars %3d-%3d, tempo=%3d, genre=%w%n",
+               SegIndex, CurrentBar + 1, CurrentBar + NumBars,
+               get_tempo(Params), Genre),
+        motif.print_motif(NewMotifIntervals)
+    else
+        printf("  Segment %2d: bars %3d-%3d, tempo=%3d, genre=%w%n",
+               SegIndex, CurrentBar + 1, CurrentBar + NumBars,
+               get_tempo(Params), Genre)
+    end,
 
     % Adjust timing
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
-    Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
+    Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals).
 
 % ==============================================================================
 % FORM-BASED COMPANION
@@ -320,12 +361,21 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
     AllNotes = generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences),
     printf("  Generated %d total notes%n%n", length(AllNotes)),
 
+    % Apply velocity curves (phrase-level dynamics per segment)
+    println("Applying expression..."),
+    ExpressiveNotes = apply_segment_expression(AllNotes, Segments),
+
+    % Apply humanization
+    HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
+    FinalNotes = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
+
     % Collect tempo changes
     TempoChanges = collect_tempo_changes(Segments),
 
     % Export to JSON
     println("Exporting to JSON..."),
-    export_session_json(AllNotes, TempoChanges, OutputPath),
+    export_session_json(FinalNotes, TempoChanges, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     println("Done! Run midi_writer.py to convert to MIDI."),
@@ -455,14 +505,15 @@ get_segment_params(segment(_, _, _, _, P, _)) = P.
 get_segment_num_bars(form_segment(_, _, _, _, _, N, _, _, _, _)) = N.
 get_segment_num_bars(segment(_, _, _, _, _, N)) = N.
 
-% Generate all segments with form awareness
+% Generate all segments with form awareness (with motif memory)
 generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = AllNotes =>
-    AllNotes = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, 1, 0, []).
+    AllNotes = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, 1, 0, [], []).
 
-generate_form_segments_helper([], _, _, _, _, _, _, Acc) = flatten(reverse(Acc)).
-generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc) = Result =>
+generate_form_segments_helper([], _, _, _, _, _, _, Acc, _MotifIntervals) = flatten(reverse(Acc)).
+generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc, MotifIntervals) = Result =>
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
+    MotifWeight = 50,
 
     % Get form context
     SectionKey = get_form_segment_key(Seg),
@@ -485,12 +536,15 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
             once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
         end
     else
-        % Connect to previous segment
+        % Connect to previous segment with motif reference
         PrevMelody = head(Acc),
         PrevLastPitch = last_pitch(PrevMelody),
         if Genre != none then
-            if once(melody.generate_connected_segment_with_genre(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody0)) then
+            if MotifIntervals != [],
+               once(melody.generate_connected_segment_with_motif(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, Preferences, MotifIntervals, MotifWeight, SegmentMelody0)) then
                 SegmentMelody = SegmentMelody0
+            elseif once(melody.generate_connected_segment_with_genre(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody1)) then
+                SegmentMelody = SegmentMelody1
             else
                 once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, Preferences, SegmentMelody))
             end
@@ -503,6 +557,11 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
         end
     end,
 
+    % Extract motif from first segment
+    NewMotifIntervals = cond(MotifIntervals == [],
+        motif.extract_motif(SegmentMelody, motif.default_motif_length()),
+        MotifIntervals),
+
     printf("  Segment %2d [%c]: bars %3d-%3d, tempo=%3d, key=%s %w%n",
            SegIndex, SectionLabel, CurrentBar + 1, CurrentBar + NumBars,
            get_tempo(Params), pitch_class_name(SectionKey), SectionMode),
@@ -511,7 +570,7 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
     Result = generate_form_segments_helper(Rest, FormSections, KeyRoot, Genre, Preferences,
-                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
+                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals).
 
 % Pitch class to note name (copied from form.pi for local use)
 pitch_class_name(0) = "C".
@@ -566,6 +625,74 @@ generate_segments_helper([Seg | Rest], KeyRoot, SegIndex, CurrentBar, Acc) = Res
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
     Result = generate_segments_helper(Rest, KeyRoot, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
+
+% ==============================================================================
+% EXPRESSION AND HUMANIZATION
+% ==============================================================================
+
+% Apply velocity curves segment-by-segment
+% Each segment is treated as a phrase with its own dynamic curve
+apply_segment_expression(AllNotes, Segments) = ExpressiveNotes =>
+    % Build bar-to-segment map for velocity params lookup
+    BarToParams = build_bar_params_map(Segments),
+    % Group notes by segment (using bar ranges)
+    SegmentBarRanges = get_segment_bar_ranges(Segments),
+    ExpressiveNotes = apply_expression_by_segments(AllNotes, SegmentBarRanges, BarToParams).
+
+% Build map from bar number to (VelBase, VelVar) for each segment
+build_bar_params_map(Segments) = Map =>
+    Map = build_bar_params_helper(Segments, 1, new_map()).
+
+build_bar_params_helper([], _, Map) = Map.
+build_bar_params_helper([Seg | Rest], CurrentBar, Map) = Result =>
+    NumBars = get_segment_num_bars(Seg),
+    Params = get_segment_params(Seg),
+    VelBase = get_velocity_base(Params),
+    VelVar = get_velocity_var(Params),
+    foreach(B in CurrentBar..CurrentBar+NumBars-1)
+        put(Map, B, (VelBase, VelVar))
+    end,
+    Result = build_bar_params_helper(Rest, CurrentBar + NumBars, Map).
+
+% Get bar ranges for each segment: [(StartBar, EndBar), ...]
+get_segment_bar_ranges(Segments) = Ranges =>
+    Ranges = get_bar_ranges_helper(Segments, 1, []).
+
+get_bar_ranges_helper([], _, Acc) = reverse(Acc).
+get_bar_ranges_helper([Seg | Rest], CurrentBar, Acc) = Result =>
+    NumBars = get_segment_num_bars(Seg),
+    EndBar = CurrentBar + NumBars - 1,
+    Result = get_bar_ranges_helper(Rest, CurrentBar + NumBars, [(CurrentBar, EndBar) | Acc]).
+
+% Apply expression to notes grouped by segment bar ranges
+apply_expression_by_segments(AllNotes, SegmentBarRanges, BarToParams) = ExpressiveNotes =>
+    % Group notes into segments by bar
+    SegmentedNotes = group_notes_by_segments(AllNotes, SegmentBarRanges),
+    % Apply velocity curves to each segment
+    ProcessedSegments = [apply_segment_curve(SegNotes, BarToParams) : SegNotes in SegmentedNotes],
+    ExpressiveNotes = flatten(ProcessedSegments).
+
+% Group notes into segments based on bar ranges
+group_notes_by_segments(Notes, BarRanges) = Groups =>
+    Groups = [segment_notes(Notes, Start, End) : (Start, End) in BarRanges].
+
+segment_notes(Notes, StartBar, EndBar) = SegNotes =>
+    SegNotes = [N : N in Notes, note_in_bar_range(N, StartBar, EndBar)].
+
+note_in_bar_range(note(_, _, time_pos(Bar, _, _), _, _), StartBar, EndBar) =>
+    Bar >= StartBar, Bar =< EndBar.
+
+% Apply velocity curve to a single segment's notes
+apply_segment_curve(SegNotes, BarToParams) = CurvedNotes =>
+    if SegNotes == [] then
+        CurvedNotes = []
+    else
+        % Get VelBase and VelVar from first note's bar
+        FirstNote = head(SegNotes),
+        FirstNote = $note(_, _, $time_pos(FirstBar, _, _), _, _),
+        (VelBase, VelVar) = cond(BarToParams.has_key(FirstBar), BarToParams.get(FirstBar), (80, 15)),
+        CurvedNotes = humanize.apply_velocity_curves(SegNotes, VelBase, VelVar)
+    end.
 
 % Adjust note's bar number to absolute position
 adjust_note_bar(Note, BarOffset) = AdjustedNote =>

@@ -1,0 +1,131 @@
+% humanize.pi - Performance humanization post-processing
+%
+% Applies controlled randomness to timing, velocity, and duration
+% to make MIDI output sound less mechanical.
+% This is a pure post-processing pass - no CP solving needed.
+
+module humanize.
+
+import music_types.
+
+% ==============================================================================
+% MAIN HUMANIZATION FUNCTION
+% ==============================================================================
+
+% Humanize a list of notes with given intensity (0.0 to 1.0)
+% Intensity 0.0 = no change, 1.0 = maximum humanization
+humanize_notes(Notes, Intensity) = HumanizedNotes =>
+    if Intensity =< 0.0 then
+        HumanizedNotes = Notes
+    else
+        HumanizedNotes = [humanize_note(Note, Intensity, I, length(Notes)) : {Note, I} in zip(Notes, 1..length(Notes))]
+    end.
+
+% Humanize a single note
+humanize_note(Note, Intensity, NoteIndex, TotalNotes) = HNote =>
+    Note = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, Velocity),
+
+    % Timing humanization: slight offset in subdivision
+    % Downbeats (beat 1) get less jitter than offbeats
+    % Max jitter: ±0.03 beats at full intensity (about ±10ms at 120bpm)
+    MaxTimingJitter = 0.03 * Intensity,
+    BeatFactor = cond(Beat == 1, 0.3, 1.0),  % Less jitter on downbeats
+    TimingOffset = (rand01() - 0.5) * 2.0 * MaxTimingJitter * BeatFactor,
+    NewSub = max(0.0, min(0.95, Sub + TimingOffset)),
+
+    % Velocity humanization: ±velocity variation
+    % Max: ±8 velocity units at full intensity
+    MaxVelJitter = round(8.0 * Intensity),
+    VelOffset = round((rand01() - 0.5) * 2.0 * MaxVelJitter),
+    NewVelocity = max(30, min(127, Velocity + VelOffset)),
+
+    % Duration humanization: slightly shorten or lengthen
+    % Applied as a tiny subdivision offset to create micro-articulations
+    % We modify duration fraction slightly by adjusting numerator scaling
+    % For simplicity, we keep the duration fraction unchanged but could
+    % add a "duration_offset" field in the future
+
+    HNote = $note(Pitch, Duration, $time_pos(Bar, Beat, NewSub), VoiceId, NewVelocity).
+
+% ==============================================================================
+% PHRASE-AWARE VELOCITY CURVES (D1)
+% ==============================================================================
+
+% Apply dynamic velocity curves: crescendo toward phrase climax,
+% diminuendo at cadence. Each segment (phrase) gets its own curve.
+%
+% Curve shape: parabolic arch peaking at the highest-pitch note
+% Notes near the climax get velocity boost, notes at phrase edges get reduction
+apply_velocity_curves(Notes, VelBase, VelVar) = CurvedNotes =>
+    Len = length(Notes),
+    if Len < 3 then
+        CurvedNotes = Notes
+    else
+        % Find the climax position (highest pitch)
+        Pitches = [P : $note($pitch(midi, P, _), _, _, _, _) in Notes],
+        MaxPitch = max(Pitches),
+        % Find first occurrence of max pitch
+        ClimaxPos = find_first_index(Pitches, MaxPitch),
+
+        % Normalize climax position (0.0 to 1.0)
+        ClimaxFrac = (ClimaxPos - 1) / max(1, Len - 1),
+
+        % Build velocity curve
+        CurvedNotes = [apply_curve_to_note(Notes[I], I, Len, ClimaxPos, ClimaxFrac, VelBase, VelVar) : I in 1..Len]
+    end.
+
+% Apply curve to a single note based on its position relative to climax
+apply_curve_to_note(Note, Index, TotalNotes, ClimaxPos, _ClimaxFrac, _VelBase, VelVar) = CurvedNote =>
+    Note = $note(Pitch, Duration, TimePos, VoiceId, BaseVelocity),
+
+    % Calculate normalized position (0.0 to 1.0)
+    Frac = (Index - 1) / max(1, TotalNotes - 1),
+
+    % Calculate normalized climax position
+    ClimaxNorm = (ClimaxPos - 1) / max(1, TotalNotes - 1),
+
+    % Parabolic curve: peak at climax position
+    % Distance from climax (0.0 at climax, 1.0 at furthest point)
+    DistFromClimax = abs(Frac - ClimaxNorm),
+
+    % Velocity modification: boost near climax, reduce at edges
+    % CurveValue ranges from -1.0 (furthest from climax) to +1.0 (at climax)
+    CurveValue = 1.0 - 2.0 * DistFromClimax,
+
+    % Scale by VelVar: at climax +VelVar/2, at edges -VelVar/2
+    VelModification = round(CurveValue * VelVar * 0.5),
+
+    % Additional cadential diminuendo: last 20% of notes get extra reduction
+    CadenceFactor = cond(Frac > 0.8, round(-VelVar * 0.3 * (Frac - 0.8) / 0.2), 0),
+
+    NewVelocity = max(35, min(127, BaseVelocity + VelModification + CadenceFactor)),
+
+    CurvedNote = $note(Pitch, Duration, TimePos, VoiceId, NewVelocity).
+
+% ==============================================================================
+% COMBINED HUMANIZATION + DYNAMICS
+% ==============================================================================
+
+% Apply both velocity curves and timing humanization
+% This is the main entry point for full expressiveness
+humanize_with_dynamics(Notes, VelBase, VelVar, HumanizeIntensity) = Result =>
+    % First apply velocity curves (phrase-level shaping)
+    CurvedNotes = apply_velocity_curves(Notes, VelBase, VelVar),
+    % Then apply micro-humanization (note-level jitter)
+    Result = humanize_notes(CurvedNotes, HumanizeIntensity).
+
+% ==============================================================================
+% UTILITY FUNCTIONS
+% ==============================================================================
+
+% Find the first index of a value in a list
+find_first_index(List, Value) = Index =>
+    Index = find_first_index_helper(List, Value, 1).
+
+find_first_index_helper([], _Value, Default) = Default.
+find_first_index_helper([X|_Rest], Value, I) = I, X == Value => true.
+find_first_index_helper([_|Rest], Value, I) = find_first_index_helper(Rest, Value, I + 1).
+
+% Random float between 0.0 and 1.0
+rand01() = R =>
+    R = random2() / 268435455.  % 2^28 - 1

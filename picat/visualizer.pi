@@ -1,0 +1,529 @@
+% visualizer.pi - Constraint violation visualizer
+%
+% Analyzes a generated melody and produces a human-readable report
+% showing which soft constraints are violated and by how much.
+% Uses static scoring (not CP) on already-solved pitch data.
+
+module visualizer.
+
+import music_types.
+import scale_utils.
+
+% ==============================================================================
+% MAIN REPORT GENERATION
+% ==============================================================================
+
+% Generate and print a constraint violation report for a melody
+% Notes: list of note structures (already generated)
+% KeyRoot: root pitch (MIDI number)
+% Genre: genre atom (or none)
+print_violation_report(Notes, KeyRoot, Genre) =>
+    Pitches = [P : $note($pitch(midi, P, _), _, _, _, _) in Notes],
+    Len = length(Pitches),
+    if Len < 3 then
+        println("  Too few notes for analysis")
+    else
+        println("=== Constraint Violation Report ==="),
+        printf("  Notes: %d, Range: %d semitones%n", Len, max(Pitches) - min(Pitches)),
+        printf("  Key root: %d, Genre: %w%n%n", KeyRoot, Genre),
+
+        % Score all constraints
+        Results = score_all_constraints(Pitches, KeyRoot),
+
+        % Print results grouped by category
+        print_category("Melodic Motion", [
+            ("leap_recovery", lookup(Results, leap_recovery)),
+            ("mostly_stepwise", lookup(Results, mostly_stepwise)),
+            ("no_consec_leaps", lookup(Results, consecutive_leaps)),
+            ("prefer_small_int", lookup(Results, prefer_smaller_intervals)),
+            ("no_repetitive_int", lookup(Results, no_repetitive_intervals)),
+            ("large_leap_recovery", lookup(Results, large_leap_recovery)),
+            ("consonant_leaps", lookup(Results, consonant_leaps_only))
+        ]),
+
+        print_category("Contour & Structure", [
+            ("single_climax", lookup(Results, single_climax)),
+            ("arch_contour", lookup(Results, arch_contour)),
+            ("balanced_motion", lookup(Results, balanced_motion)),
+            ("peak_approach_exit", lookup(Results, peak_approach_exit)),
+            ("phrase_arch", lookup(Results, phrase_arch_contour)),
+            ("cadential_descent", lookup(Results, cadential_descent)),
+            ("registral_return", lookup(Results, registral_return)),
+            ("register_consistency", lookup(Results, register_consistency))
+        ]),
+
+        print_category("Tonal & Harmonic", [
+            ("leading_tone_res", lookup(Results, leading_tone_resolution)),
+            ("phrase_ends_stable", lookup(Results, phrase_ends_stable)),
+            ("tonic_anchoring", lookup(Results, tonic_anchoring)),
+            ("chord_tone_strong", lookup(Results, chord_tone_on_strong_beats)),
+            ("opening_gesture", lookup(Results, opening_gesture))
+        ]),
+
+        print_category("Cadence & Period", [
+            ("authentic_cadence", lookup(Results, authentic_cadence)),
+            ("half_cadence", lookup(Results, half_cadence)),
+            ("antecedent_conseq", lookup(Results, antecedent_consequent)),
+            ("phrase_rhyme", lookup(Results, phrase_rhyme))
+        ]),
+
+        print_category("Motivic", [
+            ("motivic_repetition", lookup(Results, motivic_repetition)),
+            ("motivic_fragment", lookup(Results, motivic_fragmentation))
+        ]),
+
+        % Summary
+        TotalViolations = sum([V : (_, V) in Results]),
+        NumConstraints = length(Results),
+        NumClean = length([1 : (_, V) in Results, V == 0]),
+        printf("  SUMMARY: %d/%d constraints clean, %d total violations%n",
+               NumClean, NumConstraints, TotalViolations),
+        nl
+    end.
+
+% Score all constraints and return list of (id, violation_count) pairs
+score_all_constraints(Pitches, KeyRoot) = Results =>
+    Len = length(Pitches),
+    Results = [
+        (leap_recovery, score_leap_recovery(Pitches)),
+        (mostly_stepwise, score_mostly_stepwise(Pitches, 60)),
+        (consecutive_leaps, score_consecutive_leaps(Pitches)),
+        (prefer_smaller_intervals, score_prefer_smaller_intervals(Pitches, 2)),
+        (no_repetitive_intervals, score_no_repetitive_intervals(Pitches, 2)),
+        (large_leap_recovery, score_large_leap_recovery(Pitches, 8)),
+        (consonant_leaps_only, score_consonant_leaps_only(Pitches)),
+        (single_climax, score_single_climax(Pitches)),
+        (arch_contour, score_arch_contour(Pitches)),
+        (balanced_motion, score_balanced_motion(Pitches, 30)),
+        (peak_approach_exit, score_peak_approach_exit(Pitches)),
+        (phrase_arch_contour, score_phrase_arch_contour(Pitches)),
+        (cadential_descent, score_cadential_descent(Pitches)),
+        (registral_return, score_registral_return(Pitches)),
+        (register_consistency, score_register_consistency(Pitches)),
+        (leading_tone_resolution, score_leading_tone_resolution(Pitches, KeyRoot)),
+        (phrase_ends_stable, score_phrase_ends_stable(Pitches, KeyRoot)),
+        (tonic_anchoring, score_tonic_anchoring(Pitches, KeyRoot)),
+        (chord_tone_on_strong_beats, score_chord_tone_on_strong_beats(Pitches, KeyRoot)),
+        (opening_gesture, score_opening_gesture(Pitches, KeyRoot)),
+        (authentic_cadence, score_authentic_cadence(Pitches, KeyRoot)),
+        (half_cadence, score_half_cadence(Pitches, KeyRoot)),
+        (antecedent_consequent, score_antecedent_consequent(Pitches, KeyRoot)),
+        (phrase_rhyme, score_phrase_rhyme(Pitches)),
+        (motivic_repetition, score_motivic_repetition(Pitches)),
+        (motivic_fragmentation, score_motivic_fragmentation(Pitches))
+    ].
+
+% ==============================================================================
+% STATIC SCORING FUNCTIONS
+% ==============================================================================
+% These mirror the reified CP constraints but work on ground pitch data
+
+score_leap_recovery(Pitches) = Count =>
+    Len = length(Pitches),
+    if Len < 3 then Count = 0
+    else
+        Count = length([I : I in 1..Len-2,
+            abs(Pitches[I+1] - Pitches[I]) >= 5,
+            (Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) >= 0])
+    end.
+
+score_mostly_stepwise(Pitches, MinPercent) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        NumIntervals = Len - 1,
+        StepCount = length([I : I in 1..NumIntervals, abs(Pitches[I+1] - Pitches[I]) =< 2]),
+        MinSteps = (NumIntervals * MinPercent) // 100,
+        Violations = max(0, MinSteps - StepCount)
+    end.
+
+score_consecutive_leaps(Pitches) = Count =>
+    Len = length(Pitches),
+    if Len < 3 then Count = 0
+    else
+        Count = length([I : I in 1..Len-2,
+            abs(Pitches[I+1] - Pitches[I]) >= 3,
+            abs(Pitches[I+2] - Pitches[I+1]) >= 3,
+            (Pitches[I+1] - Pitches[I]) * (Pitches[I+2] - Pitches[I+1]) > 0])
+    end.
+
+score_prefer_smaller_intervals(Pitches, Threshold) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        Violations = sum([max(0, abs(Pitches[I+1] - Pitches[I]) - Threshold) : I in 1..Len-1])
+    end.
+
+score_no_repetitive_intervals(Pitches, MaxConsecutive) = Violations =>
+    Len = length(Pitches),
+    if Len < MaxConsecutive + 2 then Violations = 0
+    else
+        Count = 0,
+        foreach(I in 1..Len-MaxConsecutive-1)
+            BaseInterval = Pitches[I+1] - Pitches[I],
+            AllSame = true,
+            foreach(J in 1..MaxConsecutive)
+                NextInterval = Pitches[I+J+1] - Pitches[I+J],
+                if NextInterval != BaseInterval then AllSame := false end
+            end,
+            if AllSame then Count := Count + 1 end
+        end,
+        Violations = Count
+    end.
+
+score_large_leap_recovery(Pitches, Threshold) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then Violations = 0
+    else
+        Count = 0,
+        foreach(I in 2..Len-1)
+            IntervalIn = abs(Pitches[I] - Pitches[I-1]),
+            IntervalOut = abs(Pitches[I+1] - Pitches[I]),
+            if (IntervalIn >= Threshold, IntervalOut > 2) ; (IntervalOut >= Threshold, IntervalIn > 2) then
+                Count := Count + 1
+            end
+        end,
+        Violations = Count
+    end.
+
+score_consonant_leaps_only(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        Count = 0,
+        foreach(I in 1..Len-1)
+            Interval = abs(Pitches[I+1] - Pitches[I]),
+            if Interval > 2, not is_consonant_interval(Interval) then
+                Count := Count + 1
+            end
+        end,
+        Violations = Count
+    end.
+
+is_consonant_interval(3) => true.
+is_consonant_interval(4) => true.
+is_consonant_interval(5) => true.
+is_consonant_interval(7) => true.
+is_consonant_interval(8) => true.
+is_consonant_interval(9) => true.
+is_consonant_interval(12) => true.
+is_consonant_interval(_) => fail.
+
+score_single_climax(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then Violations = 0
+    else
+        MaxPitch = max(Pitches),
+        NumClimax = length([I : I in 1..Len, Pitches[I] == MaxPitch]),
+        ThirdStart = Len // 3 + 1,
+        ThirdEnd = 2 * Len // 3,
+        InMiddle = length([I : I in 1..Len, Pitches[I] == MaxPitch, I >= ThirdStart, I =< ThirdEnd]),
+        Violations = cond(NumClimax != 1, 1, 0) + cond(InMiddle == 0, 1, 0)
+    end.
+
+score_arch_contour(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 4 then Violations = 0
+    else
+        MidPoint = Len // 2,
+        Count = 0,
+        foreach(I in 1..Len-1)
+            Interval = Pitches[I+1] - Pitches[I],
+            if I =< MidPoint then
+                if Interval < -2 then Count := Count + 1 end
+            else
+                if Interval > 2 then Count := Count + 1 end
+            end
+        end,
+        Violations = Count
+    end.
+
+score_balanced_motion(Pitches, TolerancePercent) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        NumIntervals = Len - 1,
+        AscCount = length([I : I in 1..NumIntervals, Pitches[I+1] > Pitches[I]]),
+        DescCount = length([I : I in 1..NumIntervals, Pitches[I+1] < Pitches[I]]),
+        Tolerance = max(1, (NumIntervals * TolerancePercent) // 100),
+        Violations = max(0, abs(AscCount - DescCount) - Tolerance)
+    end.
+
+score_peak_approach_exit(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then Violations = 0
+    else
+        MaxPitch = max(Pitches),
+        Count = 0,
+        foreach(I in 1..Len)
+            if Pitches[I] == MaxPitch then
+                % Check approach
+                if I > 1, Pitches[I-1] >= Pitches[I] then
+                    Count := Count + 1
+                end,
+                % Check exit (descending step)
+                if I < Len then
+                    Descent = Pitches[I] - Pitches[I+1],
+                    if Descent < 1 ; Descent > 2 then
+                        Count := Count + 1
+                    end
+                end
+            end
+        end,
+        Violations = Count
+    end.
+
+score_phrase_arch_contour(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 6 then Violations = 0
+    else
+        MaxPitch = max(Pitches),
+        ThirdStart = Len // 3 + 1,
+        ThirdEnd = 2 * Len // 3,
+        MiddlePeaks = length([I : I in ThirdStart..ThirdEnd, Pitches[I] == MaxPitch]),
+        NoPeakInMiddle = cond(MiddlePeaks == 0, 1, 0),
+        HalfPoint = Len // 2,
+        FirstHalfAsc = length([I : I in 1..HalfPoint, I < Len, Pitches[I+1] > Pitches[I]]),
+        FirstHalfDesc = length([I : I in 1..HalfPoint, I < Len, Pitches[I+1] < Pitches[I]]),
+        SecondHalfAsc = length([I : I in HalfPoint+1..Len-1, Pitches[I+1] > Pitches[I]]),
+        SecondHalfDesc = length([I : I in HalfPoint+1..Len-1, Pitches[I+1] < Pitches[I]]),
+        FirstHalfBad = cond(FirstHalfAsc < FirstHalfDesc, 1, 0),
+        SecondHalfBad = cond(SecondHalfDesc < SecondHalfAsc, 1, 0),
+        Violations = NoPeakInMiddle + FirstHalfBad + SecondHalfBad
+    end.
+
+score_cadential_descent(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 5 then Violations = 0
+    else
+        CadenceLen = max(2, Len // 5),
+        CadenceStart = Len - CadenceLen,
+        Violations = length([I : I in CadenceStart..Len-1, Pitches[I+1] > Pitches[I]])
+    end.
+
+score_registral_return(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        Violations = cond(abs(Pitches[Len] - Pitches[1]) > 12, 1, 0)
+    end.
+
+score_register_consistency(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        Violations = length([I : I in 1..Len-1, abs(Pitches[I+1] - Pitches[I]) > 12])
+    end.
+
+score_leading_tone_resolution(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        LeadingTone = (KeyRoot + 11) mod 12,
+        Tonic = KeyRoot mod 12,
+        Violations = length([I : I in 1..Len-1,
+            Pitches[I] mod 12 == LeadingTone,
+            Pitches[I+1] mod 12 != Tonic,
+            Pitches[I+1] mod 12 != LeadingTone])
+    end.
+
+score_phrase_ends_stable(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 1 then Violations = 0
+    else
+        Root = KeyRoot mod 12,
+        Third = (KeyRoot + 4) mod 12,
+        Fifth = (KeyRoot + 7) mod 12,
+        EndPC = Pitches[Len] mod 12,
+        if EndPC == Root ; EndPC == Third ; EndPC == Fifth then
+            Violations = 0
+        else
+            Violations = 1
+        end
+    end.
+
+score_tonic_anchoring(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 4 then Violations = 0
+    else
+        TonicPC = KeyRoot mod 12,
+        NumWindows = Len // 4,
+        Count = 0,
+        foreach(W in 1..NumWindows)
+            Start = (W - 1) * 4 + 1,
+            End0 = min(Start + 3, Len),
+            TonicInWindow = length([I : I in Start..End0, Pitches[I] mod 12 == TonicPC]),
+            if TonicInWindow == 0 then Count := Count + 1 end
+        end,
+        Violations = Count
+    end.
+
+score_chord_tone_on_strong_beats(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        RootPC = KeyRoot mod 12,
+        ThirdPC = (KeyRoot + 4) mod 12,
+        FifthPC = (KeyRoot + 7) mod 12,
+        Count = 0,
+        foreach(I in 1..Len)
+            if I mod 2 == 1 then  % Strong beat
+                PC = Pitches[I] mod 12,
+                if PC != RootPC, PC != ThirdPC, PC != FifthPC then
+                    Count := Count + 1
+                end
+            end
+        end,
+        Violations = Count
+    end.
+
+score_opening_gesture(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then Violations = 0
+    else
+        RootPC = KeyRoot mod 12,
+        Deg3 = (RootPC + 4) mod 12,
+        Deg5 = (RootPC + 7) mod 12,
+        PC1 = Pitches[1] mod 12,
+        Int1 = Pitches[2] - Pitches[1],
+        Int2 = Pitches[3] - Pitches[2],
+        StableStart = (PC1 == RootPC ; PC1 == Deg3 ; PC1 == Deg5),
+        AscOpening = (Int1 > 0, Int2 > 0),
+        DescOpening = (Int1 < 0, Int2 < 0),
+        ArchOpening = (Int1 > 0, Int2 < 0),
+        if StableStart, (AscOpening ; DescOpening ; ArchOpening) then
+            Violations = 0
+        else
+            Violations = 1
+        end
+    end.
+
+score_authentic_cadence(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 2 then Violations = 0
+    else
+        RootPC = KeyRoot mod 12,
+        SecondDeg = (KeyRoot + 2) mod 12,
+        LeadingTone = (KeyRoot + 11) mod 12,
+        LastPC = Pitches[Len] mod 12,
+        PenultPC = Pitches[Len-1] mod 12,
+        if LastPC == RootPC, (PenultPC == SecondDeg ; PenultPC == LeadingTone) then
+            Violations = 0
+        else
+            Violations = 1
+        end
+    end.
+
+score_half_cadence(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 1 then Violations = 0
+    else
+        SecondDeg = (KeyRoot + 2) mod 12,
+        DominantPC = (KeyRoot + 7) mod 12,
+        LeadingTone = (KeyRoot + 11) mod 12,
+        LastPC = Pitches[Len] mod 12,
+        if LastPC == SecondDeg ; LastPC == DominantPC ; LastPC == LeadingTone then
+            Violations = 0
+        else
+            Violations = 1
+        end
+    end.
+
+score_antecedent_consequent(Pitches, KeyRoot) = Violations =>
+    Len = length(Pitches),
+    if Len < 4 then Violations = 0
+    else
+        HalfPoint = Len // 2,
+        RootPC = KeyRoot mod 12,
+        SecondDeg = (KeyRoot + 2) mod 12,
+        DominantPC = (KeyRoot + 7) mod 12,
+        LeadingTone = (KeyRoot + 11) mod 12,
+        HalfPC = Pitches[HalfPoint] mod 12,
+        EndPC = Pitches[Len] mod 12,
+        if HalfPC == SecondDeg ; HalfPC == DominantPC ; HalfPC == LeadingTone then
+            HalfV = 0
+        else
+            HalfV = 1
+        end,
+        EndV = cond(EndPC == RootPC, 0, 1),
+        Violations = HalfV + EndV
+    end.
+
+score_phrase_rhyme(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 8 then Violations = 0
+    else
+        QuarterLen = Len // 4,
+        ThirdQuarterStart = Len // 2 + 1,
+        Count = 0,
+        foreach(I in 1..QuarterLen-1)
+            Dir1 = sign(Pitches[I+1] - Pitches[I]),
+            J = ThirdQuarterStart + I - 1,
+            Dir2 = sign(Pitches[J+1] - Pitches[J]),
+            if Dir1 != Dir2 then Count := Count + 1 end
+        end,
+        Violations = Count
+    end.
+
+score_motivic_repetition(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 5 then Violations = 0
+    else
+        Intervals = [Pitches[I+1] - Pitches[I] : I in 1..Len-1],
+        HasRepeat = false,
+        foreach(I in 1..length(Intervals)-1, not HasRepeat)
+            foreach(J in I+1..length(Intervals), not HasRepeat)
+                if Intervals[J] == Intervals[I] then HasRepeat := true end
+            end
+        end,
+        Violations = cond(HasRepeat, 0, 1)
+    end.
+
+score_motivic_fragmentation(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 8 then Violations = 0
+    else
+        Intervals = [Pitches[I+1] - Pitches[I] : I in 1..Len-1],
+        QuarterLen = Len // 4,
+        SecondHalfStart = Len // 2 + 1,
+        HasMatch = false,
+        foreach(I in 1..QuarterLen-1, not HasMatch)
+            foreach(J in SecondHalfStart..length(Intervals), not HasMatch)
+                if Intervals[J] == Intervals[I] then HasMatch := true end
+            end
+        end,
+        Violations = cond(HasMatch, 0, 1)
+    end.
+
+% ==============================================================================
+% REPORT FORMATTING
+% ==============================================================================
+
+% Print a category of constraint results
+print_category(CategoryName, Results) =>
+    printf("  %s:%n", CategoryName),
+    foreach((Name, Count) in Results)
+        Status = cond(Count == 0, "OK", to_string(Count) ++ " violations"),
+        Indicator = cond(Count == 0, "[.]", cond(Count =< 2, "[*]", "[!]")),
+        printf("    %s %-22s %s%n", Indicator, Name, Status)
+    end,
+    nl.
+
+% Lookup value in association list
+lookup(List, Key) = Value =>
+    Found = false,
+    Value0 = 0,
+    foreach((K, V) in List)
+        if K == Key then
+            Value0 := V,
+            Found := true
+        end
+    end,
+    Value = Value0.
+
+% Sign function
+sign(X) = S =>
+    if X > 0 then S = 1
+    elseif X < 0 then S = -1
+    else S = 0
+    end.
