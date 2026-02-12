@@ -1,0 +1,200 @@
+% test_phase4.pi - Tests for Phase 4 features
+% Tests humanization, velocity curves, motif memory, and constraint visualizer
+
+module test_phase4.
+
+import music_types.
+import humanize.
+import motif.
+import visualizer.
+
+main(Args) =>
+    main.
+
+main =>
+    println("=== Phase 4 Feature Tests ==="),
+    nl,
+
+    Passed = 0, Failed = 0,
+
+    % Humanization tests
+    (test_humanize_count() -> printf("  PASS: humanize_notes preserves note count%n"), Passed := Passed + 1
+     ; printf("  FAIL: humanize_notes preserves note count%n"), Failed := Failed + 1),
+    (test_humanize_zero_intensity() -> printf("  PASS: humanize_notes zero intensity is identity%n"), Passed := Passed + 1
+     ; printf("  FAIL: humanize_notes zero intensity is identity%n"), Failed := Failed + 1),
+    (test_humanize_modifies_velocity() -> printf("  PASS: humanize_notes modifies velocity%n"), Passed := Passed + 1
+     ; printf("  FAIL: humanize_notes modifies velocity%n"), Failed := Failed + 1),
+    (test_humanize_velocity_range() -> printf("  PASS: humanize_notes keeps velocity in range%n"), Passed := Passed + 1
+     ; printf("  FAIL: humanize_notes keeps velocity in range%n"), Failed := Failed + 1),
+    (test_humanize_sub_range() -> printf("  PASS: humanize_notes keeps sub in range%n"), Passed := Passed + 1
+     ; printf("  FAIL: humanize_notes keeps sub in range%n"), Failed := Failed + 1),
+
+    % Velocity curve tests
+    (test_curves_count() -> printf("  PASS: velocity_curves preserves note count%n"), Passed := Passed + 1
+     ; printf("  FAIL: velocity_curves preserves note count%n"), Failed := Failed + 1),
+    (test_curves_peak_at_climax() -> printf("  PASS: velocity_curves peak near climax%n"), Passed := Passed + 1
+     ; printf("  FAIL: velocity_curves peak near climax%n"), Failed := Failed + 1),
+    (test_curves_cadence() -> printf("  PASS: velocity_curves cadence reduces from climax%n"), Passed := Passed + 1
+     ; printf("  FAIL: velocity_curves cadence reduces from climax%n"), Failed := Failed + 1),
+
+    % Motif extraction tests
+    (test_extract_motif() -> printf("  PASS: extract_motif basic%n"), Passed := Passed + 1
+     ; printf("  FAIL: extract_motif basic%n"), Failed := Failed + 1),
+    (test_extract_motif_short() -> printf("  PASS: extract_motif short melody%n"), Passed := Passed + 1
+     ; printf("  FAIL: extract_motif short melody%n"), Failed := Failed + 1),
+    (test_motif_sign() -> printf("  PASS: motif sign function%n"), Passed := Passed + 1
+     ; printf("  FAIL: motif sign function%n"), Failed := Failed + 1),
+
+    % Visualizer tests
+    (test_vis_leap_recovery_clean() -> printf("  PASS: visualizer score_leap_recovery clean%n"), Passed := Passed + 1
+     ; printf("  FAIL: visualizer score_leap_recovery clean%n"), Failed := Failed + 1),
+    (test_vis_leap_recovery_violation() -> printf("  PASS: visualizer score_leap_recovery violation%n"), Passed := Passed + 1
+     ; printf("  FAIL: visualizer score_leap_recovery violation%n"), Failed := Failed + 1),
+    (test_vis_mostly_stepwise() -> printf("  PASS: visualizer score_mostly_stepwise%n"), Passed := Passed + 1
+     ; printf("  FAIL: visualizer score_mostly_stepwise%n"), Failed := Failed + 1),
+    (test_vis_register_consistency() -> printf("  PASS: visualizer score_register_consistency%n"), Passed := Passed + 1
+     ; printf("  FAIL: visualizer score_register_consistency%n"), Failed := Failed + 1),
+    (test_vis_consonant_leaps() -> printf("  PASS: visualizer score_consonant_leaps%n"), Passed := Passed + 1
+     ; printf("  FAIL: visualizer score_consonant_leaps%n"), Failed := Failed + 1),
+    (test_vis_phrase_ends_stable() -> printf("  PASS: visualizer score_phrase_ends_stable%n"), Passed := Passed + 1
+     ; printf("  FAIL: visualizer score_phrase_ends_stable%n"), Failed := Failed + 1),
+    (test_vis_score_all() -> printf("  PASS: visualizer score_all returns all constraints%n"), Passed := Passed + 1
+     ; printf("  FAIL: visualizer score_all returns all constraints%n"), Failed := Failed + 1),
+
+    % Summary
+    nl,
+    Total = Passed + Failed,
+    printf("Results: %d/%d passed", Passed, Total),
+    if Failed > 0 then
+        printf(", %d FAILED%n", Failed),
+        fail
+    else
+        println(" - All passed!")
+    end.
+
+% ==============================================================================
+% HUMANIZATION TESTS
+% ==============================================================================
+
+make_test_notes(N) = Notes =>
+    Notes = [$note($pitch(midi, 60 + (I mod 12), 4), $duration(1, 4),
+                   $time_pos(((I-1) // 4) + 1, ((I-1) mod 4) + 1, 0.0), 1, 80)
+             : I in 1..N].
+
+test_humanize_count =>
+    Notes = make_test_notes(16),
+    Humanized = humanize.humanize_notes(Notes, 0.5),
+    length(Humanized) == length(Notes).
+
+test_humanize_zero_intensity =>
+    Notes = make_test_notes(8),
+    Humanized = humanize.humanize_notes(Notes, 0.0),
+    Humanized == Notes.
+
+test_humanize_modifies_velocity =>
+    Notes = make_test_notes(16),
+    Humanized = humanize.humanize_notes(Notes, 1.0),
+    OrigVels = [V : $note(_, _, _, _, V) in Notes],
+    NewVels = [V : $note(_, _, _, _, V) in Humanized],
+    OrigVels != NewVels.
+
+test_humanize_velocity_range =>
+    Notes = make_test_notes(32),
+    Humanized = humanize.humanize_notes(Notes, 1.0),
+    Vels = [V : $note(_, _, _, _, V) in Humanized],
+    min(Vels) >= 30, max(Vels) =< 127.
+
+test_humanize_sub_range =>
+    Notes = make_test_notes(32),
+    Humanized = humanize.humanize_notes(Notes, 1.0),
+    Subs = [S : $note(_, _, $time_pos(_, _, S), _, _) in Humanized],
+    min(Subs) >= 0.0, max(Subs) =< 0.95.
+
+% ==============================================================================
+% VELOCITY CURVE TESTS
+% ==============================================================================
+
+test_curves_count =>
+    Notes = make_test_notes(16),
+    Curved = humanize.apply_velocity_curves(Notes, 80, 15),
+    length(Curved) == length(Notes).
+
+test_curves_peak_at_climax =>
+    % Create notes with climax at position 8 (out of 16)
+    Notes = [$note($pitch(midi, P, 4), $duration(1, 4),
+                   $time_pos(((I-1) // 4) + 1, ((I-1) mod 4) + 1, 0.0), 1, 80)
+             : {P, I} in zip([60,62,64,65,67,69,71,72,71,69,67,65,64,62,60,60], 1..16)],
+    Curved = humanize.apply_velocity_curves(Notes, 80, 20),
+    CurvedVels = [V : $note(_, _, _, _, V) in Curved],
+    CurvedVels[8] > CurvedVels[1], CurvedVels[8] > CurvedVels[16].
+
+test_curves_cadence =>
+    % Create arch melody with clear climax at position 8 of 16
+    Notes = [$note($pitch(midi, P, 4), $duration(1, 4),
+                   $time_pos(((I-1) // 4) + 1, ((I-1) mod 4) + 1, 0.0), 1, 80)
+             : {P, I} in zip([60,62,64,65,67,69,71,72,71,69,67,65,64,62,60,60], 1..16)],
+    Curved = humanize.apply_velocity_curves(Notes, 80, 20),
+    CurvedVels = [V : $note(_, _, _, _, V) in Curved],
+    % Last note should have lower velocity than the climax note (position 8)
+    CurvedVels[16] < CurvedVels[8].
+
+% ==============================================================================
+% MOTIF TESTS
+% ==============================================================================
+
+test_extract_motif =>
+    % C-D-E-F-G = intervals [2, 2, 1, 2]
+    Notes = [$note($pitch(midi, P, 4), $duration(1, 4), $time_pos(1, I, 0.0), 1, 80)
+             : {P, I} in zip([60, 62, 64, 65, 67], 1..5)],
+    Intervals = motif.extract_motif(Notes, 4),
+    Intervals == [2, 2, 1, 2].
+
+test_extract_motif_short =>
+    % Only 2 notes - should return empty (need at least 2 intervals)
+    Notes = [$note($pitch(midi, P, 4), $duration(1, 4), $time_pos(1, I, 0.0), 1, 80)
+             : {P, I} in zip([60, 62], 1..2)],
+    Intervals = motif.extract_motif(Notes, 4),
+    Intervals == [].
+
+test_motif_sign =>
+    motif.sign(5) == 1, motif.sign(-3) == -1, motif.sign(0) == 0.
+
+% ==============================================================================
+% VISUALIZER TESTS
+% ==============================================================================
+
+test_vis_leap_recovery_clean =>
+    Pitches = [60, 62, 64, 62, 60, 62, 64, 65],
+    Count = visualizer.score_leap_recovery(Pitches),
+    Count == 0.
+
+test_vis_leap_recovery_violation =>
+    % Large leap (60->72) followed by same direction (72->74): violation
+    Pitches = [60, 72, 74, 72, 60],
+    Count = visualizer.score_leap_recovery(Pitches),
+    Count > 0.
+
+test_vis_mostly_stepwise =>
+    Pitches = [60, 62, 64, 62, 60, 62, 64, 65, 64, 62],
+    Count = visualizer.score_mostly_stepwise(Pitches, 60),
+    Count == 0.
+
+test_vis_register_consistency =>
+    Pitches = [60, 80, 78, 76],
+    Count = visualizer.score_register_consistency(Pitches),
+    Count == 1.
+
+test_vis_consonant_leaps =>
+    Pitches = [60, 66, 64, 62],
+    Count = visualizer.score_consonant_leaps_only(Pitches),
+    Count == 1.
+
+test_vis_phrase_ends_stable =>
+    Pitches = [64, 62, 60],
+    Count = visualizer.score_phrase_ends_stable(Pitches, 60),
+    Count == 0.
+
+test_vis_score_all =>
+    Pitches = [60, 62, 64, 65, 67, 65, 64, 62, 60, 62, 64, 65, 67, 65, 64, 60],
+    Results = visualizer.score_all_constraints(Pitches, 60),
+    length(Results) == 26.
