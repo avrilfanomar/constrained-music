@@ -1,0 +1,283 @@
+% test_variation.pi - Tests for variation generation
+%
+% Tests continuation, classical techniques, genre transfer, and utilities.
+
+module test_variation.
+
+import variation_engine.
+import variation.
+import piece_utils.
+import pieces_folk.
+import pieces_mozart.
+import pieces_beethoven.
+import pieces_bach.
+import scale_utils.
+import cp.
+
+main =>
+    println("=== Variation Tests ==="),
+    nl,
+    PassCount = 0,
+    FailCount = 0,
+
+    % Utility tests
+    printf("  %-40s", "snap_to_scale C major"),
+    (test_snap_to_scale_c_major() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "snap_to_scale A minor"),
+    (test_snap_to_scale_a_minor() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "parse_split percentage"),
+    (test_parse_split_percentage() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "parse_split note count"),
+    (test_parse_split_note_count() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % Technique tests
+    printf("  %-40s", "retrograde melody"),
+    (test_retrograde() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "invert melody"),
+    (test_invert() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "inversion preserves length"),
+    (test_inversion_length() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "inversion all in scale"),
+    (test_inversion_in_scale() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % Piece lookup tests
+    printf("  %-40s", "get_piece_by_id folk"),
+    (test_lookup_folk() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "get_piece_by_id mozart"),
+    (test_lookup_mozart() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "get_piece_by_id beethoven"),
+    (test_lookup_beethoven() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "list all pieces"),
+    (test_list_pieces() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % Continuation tests (CP - may take a moment)
+    printf("  %-40s", "continue twinkle 50%"),
+    (test_continue_twinkle() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "continuation in scale"),
+    (test_continue_in_scale() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "continuation ends on tonic"),
+    (test_continue_ends_tonic() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % Genre transfer test (CP)
+    printf("  %-40s", "genre transfer preserves length"),
+    (test_genre_transfer_length() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-40s", "genre transfer all in scale"),
+    (test_genre_transfer_in_scale() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+    printf("=== Results: %d passed, %d failed ===%n", PassCount, FailCount),
+    if FailCount > 0 then
+        halt(1)
+    end.
+
+% ==============================================================================
+% SNAP TO SCALE TESTS
+% ==============================================================================
+
+test_snap_to_scale_c_major() =>
+    % C major: C D E F G A B
+    Pitches = [60, 61, 62, 63, 64, 65, 66],  % C C# D D# E F F#
+    Snapped = variation_engine.snap_to_scale(Pitches, 60, major),
+    % All snapped pitches must be in C major scale
+    foreach(P in Snapped)
+        PC = (P - 60) mod 12,
+        (member(PC, [0, 2, 4, 5, 7, 9, 11]) -> true ; fail)
+    end.
+
+test_snap_to_scale_a_minor() =>
+    % A natural minor: A B C D E F G
+    Pitches = [69, 70, 72, 73, 76, 77, 79],  % A Bb C Db E F G
+    Snapped = variation_engine.snap_to_scale(Pitches, 69, natural_minor),
+    foreach(P in Snapped)
+        PC = (P - 69) mod 12,
+        (member(PC, [0, 2, 3, 5, 7, 8, 10]) -> true ; fail)
+    end.
+
+% ==============================================================================
+% SPLIT PARSING TESTS
+% ==============================================================================
+
+test_parse_split_percentage() =>
+    % 50% of 20 notes = 10
+    S1 = variation.parse_split("50", 20),
+    S1 == 10,
+    % 25% of 16 notes = 4
+    S2 = variation.parse_split("25", 16),
+    S2 == 4,
+    % 75% of 12 notes = 9
+    S3 = variation.parse_split("75", 12),
+    S3 == 9.
+
+test_parse_split_note_count() =>
+    % 8n = 8 notes regardless of total
+    S1 = variation.parse_split("8n", 20),
+    S1 == 8,
+    S2 = variation.parse_split("4n", 100),
+    S2 == 4.
+
+% ==============================================================================
+% RETROGRADE TESTS
+% ==============================================================================
+
+test_retrograde() =>
+    Pitches = [60, 64, 67, 72, 60],
+    Rev = variation_engine.retrograde_melody(Pitches),
+    Rev == [60, 72, 67, 64, 60].
+
+% ==============================================================================
+% INVERSION TESTS
+% ==============================================================================
+
+test_invert() =>
+    % Simple C major melody: C E G C5 (ascending)
+    % Intervals: +4, +3, +5
+    % Inverted around C4=60: 60, 56, 53, 48
+    % After snap to scale, should still be descending overall
+    Pitches = [60, 64, 67, 72],
+    Inverted = variation_engine.invert_melody(Pitches, 60, major),
+    Inverted[1] >= Inverted[4].  % Inversion should be descending
+
+test_inversion_length() =>
+    Pitches = get_melody(pieces_mozart.k545_theme()),
+    Inverted = variation_engine.invert_melody(Pitches, 60, major),
+    length(Inverted) == length(Pitches).
+
+test_inversion_in_scale() =>
+    Pitches = get_melody(twinkle_twinkle()),
+    KeyRoot = get_key(twinkle_twinkle()),
+    Mode = get_mode(twinkle_twinkle()),
+    Inverted = variation_engine.invert_melody(Pitches, KeyRoot, Mode),
+    ScaleIntervals = scale_utils.mode_intervals(Mode),
+    RootClass = KeyRoot mod 12,
+    foreach(P in Inverted)
+        PC = (P - RootClass) mod 12,
+        (member(PC, ScaleIntervals) -> true ; fail)
+    end.
+
+% ==============================================================================
+% PIECE LOOKUP TESTS
+% ==============================================================================
+
+test_lookup_folk() =>
+    P = variation.get_piece_by_id(twinkle_twinkle),
+    get_id(P) == twinkle_twinkle,
+    Pitches = get_melody(P),
+    length(Pitches) > 0.
+
+test_lookup_mozart() =>
+    P = variation.get_piece_by_id(mozart_k545_theme),
+    get_id(P) == mozart_k545_theme.
+
+test_lookup_beethoven() =>
+    P = variation.get_piece_by_id(beethoven_ode_to_joy),
+    get_id(P) == beethoven_ode_to_joy.
+
+test_list_pieces() =>
+    AllPieces = variation.get_all_melody_excerpts(),
+    length(AllPieces) >= 20.
+
+% ==============================================================================
+% CONTINUATION TESTS
+% ==============================================================================
+
+test_continue_twinkle() =>
+    Piece = variation.get_piece_by_id(twinkle_twinkle),
+    Pitches = get_melody(Piece),
+    KeyRoot = get_key(Piece),
+    Mode = get_mode(Piece),
+    TotalLen = length(Pitches),
+    SplitPoint = TotalLen // 2,
+    Prefix = [Pitches[I] : I in 1..SplitPoint],
+    RemainingCount = TotalLen - SplitPoint,
+
+    NewPitches = variation_engine.continue_melody(Prefix, RemainingCount, KeyRoot, Mode, folk_traditional, 0.0),
+    length(NewPitches) == RemainingCount.
+
+test_continue_in_scale() =>
+    Piece = variation.get_piece_by_id(twinkle_twinkle),
+    Pitches = get_melody(Piece),
+    KeyRoot = get_key(Piece),
+    Mode = get_mode(Piece),
+    SplitPoint = length(Pitches) // 2,
+    Prefix = [Pitches[I] : I in 1..SplitPoint],
+    RemainingCount = length(Pitches) - SplitPoint,
+
+    NewPitches = variation_engine.continue_melody(Prefix, RemainingCount, KeyRoot, Mode, folk_traditional, 0.0),
+
+    ScaleIntervals = scale_utils.mode_intervals(Mode),
+    RootClass = KeyRoot mod 12,
+    foreach(P in NewPitches)
+        PC = (P - RootClass) mod 12,
+        (member(PC, ScaleIntervals) -> true ; fail)
+    end.
+
+test_continue_ends_tonic() =>
+    Piece = variation.get_piece_by_id(twinkle_twinkle),
+    Pitches = get_melody(Piece),
+    KeyRoot = get_key(Piece),
+    Mode = get_mode(Piece),
+    SplitPoint = length(Pitches) // 2,
+    Prefix = [Pitches[I] : I in 1..SplitPoint],
+    RemainingCount = length(Pitches) - SplitPoint,
+
+    NewPitches = variation_engine.continue_melody(Prefix, RemainingCount, KeyRoot, Mode, folk_traditional, 0.0),
+
+    LastPitch = NewPitches[length(NewPitches)],
+    LastPitch mod 12 == KeyRoot mod 12.
+
+% ==============================================================================
+% GENRE TRANSFER TESTS
+% ==============================================================================
+
+test_genre_transfer_length() =>
+    Piece = variation.get_piece_by_id(twinkle_twinkle),
+    Pitches = get_melody(Piece),
+    KeyRoot = get_key(Piece),
+    Mode = get_mode(Piece),
+
+    NewPitches = variation_engine.genre_transfer(Pitches, KeyRoot, Mode, baroque, 0.0),
+    length(NewPitches) == length(Pitches).
+
+test_genre_transfer_in_scale() =>
+    Piece = variation.get_piece_by_id(twinkle_twinkle),
+    Pitches = get_melody(Piece),
+    KeyRoot = get_key(Piece),
+    Mode = get_mode(Piece),
+
+    NewPitches = variation_engine.genre_transfer(Pitches, KeyRoot, Mode, baroque, 0.0),
+
+    ScaleIntervals = scale_utils.mode_intervals(Mode),
+    RootClass = KeyRoot mod 12,
+    foreach(P in NewPitches)
+        PC = (P - RootClass) mod 12,
+        (member(PC, ScaleIntervals) -> true ; fail)
+    end.

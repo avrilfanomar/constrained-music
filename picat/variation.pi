@@ -1,0 +1,436 @@
+% variation.pi - Generate variations of well-known classical music works
+%
+% Two modes:
+%   continue  - Keep first part of a piece, generate the rest via CP
+%   transform - Apply genre transfer or classical techniques (inversion, retrograde, etc.)
+%
+% Usage:
+%   picat variation.pi list
+%   picat variation.pi continue piece=mozart_k545_theme split=50
+%   picat variation.pi transform piece=twinkle_twinkle genre=baroque
+%   picat variation.pi transform piece=mozart_k545_theme technique=inversion
+
+module variation.
+
+import piece_utils.
+import pieces_folk.
+import pieces_bach.
+import pieces_mozart.
+import pieces_beethoven.
+import variation_engine.
+import melody.
+import midi_export.
+import music_types.
+import scale_utils.
+import genre_profiles.
+import constraint_selector.
+import cp.
+
+% ==============================================================================
+% ENTRY POINTS
+% ==============================================================================
+
+main =>
+    print_usage().
+
+main(Args) =>
+    if Args == [] then
+        print_usage(),
+        halt
+    end,
+
+    FirstArg = head(Args),
+    RestArgs = tail(Args),
+
+    if FirstArg == "help" ; FirstArg == "-h" then
+        print_usage(),
+        halt
+    elseif FirstArg == "list" then
+        list_pieces(),
+        halt
+    elseif FirstArg == "continue" then
+        ParsedArgs = parse_args(RestArgs),
+        run_continue_cmd(ParsedArgs),
+        halt
+    elseif FirstArg == "transform" then
+        ParsedArgs = parse_args(RestArgs),
+        run_transform_cmd(ParsedArgs),
+        halt
+    else
+        printf("Unknown command: %s%n", FirstArg),
+        print_usage(),
+        halt
+    end.
+
+% ==============================================================================
+% LIST PIECES
+% ==============================================================================
+
+list_pieces() =>
+    println("Available pieces for variation:"),
+    nl,
+    AllPieces = get_all_melody_excerpts(),
+    foreach(P in AllPieces)
+        Id = get_id(P),
+        Pitches = get_melody(P),
+        KeyRoot = get_key(P),
+        Mode = get_mode(P),
+        Genre = get_genre(P),
+        printf("  %-35w %2d notes, key=%w, mode=%w, genre=%w%n",
+               Id, length(Pitches), KeyRoot, Mode, Genre)
+    end,
+    printf("%n  Total: %d pieces%n", length(AllPieces)).
+
+% ==============================================================================
+% CONTINUE COMMAND
+% ==============================================================================
+
+run_continue_cmd(Args) =>
+    PieceId = get_arg(Args, piece, none),
+    if PieceId == none then
+        println("Error: piece= is required"),
+        println("  Example: picat variation.pi continue piece=mozart_k545_theme split=50"),
+        halt(1)
+    end,
+
+    SplitSpec = get_arg(Args, split, "50"),
+    Genre = get_arg(Args, genre, none),
+    Randomness = get_arg(Args, randomness, 0.0),
+    Output = get_arg(Args, output, "variation.json"),
+
+    run_continue(PieceId, SplitSpec, Genre, Randomness, Output).
+
+run_continue(PieceId, SplitSpec, GenreOverride, Randomness, Output) =>
+    println("=== Variation: Continue ==="),
+    nl,
+
+    % Load piece
+    Piece = get_piece_by_id(PieceId),
+    Pitches = get_melody(Piece),
+    KeyRoot = get_key(Piece),
+    Mode = get_mode(Piece),
+    OrigGenre = get_genre(Piece),
+    TotalNotes = length(Pitches),
+
+    % Parse split
+    SplitPoint = parse_split(SplitSpec, TotalNotes),
+    if SplitPoint < 1 then
+        println("Error: split must keep at least 1 note"),
+        halt(1)
+    end,
+    if SplitPoint >= TotalNotes then
+        println("Error: split must leave room for generation"),
+        halt(1)
+    end,
+
+    % Determine genre
+    if GenreOverride != none then
+        if not genre_profiles.genre_exists(GenreOverride) then
+            printf("Error: Unknown genre '%w'%n", GenreOverride),
+            halt(1)
+        end,
+        Genre = GenreOverride
+    else
+        Genre = OrigGenre
+    end,
+
+    RemainingCount = TotalNotes - SplitPoint,
+    Prefix = [Pitches[I] : I in 1..SplitPoint],
+
+    printf("  Piece: %w (%d notes)%n", PieceId, TotalNotes),
+    printf("  Keeping first %d notes, generating %d more%n", SplitPoint, RemainingCount),
+    printf("  Key: %d, Mode: %w, Genre: %w%n", KeyRoot, Mode, Genre),
+    printf("  Randomness: %.2f%n", Randomness),
+    nl,
+
+    % Generate continuation
+    println("Generating continuation..."),
+    NewPitches = variation_engine.continue_melody(Prefix, RemainingCount, KeyRoot, Mode, Genre, Randomness),
+    FullPitches = Prefix ++ NewPitches,
+
+    printf("  Generated %d notes (prefix=%d + new=%d)%n", length(FullPitches), SplitPoint, length(NewPitches)),
+    nl,
+
+    % Build notes and export
+    Tempo = default_tempo(Genre),
+    Density = 4,
+    Notes = build_variation_notes(FullPitches, Density, 80, 15, Randomness),
+    export_variation(Notes, Tempo, Output),
+    printf("Done! Saved to: %s%n", Output).
+
+% ==============================================================================
+% TRANSFORM COMMAND
+% ==============================================================================
+
+run_transform_cmd(Args) =>
+    PieceId = get_arg(Args, piece, none),
+    if PieceId == none then
+        println("Error: piece= is required"),
+        println("  Example: picat variation.pi transform piece=mozart_k545_theme genre=baroque"),
+        halt(1)
+    end,
+
+    Technique = get_arg(Args, technique, none),
+    TargetGenre = get_arg(Args, genre, none),
+    Randomness = get_arg(Args, randomness, 0.0),
+    Output = get_arg(Args, output, "variation.json"),
+
+    if Technique == none, TargetGenre == none then
+        println("Error: At least one of technique= or genre= is required"),
+        println("  Techniques: inversion, retrograde, augmentation, diminution"),
+        println("  Genres: classical_period, baroque, romantic, folk_traditional, ..."),
+        halt(1)
+    end,
+
+    run_transform(PieceId, Technique, TargetGenre, Randomness, Output).
+
+run_transform(PieceId, Technique, TargetGenre, Randomness, Output) =>
+    println("=== Variation: Transform ==="),
+    nl,
+
+    % Load piece
+    Piece = get_piece_by_id(PieceId),
+    Pitches = get_melody(Piece),
+    KeyRoot = get_key(Piece),
+    Mode = get_mode(Piece),
+    OrigGenre = get_genre(Piece),
+
+    printf("  Piece: %w (%d notes)%n", PieceId, length(Pitches)),
+    printf("  Key: %d, Mode: %w, Original genre: %w%n", KeyRoot, Mode, OrigGenre),
+    if Technique != none then printf("  Technique: %w%n", Technique) end,
+    if TargetGenre != none then printf("  Target genre: %w%n", TargetGenre) end,
+    printf("  Randomness: %.2f%n", Randomness),
+    nl,
+
+    % Validate genre if specified
+    if TargetGenre != none, not genre_profiles.genre_exists(TargetGenre) then
+        printf("Error: Unknown genre '%w'%n", TargetGenre),
+        halt(1)
+    end,
+
+    % Apply technique (if specified)
+    if Technique == inversion then
+        println("Applying inversion..."),
+        TechniquePitches = variation_engine.invert_melody(Pitches, KeyRoot, Mode)
+    elseif Technique == retrograde then
+        println("Applying retrograde..."),
+        TechniquePitches = variation_engine.retrograde_melody(Pitches)
+    elseif Technique == augmentation ; Technique == diminution then
+        % These affect density, not pitches
+        TechniquePitches = Pitches
+    elseif Technique == none then
+        TechniquePitches = Pitches
+    else
+        printf("Error: Unknown technique '%w'%n", Technique),
+        printf("  Available: inversion, retrograde, augmentation, diminution%n"),
+        halt(1)
+    end,
+
+    % Apply genre transfer (if specified)
+    if TargetGenre != none then
+        println("Applying genre transfer..."),
+        FinalPitches = variation_engine.genre_transfer(TechniquePitches, KeyRoot, Mode, TargetGenre, Randomness)
+    else
+        FinalPitches = TechniquePitches
+    end,
+
+    printf("  Result: %d notes%n", length(FinalPitches)),
+    nl,
+
+    % Determine density (affected by augmentation/diminution)
+    BaseDensity = 4,
+    if Technique == augmentation then
+        Density = max(1, BaseDensity // 2)
+    elseif Technique == diminution then
+        Density = min(8, BaseDensity * 2)
+    else
+        Density = BaseDensity
+    end,
+
+    % Build notes and export
+    if TargetGenre != none then
+        Tempo = default_tempo(TargetGenre)
+    else
+        Tempo = default_tempo(OrigGenre)
+    end,
+    Notes = build_variation_notes(FinalPitches, Density, 80, 15, Randomness),
+    export_variation(Notes, Tempo, Output),
+    printf("Done! Saved to: %s%n", Output).
+
+% ==============================================================================
+% PIECE LOOKUP
+% ==============================================================================
+
+% Collect all melody excerpts (skip SATB for variation purposes)
+get_all_melody_excerpts() = Pieces =>
+    Pieces = pieces_folk.all_folk_pieces()
+          ++ pieces_bach.all_bach_melodies()
+          ++ pieces_mozart.all_mozart_pieces()
+          ++ pieces_beethoven.all_beethoven_pieces().
+
+% Find a piece by its ID
+get_piece_by_id(Id) = Piece =>
+    AllPieces = get_all_melody_excerpts(),
+    Found = [P : P in AllPieces, get_id(P) == Id],
+    if Found != [] then
+        Piece = Found[1]
+    else
+        printf("Error: Unknown piece '%w'%n", Id),
+        println("Run 'picat variation.pi list' to see available pieces."),
+        halt(1)
+    end.
+
+% ==============================================================================
+% NOTE BUILDING & EXPORT
+% ==============================================================================
+
+% Build note structures from a pitch list
+build_variation_notes(Pitches, NotesPerBar, VelBase, VelVar, Randomness) = Notes =>
+    Notes = melody.build_mood_melody_with_randomness(
+        Pitches,
+        (length(Pitches) + NotesPerBar - 1) // NotesPerBar,  % NumBars (ceiling)
+        NotesPerBar,
+        1,  % VoiceId (soprano)
+        VelBase, VelVar, Randomness).
+
+% Export variation to JSON
+export_variation(Notes, Tempo, FilePath) =>
+    TempoChanges = [tempo_change(1, Tempo)],
+    midi_export.export_session_json(Notes, TempoChanges, FilePath).
+
+% Default tempo for a genre (middle of range)
+default_tempo(classical_period) = 110.
+default_tempo(baroque) = 90.
+default_tempo(romantic) = 100.
+default_tempo(folk_traditional) = 100.
+default_tempo(traditional_jazz) = 130.
+default_tempo(modal) = 90.
+default_tempo(sacred_chant) = 70.
+default_tempo(minimalist) = 80.
+default_tempo(children_songs) = 110.
+default_tempo(galant) = 100.
+default_tempo(high_classical) = 110.
+default_tempo(sturm_und_drang) = 120.
+default_tempo(blues) = 80.
+default_tempo(_) = 100.
+
+% ==============================================================================
+% SPLIT PARSING
+% ==============================================================================
+
+% Parse split specification: "50" = 50%, "8n" = 8 notes
+parse_split(Spec, TotalNotes) = SplitPoint =>
+    SpecStr = to_string(Spec),
+    Len = length(SpecStr),
+    if Len > 0, SpecStr[Len] == 'n' then
+        % Absolute note count (e.g., "8n")
+        NumStr = [SpecStr[I] : I in 1..Len-1],
+        SplitPoint = to_int(NumStr)
+    else
+        % Percentage (e.g., "50" means 50%)
+        Pct = to_int(SpecStr),
+        SplitPoint = max(1, (TotalNotes * Pct) // 100)
+    end.
+
+% Safe int conversion
+to_int(S) = N =>
+    catch(N = to_integer(S), _, N = 0).
+
+% ==============================================================================
+% CLI ARGUMENT PARSING
+% ==============================================================================
+
+parse_args(Args) = ParsedMap =>
+    ParsedMap = parse_args_helper(Args, new_map()).
+
+parse_args_helper([], Map) = Map.
+parse_args_helper([Arg | Rest], Map) = Result =>
+    Parts = split(Arg, "="),
+    if length(Parts) >= 2 then
+        Key = Parts[1],
+        Value = join_parts(Parts, 2),
+        Map2 = set_parsed_arg(Map, Key, Value),
+        Result = parse_args_helper(Rest, Map2)
+    else
+        printf("Warning: Unknown argument '%s' (use key=value format)%n", Arg),
+        Result = parse_args_helper(Rest, Map)
+    end.
+
+% Join parts from index onwards (in case value contains '=')
+join_parts(Parts, StartIdx) = Result =>
+    if StartIdx > length(Parts) then
+        Result = ""
+    else
+        Strs = [Parts[I] : I in StartIdx..length(Parts)],
+        Result = join_with(Strs, "=")
+    end.
+
+join_with([], _) = "".
+join_with([X], _) = X.
+join_with([X|Rest], Sep) = X ++ Sep ++ join_with(Rest, Sep).
+
+set_parsed_arg(Map, "piece", Value) = Map =>
+    Map.put(piece, to_atom_lower(Value)).
+set_parsed_arg(Map, "split", Value) = Map =>
+    Map.put(split, Value).
+set_parsed_arg(Map, "technique", Value) = Map =>
+    Map.put(technique, to_atom_lower(Value)).
+set_parsed_arg(Map, "genre", Value) = Map =>
+    Map.put(genre, to_atom_lower(Value)).
+set_parsed_arg(Map, "randomness", Value) = Map =>
+    Map.put(randomness, to_float(Value)).
+set_parsed_arg(Map, "random", Value) = Map =>
+    Map.put(randomness, to_float(Value)).
+set_parsed_arg(Map, "output", Value) = Map =>
+    Map.put(output, Value).
+set_parsed_arg(Map, Key, _Value) = Map =>
+    printf("Warning: Unknown option '%s'%n", Key).
+
+get_arg(Map, Key, Default) = Value =>
+    if Map.has_key(Key) then
+        Value = Map.get(Key)
+    else
+        Value = Default
+    end.
+
+% Convert string to lowercase atom
+to_atom_lower(S) = A =>
+    A = to_lowercase(S).parse_term().
+
+% ==============================================================================
+% USAGE
+% ==============================================================================
+
+print_usage() =>
+    println("Variation Generator - Create variations of classical music works"),
+    nl,
+    println("Usage: picat variation.pi <command> [options]"),
+    nl,
+    println("Commands:"),
+    println("  list        List all available pieces"),
+    println("  continue    Keep first part, generate the rest"),
+    println("  transform   Apply techniques or genre transfer"),
+    nl,
+    println("Continue options:"),
+    println("  piece=ID          Piece to continue (required)"),
+    println("  split=50          Keep first 50% (default: 50)"),
+    println("  split=8n          Keep first 8 notes"),
+    println("  genre=GENRE       Genre for generated part (default: original)"),
+    println("  randomness=0.3    Variation amount 0.0-1.0 (default: 0.0)"),
+    println("  output=FILE       Output JSON path (default: variation.json)"),
+    nl,
+    println("Transform options:"),
+    println("  piece=ID          Piece to transform (required)"),
+    println("  technique=TYPE    inversion, retrograde, augmentation, diminution"),
+    println("  genre=GENRE       Target genre for genre transfer"),
+    println("  randomness=0.3    Variation amount 0.0-1.0 (default: 0.0)"),
+    println("  output=FILE       Output JSON path (default: variation.json)"),
+    nl,
+    println("Examples:"),
+    println("  picat variation.pi list"),
+    println("  picat variation.pi continue piece=mozart_k545_theme split=50"),
+    println("  picat variation.pi continue piece=bach_invention1_subject split=8n genre=romantic"),
+    println("  picat variation.pi transform piece=twinkle_twinkle genre=baroque"),
+    println("  picat variation.pi transform piece=mozart_k545_theme technique=inversion"),
+    println("  picat variation.pi transform piece=mozart_k545_theme technique=inversion genre=baroque"),
+    nl.

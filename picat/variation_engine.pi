@@ -1,0 +1,225 @@
+% variation_engine.pi - Core logic for variation generation
+%
+% Provides:
+%   - continue_melody: CP-based continuation from a prefix
+%   - genre_transfer: Regenerate under different genre constraints preserving contour
+%   - invert_melody: Melodic inversion around first note
+%   - retrograde_melody: Reverse pitch sequence
+%   - snap_to_scale: Snap pitches to nearest scale notes
+
+module variation_engine.
+
+import cp.
+import scale_utils.
+import music_constraints.
+import advanced.
+import constraint_selector.
+import soft_constraints.
+import melody.
+import genre_profiles.
+import piece_utils.
+
+% ==============================================================================
+% CONTINUATION
+% ==============================================================================
+
+% Generate continuation pitches for a melody prefix
+% Returns only the NEW pitches (caller combines with prefix)
+continue_melody(Prefix, RemainingCount, KeyRoot, Mode, Genre, Randomness) = NewPitches =>
+    if RemainingCount < 1 then
+        NewPitches = []
+    else
+        % Derive voice range from prefix
+        PrefixMin = min(Prefix),
+        PrefixMax = max(Prefix),
+        Low = max(PrefixMin - 5, 36),
+        High = min(PrefixMax + 5, 96),
+        ScaleNotes = scale_notes_in_range(KeyRoot, Mode, Low, High),
+
+        if ScaleNotes == [] then
+            printf("Error: No scale notes in range %d-%d for %w %w%n", Low, High, KeyRoot, Mode),
+            halt(1)
+        end,
+
+        % Create CP variables
+        NewPitches = new_list(RemainingCount),
+        NewPitches :: ScaleNotes,
+
+        % Get genre constraints
+        ConstraintSet = constraint_selector.select_constraints(Genre, [], Randomness),
+        MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+        % Connection: first new note within MaxInterval of last prefix note
+        LastPrefix = Prefix[length(Prefix)],
+        ValidConnect = [N : N in ScaleNotes, abs(N - LastPrefix) =< MaxInterval],
+        if ValidConnect != [] then
+            NewPitches[1] :: ValidConnect
+        end,
+
+        % Max interval between consecutive new notes
+        foreach(I in 1..RemainingCount-1)
+            $abs(NewPitches[I+1] - NewPitches[I]) #=< MaxInterval
+        end,
+
+        % End on tonic
+        RootClass = KeyRoot mod 12,
+        ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+        if ValidEndNotes != [] then
+            NewPitches[RemainingCount] :: ValidEndNotes
+        end,
+
+        % No more than 2 consecutive repeated notes
+        if RemainingCount >= 3 then
+            music_constraints.max_consecutive_repeats(NewPitches, 2)
+        end,
+
+        % Minimum variety
+        if RemainingCount >= 4 then
+            nvalue(NV, NewPitches),
+            NV #>= min(3, RemainingCount // 2)
+        end,
+
+        % Genre hard constraints
+        melody.apply_genre_hard_constraints(NewPitches, KeyRoot, ConstraintSet),
+
+        % Genre soft constraints
+        TotalCost = melody.apply_genre_soft_constraints(NewPitches, KeyRoot, ConstraintSet, Randomness),
+
+        % Solve
+        melody.solve_genre_melody(NewPitches, TotalCost, Randomness)
+    end.
+
+% ==============================================================================
+% GENRE TRANSFER
+% ==============================================================================
+
+% Regenerate a melody under different genre constraints, preserving contour
+genre_transfer(OrigPitches, KeyRoot, Mode, TargetGenre, Randomness) = NewPitches =>
+    Len = length(OrigPitches),
+
+    % Derive voice range from original
+    OrigMin = min(OrigPitches),
+    OrigMax = max(OrigPitches),
+    Low = max(OrigMin - 5, 36),
+    High = min(OrigMax + 5, 96),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, Low, High),
+
+    % Create CP variables
+    NewPitches = new_list(Len),
+    NewPitches :: ScaleNotes,
+
+    % Get target genre constraints
+    ConstraintSet = constraint_selector.select_constraints(TargetGenre, [], Randomness),
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    % Base melodic constraints
+    % Max interval
+    foreach(I in 1..Len-1)
+        $abs(NewPitches[I+1] - NewPitches[I]) #=< MaxInterval
+    end,
+
+    % Start on stable tones
+    RootClass = KeyRoot mod 12,
+    StablePCs = [RootClass, (RootClass + 4) mod 12, (RootClass + 7) mod 12],
+    ValidStartNotes = [N : N in ScaleNotes, member(N mod 12, StablePCs)],
+    if ValidStartNotes != [] then
+        NewPitches[1] :: ValidStartNotes
+    end,
+
+    % End on tonic
+    ValidEndNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+    if ValidEndNotes != [] then
+        NewPitches[Len] :: ValidEndNotes
+    end,
+
+    % No more than 2 consecutive repeated notes
+    if Len >= 3 then
+        music_constraints.max_consecutive_repeats(NewPitches, 2)
+    end,
+
+    % Minimum variety
+    if Len >= 4 then
+        nvalue(NV, NewPitches),
+        NV #>= min(3, Len // 2)
+    end,
+
+    % Genre hard constraints
+    melody.apply_genre_hard_constraints(NewPitches, KeyRoot, ConstraintSet),
+
+    % Genre soft constraints
+    GenreCost = melody.apply_genre_soft_constraints(NewPitches, KeyRoot, ConstraintSet, Randomness),
+
+    % Contour similarity: penalize deviating from original's direction
+    ContourWeight = 50,
+    if Len >= 2, not constraint_selector.skip_soft_optimization(Randomness) then
+        NumIntervals = Len - 1,
+        ContourViolations = new_list(NumIntervals),
+        ContourViolations :: 0..1,
+        foreach(I in 1..NumIntervals)
+            OrigInterval = OrigPitches[I+1] - OrigPitches[I],
+            if OrigInterval > 0 then
+                % Original ascending: penalize if not ascending
+                ContourViolations[I] #<=> (NewPitches[I+1] #=< NewPitches[I])
+            elseif OrigInterval < 0 then
+                % Original descending: penalize if not descending
+                ContourViolations[I] #<=> (NewPitches[I+1] #>= NewPitches[I])
+            else
+                % Original same: penalize if changed
+                ContourViolations[I] #<=> (NewPitches[I+1] #!= NewPitches[I])
+            end
+        end,
+        ContourPenalty #= ContourWeight * sum(ContourViolations),
+
+        % Combine costs
+        if integer(GenreCost), GenreCost == 0 then
+            TotalCost = ContourPenalty
+        else
+            TotalCost #= GenreCost + ContourPenalty
+        end,
+
+        % Solve with optimization
+        melody.solve_genre_melody(NewPitches, TotalCost, Randomness)
+    else
+        % High randomness or short melody: skip contour matching
+        melody.solve_genre_melody(NewPitches, GenreCost, Randomness)
+    end.
+
+% ==============================================================================
+% CLASSICAL TECHNIQUES
+% ==============================================================================
+
+% Melodic inversion: mirror intervals around first note, snap to scale
+invert_melody(Pitches, KeyRoot, Mode) = Inverted =>
+    Pivot = Pitches[1],
+    RawInverted = [Pivot - (Pitches[I] - Pivot) : I in 1..length(Pitches)],
+    Inverted = snap_to_scale(RawInverted, KeyRoot, Mode).
+
+% Retrograde: reverse the pitch sequence
+retrograde_melody(Pitches) = reverse(Pitches).
+
+% ==============================================================================
+% SNAP TO SCALE
+% ==============================================================================
+
+% Snap each pitch to the nearest scale note
+snap_to_scale(Pitches, KeyRoot, Mode) = Snapped =>
+    ScaleIntervals = scale_utils.mode_intervals(Mode),
+    RootClass = KeyRoot mod 12,
+    Snapped = [snap_pitch(P, RootClass, ScaleIntervals) : P in Pitches].
+
+% Snap a single pitch to the nearest scale note
+snap_pitch(Pitch, RootClass, ScaleIntervals) = Best =>
+    % Check pitches within ±2 semitones for nearest in-scale note
+    Candidates = [P : Offset in -2..2,
+                  P = Pitch + Offset,
+                  PC = (P - RootClass) mod 12,
+                  member(PC, ScaleIntervals)],
+    if Candidates != [] then
+        % Pick closest (prefer lower distance, then lower pitch for ties)
+        Distances = [(abs(C - Pitch), C) : C in Candidates],
+        SortedDists = sort(Distances),
+        (_, Best) = SortedDists[1]
+    else
+        % Fallback: just use original pitch
+        Best = Pitch
+    end.
