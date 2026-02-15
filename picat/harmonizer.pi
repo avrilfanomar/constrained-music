@@ -1,0 +1,299 @@
+% harmonizer.pi - Analyze melody and select best-fitting chords per bar
+%
+% Post-processing module: takes solved melody notes and produces a chord
+% progression by scoring diatonic chords against strong-beat melody pitches.
+
+module harmonizer.
+
+import scale_utils.
+import harmonic.
+
+% ==============================================================================
+% CHORD ASSIGNMENT STRUCTURE
+% ==============================================================================
+% chord_assignment(Bar, Degree, Quality, RootPitchClass, BassNote)
+
+chord_bar(chord_assignment(B, _, _, _, _)) = B.
+chord_degree(chord_assignment(_, D, _, _, _)) = D.
+chord_quality(chord_assignment(_, _, Q, _, _)) = Q.
+chord_root_pc(chord_assignment(_, _, _, R, _)) = R.
+chord_bass(chord_assignment(_, _, _, _, Bass)) = Bass.
+
+% ==============================================================================
+% MAIN ENTRY POINT
+% ==============================================================================
+
+% Harmonize a melody: produce one chord per bar
+% MelodyNotes: list of $note() structures
+% KeyRoot: MIDI pitch of key root (e.g. 60 for C)
+% Mode: major, minor, dorian, etc.
+% Genre: genre atom for cadence style
+% NumBars: total number of bars
+% Returns: list of $chord_assignment() structures (one per bar)
+harmonize_melody(MelodyNotes, KeyRoot, Mode, Genre, NumBars) = ChordProg =>
+    RootPC = KeyRoot mod 12,
+    Intervals = mode_intervals_safe(Mode),
+
+    % Step 1: Group melody note pitch classes by bar
+    BarPitches = group_pitches_by_bar(MelodyNotes, NumBars),
+    BarStrongPitches = group_strong_pitches_by_bar(MelodyNotes, NumBars),
+
+    % Step 2: Score and select best chord for each bar
+    RawDegrees = new_list(NumBars),
+    foreach(B in 1..NumBars)
+        AllPC = BarPitches[B],
+        StrongPC = BarStrongPitches[B],
+        if StrongPC == [], AllPC == [] then
+            % Empty bar — default to tonic
+            RawDegrees[B] = 1
+        else
+            RawDegrees[B] = best_chord_for_bar(AllPC, StrongPC, RootPC, Intervals)
+        end
+    end,
+
+    % Step 3: Apply cadence overrides
+    Degrees = apply_cadences(RawDegrees, Genre, NumBars),
+
+    % Step 4: Compute bass notes with smooth voice leading
+    BassNotes = compute_bass_notes(Degrees, RootPC, Intervals, NumBars),
+
+    % Step 5: Build chord_assignment list
+    ChordProg = [build_chord_assignment(B, Degrees[B], RootPC, Intervals, mode_for_quality(Mode), BassNotes[B])
+                 : B in 1..NumBars].
+
+% ==============================================================================
+% PITCH GROUPING
+% ==============================================================================
+
+% Group all melody pitch classes by bar number
+group_pitches_by_bar(Notes, NumBars) = Groups =>
+    Groups = new_array(NumBars),
+    foreach(B in 1..NumBars) Groups[B] = [] end,
+    foreach(Note in Notes)
+        Note = $note($pitch(midi, Midi, _), _, $time_pos(Bar, _, _), _, _),
+        if Bar >= 1, Bar =< NumBars then
+            Groups[Bar] := Groups[Bar] ++ [Midi mod 12]
+        end
+    end.
+
+% Group strong-beat pitch classes by bar (beats 1 and 3)
+group_strong_pitches_by_bar(Notes, NumBars) = Groups =>
+    Groups = new_array(NumBars),
+    foreach(B in 1..NumBars) Groups[B] = [] end,
+    foreach(Note in Notes)
+        Note = $note($pitch(midi, Midi, _), _, $time_pos(Bar, Beat, _), _, _),
+        if Bar >= 1, Bar =< NumBars, (Beat == 1 ; Beat == 3) then
+            Groups[Bar] := Groups[Bar] ++ [Midi mod 12]
+        end
+    end.
+
+% ==============================================================================
+% CHORD SCORING
+% ==============================================================================
+
+% Find the best-scoring diatonic chord degree for a bar
+best_chord_for_bar(AllPC, StrongPC, RootPC, Intervals) = BestDeg =>
+    NumDegrees = length(Intervals),
+    BestScore = -999,
+    BestDeg0 = 1,
+    foreach(Deg in 1..NumDegrees)
+        Score = score_chord(Deg, RootPC, Intervals, StrongPC, AllPC),
+        if Score > BestScore then
+            BestScore := Score,
+            BestDeg0 := Deg
+        elseif Score == BestScore, Deg == 1 then
+            % Prefer tonic on ties
+            BestDeg0 := 1
+        end
+    end,
+    BestDeg = BestDeg0.
+
+% Score a candidate chord at a given scale degree
+score_chord(Degree, RootPC, Intervals, StrongPC, AllPC) = Score =>
+    NumDegrees = length(Intervals),
+    ChordRootPC = (RootPC + Intervals[Degree]) mod 12,
+    % Get chord intervals based on 3rd and 5th above in scale
+    ThirdDegIdx = ((Degree - 1 + 2) mod NumDegrees) + 1,
+    FifthDegIdx = ((Degree - 1 + 4) mod NumDegrees) + 1,
+    ThirdPC = (RootPC + Intervals[ThirdDegIdx]) mod 12,
+    FifthPC = (RootPC + Intervals[FifthDegIdx]) mod 12,
+    ChordPCs = [ChordRootPC, ThirdPC, FifthPC],
+
+    % Score strong-beat matches
+    StrongScore = sum([score_strong_match(PC, ChordRootPC, ChordPCs) : PC in StrongPC]),
+
+    % Score all-note matches (weaker)
+    WeakPC = remove_all(AllPC, StrongPC),
+    WeakScore = sum([cond(pc_member(PC, ChordPCs), 1, 0) : PC in WeakPC]),
+
+    Score = StrongScore + WeakScore.
+
+% Score a single strong-beat pitch against a chord
+score_strong_match(PC, ChordRootPC, ChordPCs) = S =>
+    if PC == ChordRootPC then
+        S = 3
+    elseif pc_member(PC, ChordPCs) then
+        S = 2
+    else
+        S = -1
+    end.
+
+% Pitch class membership check (deterministic)
+pc_member(_, []) => fail.
+pc_member(PC, [H|T]) =>
+    if PC == H then true
+    else pc_member(PC, T)
+    end.
+
+% Remove all elements of Remove from List
+remove_all(List, Remove) = [X : X in List, not pc_member(X, Remove)].
+
+% ==============================================================================
+% CADENCE OVERRIDES
+% ==============================================================================
+
+% Apply cadence patterns based on genre
+apply_cadences(Degrees, Genre, NumBars) = Final =>
+    Final = copy_term(Degrees),
+
+    % First bar = I (tonic)
+    Final[1] := 1,
+
+    % Last bar = I (tonic)
+    if NumBars >= 1 then
+        Final[NumBars] := 1
+    end,
+
+    % Penultimate bar = V (dominant) for authentic cadence
+    if NumBars >= 3 then
+        Final[NumBars - 1] := 5
+    end,
+
+    % Jazz/blues: ii-V-I in last 3 bars
+    if (Genre == traditional_jazz ; Genre == blues), NumBars >= 3 then
+        Final[NumBars - 2] := 2,
+        Final[NumBars - 1] := 5,
+        Final[NumBars] := 1
+    end,
+
+    % Half cadence at midpoint if long enough
+    if NumBars >= 8 then
+        MidBar = NumBars // 2,
+        Final[MidBar] := 5
+    end.
+
+% ==============================================================================
+% BASS VOICE LEADING
+% ==============================================================================
+
+% Compute bass notes with smooth voice leading
+compute_bass_notes(Degrees, RootPC, Intervals, NumBars) = BassNotes =>
+    BassNotes = new_list(NumBars),
+    NumDegrees = length(Intervals),
+    % First bass: chord root near middle of bass register (MIDI 43 = G2)
+    FirstPC = (RootPC + Intervals[Degrees[1]]) mod 12,
+    BassNotes[1] = nearest_pitch_in_range(FirstPC, 36, 55, 43),
+    % Subsequent: closest to previous
+    foreach(B in 2..NumBars)
+        DegIdx = Degrees[B],
+        if DegIdx >= 1, DegIdx =< NumDegrees then
+            PC = (RootPC + Intervals[DegIdx]) mod 12
+        else
+            PC = RootPC
+        end,
+        BassNotes[B] = nearest_pitch_to(PC, 36, 55, BassNotes[B-1])
+    end.
+
+% Find the MIDI pitch with given pitch class closest to Target within range
+nearest_pitch_to(PC, Lo, Hi, Target) = Best =>
+    Candidates = [N : N in Lo..Hi, N mod 12 == PC],
+    if Candidates == [] then
+        Best = Target  % fallback
+    else
+        Best0 = Candidates[1],
+        BestDist = abs(Best0 - Target),
+        foreach(C in Candidates)
+            D = abs(C - Target),
+            if D < BestDist then
+                Best0 := C,
+                BestDist := D
+            end
+        end,
+        Best = Best0
+    end.
+
+% Find nearest pitch to a preferred center in range
+nearest_pitch_in_range(PC, Lo, Hi, Preferred) = Best =>
+    Best = nearest_pitch_to(PC, Lo, Hi, Preferred).
+
+% ==============================================================================
+% CHORD ASSIGNMENT BUILDING
+% ==============================================================================
+
+% Build a chord_assignment from degree info
+build_chord_assignment(Bar, Degree, RootPC, Intervals, QualityMode, BassNote) = CA =>
+    NumDegrees = length(Intervals),
+    if Degree >= 1, Degree =< NumDegrees then SafeDeg = Degree else SafeDeg = 1 end,
+    ChordRootPC = (RootPC + Intervals[SafeDeg]) mod 12,
+    Quality = chord_quality_at_degree(QualityMode, SafeDeg),
+    CA = $chord_assignment(Bar, SafeDeg, Quality, ChordRootPC, BassNote).
+
+% Get chord quality using scale_utils if available, else compute from intervals
+chord_quality_at_degree(Mode, Degree) = Q =>
+    if (Mode == major ; Mode == minor) then
+        Q = scale_utils.diatonic_quality(Mode, Degree)
+    else
+        % For other modes, map to closest major/minor
+        Q = scale_utils.diatonic_quality(major, Degree)
+    end.
+
+% ==============================================================================
+% MODE HELPERS
+% ==============================================================================
+
+% Safe mode intervals — returns major scale intervals for unknown modes
+mode_intervals_safe(Mode) = Intervals =>
+    if mode_has_intervals(Mode) then
+        Intervals = scale_utils.mode_intervals(Mode)
+    else
+        Intervals = scale_utils.mode_intervals(major)
+    end.
+
+% Check if a mode has 7-note diatonic intervals (suitable for triadic harmony)
+mode_has_intervals(major) => true.
+mode_has_intervals(minor) => true.
+mode_has_intervals(natural_minor) => true.
+mode_has_intervals(harmonic_minor) => true.
+mode_has_intervals(melodic_minor) => true.
+mode_has_intervals(ionian) => true.
+mode_has_intervals(dorian) => true.
+mode_has_intervals(phrygian) => true.
+mode_has_intervals(lydian) => true.
+mode_has_intervals(mixolydian) => true.
+mode_has_intervals(aeolian) => true.
+mode_has_intervals(locrian) => true.
+mode_has_intervals(_) => fail.
+
+% Map mode to major/minor for quality lookups
+mode_for_quality(minor) = minor.
+mode_for_quality(natural_minor) = minor.
+mode_for_quality(harmonic_minor) = minor.
+mode_for_quality(melodic_minor) = minor.
+mode_for_quality(aeolian) = minor.
+mode_for_quality(dorian) = minor.
+mode_for_quality(phrygian) = minor.
+mode_for_quality(_) = major.  % Default: major for all other modes
+
+% ==============================================================================
+% ACCESSORS
+% ==============================================================================
+
+% Get chord tones (pitch classes) for a chord assignment
+chord_tone_pcs(chord_assignment(_, _, Quality, ChordRootPC, _)) = PCs =>
+    Ints = harmonic.chord_intervals(Quality),
+    PCs = [(ChordRootPC + I) mod 12 : I in Ints].
+
+% Get chord voicing as MIDI notes in a register
+chord_voicing(CA, LowMidi, HighMidi) = Notes =>
+    PCs = chord_tone_pcs(CA),
+    Notes = [N : N in LowMidi..HighMidi, pc_member(N mod 12, PCs)].

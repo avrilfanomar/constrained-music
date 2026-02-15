@@ -25,6 +25,7 @@ import scale_utils.
 import genre_profiles.
 import constraint_selector.
 import cp.
+import util.
 
 % ==============================================================================
 % ENTRY POINTS
@@ -295,7 +296,7 @@ build_variation_notes(Pitches, NotesPerBar, VelBase, VelVar, Randomness) = Notes
 
 % Export variation to JSON
 export_variation(Notes, Tempo, FilePath) =>
-    TempoChanges = [tempo_change(1, Tempo)],
+    TempoChanges = [$tempo_change(1, Tempo)],
     midi_export.export_session_json(Notes, TempoChanges, FilePath).
 
 % Default tempo for a genre (middle of range)

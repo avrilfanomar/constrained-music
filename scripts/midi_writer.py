@@ -25,7 +25,12 @@ except ImportError:
 
 
 def json_to_midi(json_path: str, midi_path: str) -> None:
-    """Convert a Music Companion JSON file to MIDI."""
+    """Convert a Music Companion JSON file to MIDI.
+
+    Supports multi-track output: notes are grouped by their 'voice' field.
+    Voice 1 (melody) -> Track 0, Voice 10 (accompaniment) -> Track 1, etc.
+    Backward compatible: single-voice files produce single-track MIDI.
+    """
 
     # Load JSON data
     with open(json_path, 'r') as f:
@@ -39,22 +44,39 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
     print(f"  Notes: {len(notes)}")
     print(f"  Tempo changes: {len(tempo_changes)}")
 
-    # Create MIDI file (1 track)
+    # Group notes into tracks: melody (voice <= 9) and accompaniment (voice 10+)
+    ACCOMP_VOICE = 10
+    has_accomp = any(note.get('voice', 1) >= ACCOMP_VOICE for note in notes)
+    num_tracks = 2 if has_accomp else 1
+
+    # Map all melody voices to track 0, accompaniment to track 1
+    def voice_to_track(v):
+        return 1 if v >= ACCOMP_VOICE else 0
+
+    TRACK_NAMES = {0: "Melody (RH)", 1: "Accompaniment (LH)"}
+    PROGRAM = 0  # Acoustic Grand Piano
+
+    track_labels = [TRACK_NAMES[i] for i in range(num_tracks)]
+    print(f"  Tracks: {num_tracks} ({', '.join(track_labels)})")
+
+    # Create MIDI file
     # Use deinterleave=False to avoid issues with overlapping notes
     # Use high resolution (480 ticks per quarter note) for precise timing
-    midi = MIDIFile(1, deinterleave=False, ticks_per_quarternote=480)
-    track = 0
-    channel = 0
-    time = 0  # Start at beginning
+    midi = MIDIFile(num_tracks, deinterleave=False, ticks_per_quarternote=480)
 
-    # Set track name
-    midi.addTrackName(track, 0, "Music Companion")
+    # Set up each track
+    for track_idx in range(num_tracks):
+        name = TRACK_NAMES.get(track_idx, f"Track {track_idx}")
+        midi.addTrackName(track_idx, 0, name)
+        channel = min(track_idx, 15)  # MIDI channels 0-15
+        midi.addProgramChange(track_idx, channel, 0, PROGRAM)
 
     # Default tempo (will be overwritten by first tempo change)
     initial_tempo = 120
     if tempo_changes:
         initial_tempo = tempo_changes[0]['bpm']
-    midi.addTempo(track, 0, initial_tempo)
+    # Tempo events go on track 0 (MIDI convention for format 1)
+    midi.addTempo(0, 0, initial_tempo)
 
     # Build a tempo map: bar -> tempo
     tempo_map = {}
@@ -66,7 +88,6 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
     added_tempos = {0}  # Track which beat positions have tempo changes
 
     # Convert notes to MIDI events
-    # We need to calculate absolute time in beats
     beats_per_bar = 4  # Assuming 4/4 time
 
     for note in notes:
@@ -77,6 +98,10 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
         beat = note['beat']
         sub = note.get('sub', 0)
         velocity = note['velocity']
+        voice = note.get('voice', 1)
+
+        track_idx = voice_to_track(voice)
+        channel = min(track_idx, 15)
 
         # Calculate start time in beats (0-indexed)
         start_beat = (bar - 1) * beats_per_bar + (beat - 1) + sub
@@ -85,16 +110,16 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
         # duration is a fraction of a whole note (4 beats in 4/4)
         duration_beats = (dur_num * beats_per_bar) / dur_den
 
-        # Check for tempo change at this bar
+        # Check for tempo change at this bar (on track 0 only)
         if bar in tempo_map and start_beat not in added_tempos:
             new_tempo = tempo_map[bar]
             if new_tempo != current_tempo:
-                midi.addTempo(track, start_beat, new_tempo)
+                midi.addTempo(0, start_beat, new_tempo)
                 current_tempo = new_tempo
                 added_tempos.add(start_beat)
 
-        # Add note
-        midi.addNote(track, channel, pitch, start_beat, duration_beats, velocity)
+        # Add note to its track
+        midi.addNote(track_idx, channel, pitch, start_beat, duration_beats, velocity)
 
     # Write MIDI file
     with open(midi_path, 'wb') as f:
@@ -131,17 +156,27 @@ def main():
 
     json_path = sys.argv[1]
 
+    # Validate input file exists first
+    json_file = Path(json_path)
+    if not json_file.exists() or not json_file.is_file():
+        # Fall back to session.json if input is invalid
+        if json_path in ['.', ''] or not json_file.is_file():
+            json_path = 'session.json'
+            json_file = Path(json_path)
+            if not json_file.exists():
+                print(f"Error: Input file not found: {sys.argv[1]}")
+                print(f"       And fallback session.json also not found")
+                sys.exit(1)
+        else:
+            print(f"Error: Input file not found: {json_path}")
+            sys.exit(1)
+
     # Determine output path
     if len(sys.argv) >= 3:
         midi_path = sys.argv[2]
     else:
         # Use same name with .mid extension
-        midi_path = str(Path(json_path).with_suffix('.mid'))
-
-    # Validate input file exists
-    if not Path(json_path).exists():
-        print(f"Error: Input file not found: {json_path}")
-        sys.exit(1)
+        midi_path = str(json_file.with_suffix('.mid'))
 
     json_to_midi(json_path, midi_path)
 

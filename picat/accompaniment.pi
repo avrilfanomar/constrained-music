@@ -1,0 +1,250 @@
+% accompaniment.pi - Render chord progressions into left-hand piano notes
+%
+% Post-processing module: takes a chord progression from harmonizer.pi and
+% renders it into $note() structures using genre-appropriate accompaniment
+% patterns (block, alberti, arpeggiated, waltz, stride).
+
+module accompaniment.
+
+import music_types.
+import harmonizer.
+import scale_utils.
+
+% ==============================================================================
+% CONSTANTS
+% ==============================================================================
+
+% Left-hand piano voice ID
+lh_voice_id() = 10.
+
+% Bass register
+bass_lo() = 36.  % C2
+bass_hi() = 55.  % G3
+
+% Chord voicing register (below typical melody range of 60+)
+chord_lo() = 48.  % C3
+chord_hi() = 67.  % G4
+
+% Default velocity offset from melody (softer)
+default_velocity_offset() = -15.
+
+% ==============================================================================
+% MAIN ENTRY POINT
+% ==============================================================================
+
+% Generate accompaniment notes from a chord progression
+% ChordProg: list of $chord_assignment() from harmonizer
+% Genre: genre atom for pattern selection
+% MelodyVelocity: average melody velocity (for relative dynamics)
+% Returns: list of $note() structures with VoiceId = lh_voice_id()
+generate_accompaniment(ChordProg, Genre, MelodyVelocity) = AccompNotes =>
+    Pattern = default_pattern(Genre),
+    VelOffset = velocity_offset(Genre),
+    BaseVel = max(35, min(110, MelodyVelocity + VelOffset)),
+    VoiceId = lh_voice_id(),
+    AccompNotes = flatten([render_bar(CA, Pattern, VoiceId, BaseVel)
+                           : CA in ChordProg]).
+
+% Generate with explicit pattern override
+generate_accompaniment(ChordProg, Pattern, _Genre, MelodyVelocity) = AccompNotes =>
+    VelOffset = default_velocity_offset(),
+    BaseVel = max(35, min(110, MelodyVelocity + VelOffset)),
+    VoiceId = lh_voice_id(),
+    AccompNotes = flatten([render_bar(CA, Pattern, VoiceId, BaseVel)
+                           : CA in ChordProg]).
+
+% ==============================================================================
+% GENRE-TO-PATTERN MAPPING
+% ==============================================================================
+
+default_pattern(classical_period) = alberti.
+default_pattern(galant) = alberti.
+default_pattern(high_classical) = alberti.
+default_pattern(baroque) = arpeggiated.
+default_pattern(romantic) = arpeggiated.
+default_pattern(modal) = arpeggiated.
+default_pattern(sturm_und_drang) = arpeggiated.
+default_pattern(traditional_jazz) = stride.
+default_pattern(blues) = stride.
+default_pattern(folk_traditional) = block.
+default_pattern(sacred_chant) = block.
+default_pattern(children_songs) = block.
+default_pattern(minimalist) = block.
+default_pattern(contemporary) = block.
+default_pattern(_) = block.  % Fallback
+
+% Genre-specific velocity offsets (negative = softer than melody)
+velocity_offset(romantic) = -10.
+velocity_offset(traditional_jazz) = -10.
+velocity_offset(blues) = -10.
+velocity_offset(folk_traditional) = -20.
+velocity_offset(sacred_chant) = -20.
+velocity_offset(children_songs) = -20.
+velocity_offset(minimalist) = -18.
+velocity_offset(_) = -15.  % Default
+
+% ==============================================================================
+% BAR RENDERING DISPATCHER
+% ==============================================================================
+
+% Render one bar of accompaniment from a chord assignment
+render_bar(CA, block, VoiceId, Vel) = Notes =>
+    Notes = render_block(CA, VoiceId, Vel).
+render_bar(CA, alberti, VoiceId, Vel) = Notes =>
+    Notes = render_alberti(CA, VoiceId, Vel).
+render_bar(CA, arpeggiated, VoiceId, Vel) = Notes =>
+    Notes = render_arpeggiated(CA, VoiceId, Vel).
+render_bar(CA, waltz, VoiceId, Vel) = Notes =>
+    Notes = render_waltz(CA, VoiceId, Vel).
+render_bar(CA, stride, VoiceId, Vel) = Notes =>
+    Notes = render_stride(CA, VoiceId, Vel).
+render_bar(CA, _, VoiceId, Vel) = Notes =>
+    Notes = render_block(CA, VoiceId, Vel).  % Fallback
+
+% ==============================================================================
+% PATTERN RENDERERS
+% ==============================================================================
+
+% BLOCK: all chord notes on beat 1, sustained for whole bar
+render_block(CA, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    BassNote = harmonizer.chord_bass(CA),
+    ChordNotes = get_chord_voicing(CA),
+    AllPitches = [BassNote | ChordNotes],
+    Notes = [make_note(P, Bar, 1, 1, 1, VoiceId, Vel) : P in AllPitches].
+
+% ALBERTI: Root-5th-3rd-5th pattern (4 quarter notes)
+render_alberti(CA, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    Voicing = get_chord_voicing(CA),
+    % Need at least 3 notes for Alberti pattern
+    if length(Voicing) >= 3 then
+        Root = Voicing[1],
+        Third = Voicing[2],
+        Fifth = Voicing[3],
+        Pattern = [Root, Fifth, Third, Fifth],
+        Notes = [make_note(Pattern[I], Bar, I, 1, 4, VoiceId,
+                          cond(I == 1, Vel + 5, Vel - 3))
+                 : I in 1..4]
+    else
+        % Fallback to block if not enough chord tones
+        Notes = render_block(CA, VoiceId, Vel)
+    end.
+
+% ARPEGGIATED: Bass-Root-3rd-5th ascending (4 quarter notes)
+render_arpeggiated(CA, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    BassNote = harmonizer.chord_bass(CA),
+    Voicing = get_chord_voicing(CA),
+    Pattern = [BassNote | sort(Voicing)],
+    % Take first 4 notes (or pad by repeating)
+    Len = length(Pattern),
+    if Len >= 4 then
+        Actual = [Pattern[I] : I in 1..4]
+    else
+        Actual = Pattern ++ [Pattern[((I - 1) mod Len) + 1] : I in Len+1..4]
+    end,
+    Notes = [make_note(Actual[I], Bar, I, 1, 4, VoiceId,
+                      cond(I == 1, Vel + 5, Vel - 2))
+             : I in 1..4].
+
+% WALTZ: Bass on beat 1, chord on beats 2 and 3
+render_waltz(CA, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    BassNote = harmonizer.chord_bass(CA),
+    ChordNotes = get_chord_voicing(CA),
+    BassNoteObj = make_note(BassNote, Bar, 1, 1, 4, VoiceId, Vel + 8),
+    ChordBeat2 = [make_note(P, Bar, 2, 1, 4, VoiceId, Vel - 5) : P in ChordNotes],
+    ChordBeat3 = [make_note(P, Bar, 3, 1, 4, VoiceId, Vel - 5) : P in ChordNotes],
+    Notes = [BassNoteObj] ++ ChordBeat2 ++ ChordBeat3.
+
+% STRIDE: Bass on beats 1,3 + chord on beats 2,4
+render_stride(CA, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    BassNote = harmonizer.chord_bass(CA),
+    ChordNotes = get_chord_voicing(CA),
+    % Bass: root on beat 1, fifth on beat 3
+    FifthBass = find_fifth_bass(BassNote),
+    Bass1 = make_note(BassNote, Bar, 1, 1, 4, VoiceId, Vel + 5),
+    Bass3 = make_note(FifthBass, Bar, 3, 1, 4, VoiceId, Vel),
+    Chord2 = [make_note(P, Bar, 2, 1, 4, VoiceId, Vel - 5) : P in ChordNotes],
+    Chord4 = [make_note(P, Bar, 4, 1, 4, VoiceId, Vel - 5) : P in ChordNotes],
+    Notes = [Bass1] ++ Chord2 ++ [Bass3] ++ Chord4.
+
+% ==============================================================================
+% CHORD VOICING
+% ==============================================================================
+
+% Get 3 chord tones in the chord register (48-67)
+get_chord_voicing(CA) = Voicing =>
+    PCs = harmonizer.chord_tone_pcs(CA),
+    Lo = chord_lo(),
+    Hi = chord_hi(),
+    % Collect all valid pitches, pick the lowest occurrence of each PC
+    AllNotes = sort([N : N in Lo..Hi, pc_in_list(N mod 12, PCs)]),
+    % Take one per pitch class (lowest voicing = root position tendency)
+    Voicing = pick_one_per_pc(AllNotes, PCs, []).
+
+% Pick one note per pitch class (preserving PC order for correct Root-3rd-5th)
+pick_one_per_pc(_, [], Acc) = reverse(Acc).
+pick_one_per_pc(Notes, [PC|RestPC], Acc) = Result =>
+    Candidates = [N : N in Notes, N mod 12 == PC],
+    if Candidates != [] then
+        Result = pick_one_per_pc(Notes, RestPC, [Candidates[1] | Acc])
+    else
+        Result = pick_one_per_pc(Notes, RestPC, Acc)
+    end.
+
+% Deterministic pitch class membership
+pc_in_list(_, []) => fail.
+pc_in_list(PC, [H|T]) =>
+    if PC == H then true
+    else pc_in_list(PC, T)
+    end.
+
+% Find the fifth above a bass note (7 semitones up, staying in bass range)
+find_fifth_bass(BassNote) = Fifth =>
+    F = BassNote + 7,
+    if F > bass_hi() then
+        Fifth = F - 12
+    else
+        Fifth = F
+    end,
+    if Fifth < bass_lo() then
+        Fifth := BassNote  % fallback to root
+    end.
+
+% ==============================================================================
+% NOTE CONSTRUCTION
+% ==============================================================================
+
+% Build a $note() structure for accompaniment
+make_note(MidiPitch, Bar, Beat, DurNum, DurDen, VoiceId, Vel) = Note =>
+    ClampedVel = max(30, min(120, Vel)),
+    Octave = MidiPitch // 12 - 1,
+    Note = $note(
+        $pitch(midi, MidiPitch, Octave),
+        $duration(DurNum, DurDen),
+        $time_pos(Bar, Beat, 0),
+        VoiceId,
+        ClampedVel
+    ).
+
+% ==============================================================================
+% UTILITIES
+% ==============================================================================
+
+% Average velocity of melody notes
+average_velocity(Notes) = Avg =>
+    if Notes == [] then
+        Avg = 75
+    else
+        Total = sum([V : $note(_, _, _, _, V) in Notes]),
+        Avg = Total // length(Notes)
+    end.
+
+% Supported pattern names (for CLI validation)
+supported_patterns() = [block, alberti, arpeggiated, waltz, stride].
+
+% Check if a pattern is valid
+valid_pattern(P) => pc_in_list(P, supported_patterns()).

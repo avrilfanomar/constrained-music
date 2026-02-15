@@ -1,0 +1,351 @@
+% test_accompaniment.pi - Tests for harmonizer and accompaniment modules
+%
+% Tests chord selection, cadence application, bass voice leading,
+% pattern rendering, and genre mapping.
+
+module test_accompaniment.
+
+import harmonizer.
+import accompaniment.
+import music_types.
+import scale_utils.
+import pieces_folk.
+import piece_utils.
+import genre_profiles.
+
+main =>
+    println("=== Accompaniment Tests ==="),
+    nl,
+    PassCount = 0,
+    FailCount = 0,
+
+    % --- Harmonizer tests ---
+    println("Harmonizer:"),
+
+    printf("  %-44s", "harmonize Twinkle Twinkle"),
+    (test_harmonize_twinkle() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "first bar is tonic"),
+    (test_first_bar_tonic() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "last bar is tonic"),
+    (test_last_bar_tonic() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "penultimate bar is dominant"),
+    (test_penultimate_dominant() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "bass voice leading smooth"),
+    (test_bass_voice_leading() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "diatonic chords C major"),
+    (test_diatonic_chords_major() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "diatonic chords A minor"),
+    (test_diatonic_chords_minor() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "harmonize in minor key"),
+    (test_harmonize_minor() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "bass notes in range 36-55"),
+    (test_bass_in_range() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Accompaniment pattern tests ---
+    nl,
+    println("Accompaniment Patterns:"),
+
+    printf("  %-44s", "block pattern note count"),
+    (test_block_pattern() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "alberti pattern 4 notes"),
+    (test_alberti_pattern() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "arpeggiated pattern 4 notes"),
+    (test_arpeggiated_pattern() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "stride pattern bass+chord"),
+    (test_stride_pattern() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "all notes have VoiceId=10"),
+    (test_voice_id() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "all notes in register 36-67"),
+    (test_register_range() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Genre mapping tests ---
+    nl,
+    println("Genre Mapping:"),
+
+    printf("  %-44s", "all genres have valid pattern"),
+    (test_all_genres_pattern() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Integration tests ---
+    nl,
+    println("Integration:"),
+
+    printf("  %-44s", "full pipeline melody+accomp"),
+    (test_full_pipeline() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % Summary
+    nl,
+    Total = PassCount + FailCount,
+    printf("Results: %d/%d passed%n", PassCount, Total),
+    if FailCount > 0 then
+        printf("FAILURES: %d%n", FailCount),
+        halt(1)
+    else
+        println("All tests passed!")
+    end.
+
+% ==============================================================================
+% TEST HELPERS
+% ==============================================================================
+
+% Build a simple test melody from pitches (all in bar 1..N, 4 notes per bar)
+make_test_melody(Pitches, NumBars) = Notes =>
+    NotesPerBar = length(Pitches) // NumBars,
+    Notes = [make_test_note(Pitches[I], I, NotesPerBar) : I in 1..length(Pitches)].
+
+make_test_note(Midi, Index, NotesPerBar) = Note =>
+    Bar = ((Index - 1) // NotesPerBar) + 1,
+    Beat = ((Index - 1) mod NotesPerBar) + 1,
+    Octave = Midi // 12 - 1,
+    Note = $note(
+        $pitch(midi, Midi, Octave),
+        $duration(1, NotesPerBar),
+        $time_pos(Bar, Beat, 0),
+        1,
+        80
+    ).
+
+% ==============================================================================
+% HARMONIZER TESTS
+% ==============================================================================
+
+% Twinkle Twinkle: C C G G A A G | F F E E D D C
+% Expected: bar 1 ~ I or V (C,G prominent), bar 2 ~ I (F,E,D,C)
+test_harmonize_twinkle() =>
+    Pitches = [60, 60, 67, 67, 69, 69, 67,
+               65, 65, 64, 64, 62, 62, 60],
+    Notes = make_test_melody(Pitches, 2),
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, folk_traditional, 2),
+    length(Chords) == 2,
+    % Both bars should produce valid chords (degree 1-7)
+    D1 = harmonizer.chord_degree(Chords[1]),
+    D2 = harmonizer.chord_degree(Chords[2]),
+    D1 >= 1, D1 =< 7,
+    D2 >= 1, D2 =< 7.
+
+% First bar must be tonic after cadence overrides
+test_first_bar_tonic() =>
+    Pitches = [60, 64, 67, 60, 62, 65, 69, 60,
+               60, 64, 67, 60, 62, 65, 69, 60],
+    Notes = make_test_melody(Pitches, 4),
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, classical_period, 4),
+    D1 = harmonizer.chord_degree(Chords[1]),
+    D1 == 1.
+
+% Last bar must be tonic
+test_last_bar_tonic() =>
+    Pitches = [60, 64, 67, 60, 62, 65, 69, 60,
+               60, 64, 67, 60, 62, 65, 69, 60],
+    Notes = make_test_melody(Pitches, 4),
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, classical_period, 4),
+    DLast = harmonizer.chord_degree(Chords[4]),
+    DLast == 1.
+
+% Penultimate bar should be V (dominant)
+test_penultimate_dominant() =>
+    Pitches = [60, 64, 67, 60, 62, 65, 69, 60,
+               60, 64, 67, 60, 62, 65, 69, 60],
+    Notes = make_test_melody(Pitches, 4),
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, classical_period, 4),
+    DPenult = harmonizer.chord_degree(Chords[3]),
+    DPenult == 5.
+
+% Bass notes should not leap more than 7 semitones (P5) between bars
+test_bass_voice_leading() =>
+    % Use Twinkle full for a longer progression
+    Pitches = get_melody(twinkle_twinkle_full()),
+    NumBars = length(Pitches) // 7,
+    Notes = make_test_melody(Pitches, NumBars),
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, folk_traditional, NumBars),
+    AllSmooth = true,
+    foreach(I in 1..length(Chords)-1)
+        B1 = harmonizer.chord_bass(Chords[I]),
+        B2 = harmonizer.chord_bass(Chords[I+1]),
+        Interval = abs(B2 - B1),
+        if Interval > 7 then
+            AllSmooth := false
+        end
+    end,
+    AllSmooth == true.
+
+% Check diatonic chord qualities in C major
+test_diatonic_chords_major() =>
+    diatonic_quality(major, 1) == major,
+    diatonic_quality(major, 2) == minor,
+    diatonic_quality(major, 3) == minor,
+    diatonic_quality(major, 4) == major,
+    diatonic_quality(major, 5) == major,
+    diatonic_quality(major, 6) == minor,
+    diatonic_quality(major, 7) == diminished.
+
+% Check diatonic chord qualities in A minor
+test_diatonic_chords_minor() =>
+    diatonic_quality(minor, 1) == minor,
+    diatonic_quality(minor, 2) == diminished,
+    diatonic_quality(minor, 3) == major,
+    diatonic_quality(minor, 4) == minor,
+    diatonic_quality(minor, 5) == minor,
+    diatonic_quality(minor, 6) == major,
+    diatonic_quality(minor, 7) == major.
+
+% Harmonize in A minor — should produce valid chords
+test_harmonize_minor() =>
+    % Simple A minor melody: A B C D E D C B A ...
+    Pitches = [57, 59, 60, 62, 64, 62, 60, 59,
+               57, 59, 60, 62, 64, 62, 60, 57],
+    Notes = make_test_melody(Pitches, 4),
+    Chords = harmonizer.harmonize_melody(Notes, 57, minor, classical_period, 4),
+    length(Chords) == 4,
+    foreach(C in Chords)
+        D = harmonizer.chord_degree(C),
+        D >= 1, D =< 7
+    end.
+
+% All bass notes should be in MIDI 36-55
+test_bass_in_range() =>
+    Pitches = get_melody(twinkle_twinkle()),
+    NumBars = 2,
+    Notes = make_test_melody(Pitches, NumBars),
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, folk_traditional, NumBars),
+    foreach(C in Chords)
+        B = harmonizer.chord_bass(C),
+        B >= 36, B =< 55
+    end.
+
+% ==============================================================================
+% ACCOMPANIMENT PATTERN TESTS
+% ==============================================================================
+
+% Helper: generate chords for a simple C major melody
+simple_chords() = Chords =>
+    Pitches = [60, 64, 67, 60, 62, 65, 67, 60],
+    Notes = make_test_melody(Pitches, 2),
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, classical_period, 2).
+
+% Block pattern: should produce 3 notes per bar (bass + 2-3 chord tones)
+test_block_pattern() =>
+    Chords = simple_chords(),
+    AccompNotes = accompaniment.generate_accompaniment(Chords, folk_traditional, 80),
+    % At least 2 notes per bar (bass + some chord tones)
+    length(AccompNotes) >= 4.
+
+% Alberti pattern: exactly 4 notes per bar
+test_alberti_pattern() =>
+    Chords = simple_chords(),
+    AccompNotes = accompaniment.generate_accompaniment(Chords, classical_period, 80),
+    % 2 bars * 4 notes = 8 notes
+    length(AccompNotes) == 8.
+
+% Arpeggiated pattern: exactly 4 notes per bar
+test_arpeggiated_pattern() =>
+    Chords = simple_chords(),
+    AccompNotes = accompaniment.generate_accompaniment(Chords, baroque, 80),
+    length(AccompNotes) == 8.
+
+% Stride pattern: bass(1) + chord(2) + bass(3) + chord(4)
+test_stride_pattern() =>
+    Chords = simple_chords(),
+    AccompNotes = accompaniment.generate_accompaniment(Chords, traditional_jazz, 80),
+    % 2 bars * (2 bass + 2*chord_notes) — at least 8 notes
+    length(AccompNotes) >= 8.
+
+% All accompaniment notes should have VoiceId = 10
+test_voice_id() =>
+    Chords = simple_chords(),
+    AccompNotes = accompaniment.generate_accompaniment(Chords, classical_period, 80),
+    foreach(Note in AccompNotes)
+        Note = $note(_, _, _, VId, _),
+        VId == 10
+    end.
+
+% All accompaniment notes should be in MIDI 36-67
+test_register_range() =>
+    Chords = simple_chords(),
+    AccompNotes = accompaniment.generate_accompaniment(Chords, classical_period, 80),
+    foreach(Note in AccompNotes)
+        Note = $note($pitch(midi, Midi, _), _, _, _, _),
+        Midi >= 36, Midi =< 67
+    end.
+
+% ==============================================================================
+% GENRE MAPPING TESTS
+% ==============================================================================
+
+% All defined genres should return a valid accompaniment pattern
+test_all_genres_pattern() =>
+    Genres = genre_profiles.all_genres(),
+    ValidPatterns = accompaniment.supported_patterns(),
+    foreach(G in Genres)
+        P = accompaniment.default_pattern(G),
+        pc_in_list(P, ValidPatterns)
+    end.
+
+% Deterministic membership
+pc_in_list(_, []) => fail.
+pc_in_list(X, [H|T]) =>
+    if X == H then true
+    else pc_in_list(X, T)
+    end.
+
+% ==============================================================================
+% INTEGRATION TESTS
+% ==============================================================================
+
+% Full pipeline: melody notes → harmonize → accompaniment → valid notes
+test_full_pipeline() =>
+    % Use Twinkle Twinkle as melody
+    Pitches = get_melody(twinkle_twinkle()),
+    NumBars = 2,
+    Notes = make_test_melody(Pitches, NumBars),
+
+    % Harmonize
+    Chords = harmonizer.harmonize_melody(Notes, 60, major, classical_period, NumBars),
+    length(Chords) == NumBars,
+
+    % Generate accompaniment
+    AvgVel = accompaniment.average_velocity(Notes),
+    AccompNotes = accompaniment.generate_accompaniment(Chords, classical_period, AvgVel),
+    AccompNotes != [],
+
+    % All accompaniment notes are valid $note() structures
+    foreach(N in AccompNotes)
+        N = $note($pitch(midi, Midi, _), $duration(_, _), $time_pos(Bar, Beat, _), VId, Vel),
+        Midi >= 0, Midi =< 127,
+        Bar >= 1, Bar =< NumBars,
+        Beat >= 1,
+        VId == 10,
+        Vel >= 30, Vel =< 120
+    end,
+
+    % Combined notes from melody + accompaniment
+    AllNotes = Notes ++ AccompNotes,
+    length(AllNotes) > length(Notes).

@@ -113,6 +113,9 @@ alto_voice() = $voice(2, alto, 1, $range(53, 74)).         % F3-D5
 tenor_voice() = $voice(3, tenor, 2, $range(48, 69)).       % C3-A4
 bass_voice() = $voice(4, bass, 3, $range(40, 60)).         % E2-C4
 
+% Piano split voices (for accompaniment)
+piano_lh_voice() = $voice(10, piano_lh, 1, $range(36, 67)).  % C2-G4 (left hand)
+
 % Instrument voices
 piano_voice() = $voice(5, piano, 0, $range(21, 108)).      % A0-C8
 violin_voice() = $voice(6, violin, 1, $range(55, 103)).    % G3-G7

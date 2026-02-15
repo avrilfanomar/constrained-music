@@ -21,6 +21,8 @@ import validation.
 import humanize.
 import motif.
 import visualizer.
+import harmonizer.
+import accompaniment.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -82,8 +84,12 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
 
     % Apply humanization (micro-timing and velocity jitter)
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
-    FinalNotes = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    FinalMelody = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
+
+    % Generate accompaniment
+    AccompNotes = generate_accompaniment_for_melody(AllNotes, KeyRoot, Segments, none, none),
+    FinalNotes = FinalMelody ++ AccompNotes,
 
     % Collect tempo changes for MIDI export
     TempoChanges = collect_tempo_changes(Segments),
@@ -230,8 +236,13 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
 
     % Apply humanization
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
-    FinalNotes = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    FinalMelody = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
+
+    % Generate accompaniment
+    AccompPattern = get_accomp_preference(Preferences),
+    AccompNotes = generate_accompaniment_for_melody(AllNotes, KeyRoot, Segments, Genre, AccompPattern),
+    FinalNotes = FinalMelody ++ AccompNotes,
 
     % Collect tempo changes
     TempoChanges = collect_tempo_changes(Segments),
@@ -367,8 +378,13 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
 
     % Apply humanization
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
-    FinalNotes = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    FinalMelody = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
+
+    % Generate accompaniment
+    AccompPattern = cond(Genre != none, get_accomp_preference(Preferences), none),
+    AccompNotes = generate_accompaniment_for_melody(AllNotes, KeyRoot, Segments, Genre, AccompPattern),
+    FinalNotes = FinalMelody ++ AccompNotes,
 
     % Collect tempo changes
     TempoChanges = collect_tempo_changes(Segments),
@@ -627,6 +643,64 @@ generate_segments_helper([Seg | Rest], KeyRoot, SegIndex, CurrentBar, Acc) = Res
     Result = generate_segments_helper(Rest, KeyRoot, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc]).
 
 % ==============================================================================
+% ACCOMPANIMENT GENERATION
+% ==============================================================================
+
+% Generate accompaniment for a melody
+% Genre = none means use default (block) pattern
+% Pattern = none means auto-select from genre
+generate_accompaniment_for_melody(MelodyNotes, KeyRoot, Segments, Genre, Pattern) = AccompNotes =>
+    if MelodyNotes == [] then
+        AccompNotes = []
+    else
+        % Determine mode from first segment
+        FirstParams = get_segment_params(Segments[1]),
+        Mode = get_mode(FirstParams),
+
+        % Total bars from melody notes
+        MaxBar = max([Bar : $note(_, _, $time_pos(Bar, _, _), _, _) in MelodyNotes]),
+
+        % Harmonize
+        println("Generating accompaniment..."),
+        ChordProg = harmonizer.harmonize_melody(MelodyNotes, KeyRoot, Mode, cond(Genre != none, Genre, classical_period), MaxBar),
+
+        % Check if accompaniment is disabled
+        if Pattern == none then
+            AccompNotes = [],
+            println("Accompaniment disabled")
+        else
+            % Get average melody velocity
+            AvgVel = accompaniment.average_velocity(MelodyNotes),
+
+            % Select pattern (auto = use genre default, explicit = use specified pattern)
+            if Pattern == auto then
+                % Auto-select based on genre
+                if Genre != none then
+                    AccompNotes = accompaniment.generate_accompaniment(ChordProg, Genre, AvgVel)
+                else
+                    AccompNotes = accompaniment.generate_accompaniment(ChordProg, classical_period, AvgVel)
+                end
+            else
+                % Use explicit pattern with genre fallback for velocity offset
+                AccompNotes = accompaniment.generate_accompaniment(ChordProg, Pattern, Genre, AvgVel)
+            end,
+
+            % Light humanization for accompaniment
+            AccompNotes := humanize.humanize_notes(AccompNotes, 0.15),
+            printf("  Generated %d accompaniment notes%n%n", length(AccompNotes))
+        end
+    end.
+
+% Get accomp pattern preference from CLI preferences list
+% Returns: explicit pattern name, 'auto' (use genre default), or 'none' (disabled)
+get_accomp_preference(Preferences) = Pattern =>
+    if member(accomp=P, Preferences) then
+        Pattern = P
+    else
+        Pattern = auto  % Default: auto-select from genre
+    end.
+
+% ==============================================================================
 % EXPRESSION AND HUMANIZATION
 % ==============================================================================
 
@@ -741,10 +815,12 @@ main(Args) =>
         print_all_genres(),
         halt
     elseif FirstArg == "demo" then
-        % Parse additional options for demo
+        % Parse additional options for demo (genre, accomp, randomness, etc.)
         ParsedOpts = parse_args(RestArgs),
         Randomness = get_arg(ParsedOpts, randomness, 0.0),
-        demo_with_randomness(Randomness),
+        Genre = get_arg(ParsedOpts, genre, none),
+        Accomp = get_arg(ParsedOpts, accomp, auto),
+        demo_with_options(Randomness, Genre, Accomp),
         halt
     elseif FirstArg == "path" then
         demo_path(),
@@ -877,6 +953,8 @@ set_arg(Map, "disable", Value) = Map =>
     Map.put(disable, Existing ++ [to_atom(Value)]).
 set_arg(Map, "intensity", Value) = Map =>
     Map.put(intensity, to_atom(Value)).
+set_arg(Map, "accomp", Value) = Map =>
+    Map.put(accomp, to_atom(Value)).
 set_arg(Map, "count", Value) = Map =>
     Map.put(count, to_integer(Value)).
 set_arg(Map, Key, Value) = Map =>
@@ -989,6 +1067,11 @@ build_preferences(ParsedArgs) = Preferences =>
     % Add intensity
     Intensity = get_arg(ParsedArgs, intensity, standard),
     Prefs := Prefs ++ [intensity=Intensity],
+    % Add accompaniment pattern
+    Accomp = get_arg(ParsedArgs, accomp, none),
+    if Accomp != none then
+        Prefs := Prefs ++ [accomp=Accomp]
+    end,
     Preferences = Prefs.
 
 % Print all available genres
@@ -1016,6 +1099,17 @@ demo() =>
 % Quick demo with randomness
 demo_with_randomness(Randomness) =>
     run_companion_presets(sad_depressed, energized, 60, "session.json", Randomness).
+
+% Quick demo with genre and accompaniment options
+demo_with_options(Randomness, Genre, Accomp) =>
+    % Build preferences list
+    Prefs = cond(Accomp != auto, [accomp=Accomp], []),
+    % If genre specified, use run_companion_with_genre; otherwise use run_companion_presets
+    if Genre != none then
+        run_companion_with_genre(mood_preset(sad_depressed), mood_preset(energized), 60, "session.json", Randomness, Genre, Prefs)
+    else
+        run_companion_presets(sad_depressed, energized, 60, "session.json", Randomness)
+    end.
 
 % Demo showing transition path only (no generation)
 demo_path() =>

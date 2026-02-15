@@ -9,14 +9,17 @@
 # Options:
 #   --midi          Convert output JSON to MIDI after running
 #   --play          Convert to MIDI and play with timidity
+#   --lilypond      Generate LilyPond score (.ly) for sheet music
+#   --sampler       Generate sampler-ready MIDI with CC automation
+#   --library <lib> Sampler library style: spitfire, eastwest, generic
+#   --all           Generate all outputs (MIDI, LilyPond, sampler)
+#   --output <name> Output file base name (default: derived from args)
+#   --player <p>    Specify MIDI player: timidity, fluidsynth, vlc, mpv
 
 set -euo pipefail
 
-# Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-
-# Set Picat module search path
 export PICATPATH="$PROJECT_ROOT/picat"
 
 # Parse options
@@ -30,53 +33,23 @@ MIDI_PLAYER=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --midi)
-            CONVERT_MIDI=true
-            shift
-            ;;
-        --play)
-            CONVERT_MIDI=true
-            PLAY_MIDI=true
-            shift
-            ;;
-        --lilypond)
-            CONVERT_LILYPOND=true
-            shift
-            ;;
-        --sampler)
-            CONVERT_SAMPLER=true
-            shift
-            ;;
-        --library)
-            SAMPLER_LIBRARY="$2"
-            shift 2
-            ;;
-        --output)
-            OUTPUT_NAME="$2"
-            shift 2
-            ;;
-        --player)
-            MIDI_PLAYER="$2"
-            shift 2
-            ;;
-        --all)
-            CONVERT_MIDI=true
-            CONVERT_LILYPOND=true
-            CONVERT_SAMPLER=true
-            shift
-            ;;
-        *)
-            break
-            ;;
+        --midi)      CONVERT_MIDI=true; shift ;;
+        --play)      CONVERT_MIDI=true; PLAY_MIDI=true; shift ;;
+        --lilypond)  CONVERT_LILYPOND=true; shift ;;
+        --sampler)   CONVERT_SAMPLER=true; shift ;;
+        --library)   SAMPLER_LIBRARY="$2"; shift 2 ;;
+        --output)    OUTPUT_NAME="$2"; shift 2 ;;
+        --player)    MIDI_PLAYER="$2"; shift 2 ;;
+        --all)       CONVERT_MIDI=true; CONVERT_LILYPOND=true; CONVERT_SAMPLER=true; shift ;;
+        *)           break ;;
     esac
 done
 
-# Function to find available MIDI player
+# Find an available MIDI player
 find_midi_player() {
-    # Check in order of preference
-    local players=("timidity" "fluidsynth" "vlc" "mpv" "aplay")
+    local players=(timidity fluidsynth vlc mpv)
     for player in "${players[@]}"; do
-        if command -v "$player" &> /dev/null; then
+        if command -v "$player" &>/dev/null; then
             echo "$player"
             return 0
         fi
@@ -84,12 +57,11 @@ find_midi_player() {
     return 1
 }
 
-# Function to play MIDI file with available player
+# Play a MIDI file
 play_midi() {
     local midi_file="$1"
     local player="${MIDI_PLAYER:-}"
 
-    # If no player specified, find one
     if [ -z "$player" ]; then
         player=$(find_midi_player) || {
             echo "Error: No MIDI player found. Install one of: timidity, fluidsynth, vlc, mpv"
@@ -110,9 +82,7 @@ play_midi() {
             timidity "$midi_file" --output-16bit
             ;;
         fluidsynth)
-            # FluidSynth requires a soundfont
             local soundfont=""
-            # Try common soundfont locations
             for sf in /usr/share/soundfonts/default.sf2 \
                       /usr/share/sounds/sf2/FluidR3_GM.sf2 \
                       /usr/share/soundfonts/FluidR3_GM.sf2 \
@@ -123,8 +93,7 @@ play_midi() {
                 fi
             done
             if [ -z "$soundfont" ]; then
-                echo "Warning: No soundfont found for fluidsynth"
-                echo "Install a soundfont package or set SOUNDFONT environment variable"
+                echo "Error: No soundfont found for fluidsynth"
                 return 1
             fi
             fluidsynth -a alsa -m alsa_seq -l -i "$soundfont" "$midi_file"
@@ -135,14 +104,8 @@ play_midi() {
         mpv)
             mpv "$midi_file"
             ;;
-        aplay)
-            # aplay can't play MIDI directly, needs conversion
-            echo "Error: aplay cannot play MIDI files directly"
-            return 1
-            ;;
         *)
-            # Try running the specified player directly
-            if command -v "$player" &> /dev/null; then
+            if command -v "$player" &>/dev/null; then
                 "$player" "$midi_file"
             else
                 echo "Error: Player '$player' not found"
@@ -153,7 +116,7 @@ play_midi() {
 }
 
 # Check if Picat is installed
-if ! command -v picat &> /dev/null; then
+if ! command -v picat &>/dev/null; then
     echo "Error: Picat is not installed or not in PATH"
     echo ""
     echo "Please install Picat from: https://picat-lang.org/"
@@ -165,7 +128,7 @@ if ! command -v picat &> /dev/null; then
     exit 1
 fi
 
-# Check for arguments
+# Show usage if no arguments
 if [ $# -eq 0 ]; then
     echo "Constrained Music Generation - Picat Runner"
     echo ""
@@ -174,7 +137,7 @@ if [ $# -eq 0 ]; then
     echo "Options:"
     echo "  --midi             Convert output JSON to MIDI after running"
     echo "  --play             Convert to MIDI and play with available player"
-    echo "  --player <player>  Specify MIDI player: timidity, fluidsynth, vlc, mpv, afplay"
+    echo "  --player <player>  Specify MIDI player: timidity, fluidsynth, vlc, mpv"
     echo "  --lilypond         Generate LilyPond score (.ly) for sheet music"
     echo "  --sampler          Generate sampler-ready MIDI with CC automation"
     echo "  --library <lib>    Sampler library style: spitfire, eastwest, generic"
@@ -199,59 +162,48 @@ fi
 FILE="$1"
 shift
 
-# If file path doesn't start with /, make it relative to project root
+# Make relative paths absolute from project root
 if [[ "$FILE" != /* ]]; then
     FILE="$PROJECT_ROOT/$FILE"
 fi
 
-# Check if file exists
 if [ ! -f "$FILE" ]; then
     echo "Error: File not found: $FILE"
     exit 1
 fi
 
-# Determine output name from Picat arguments if not specified via --output
-# Look for output=... in the Picat args
+# Determine output name: explicit --output > output=arg > first non-kv arg > "session"
 if [ -z "$OUTPUT_NAME" ]; then
     for arg in "$@"; do
         if [[ "$arg" == output=* ]]; then
             OUTPUT_NAME="${arg#output=}"
-            OUTPUT_NAME="${OUTPUT_NAME%.json}"  # Remove .json if present
+            OUTPUT_NAME="${OUTPUT_NAME%.json}"
             break
         fi
     done
 fi
 
-# Fall back to first arg or default
-if [ -z "$OUTPUT_NAME" ] && [ $# -gt 0 ]; then
-    # Check if first arg is a command like 'demo', use it as output name
-    first_arg="$1"
-    if [[ ! "$first_arg" == *=* ]]; then
-        OUTPUT_NAME="$first_arg"
-    else
-        OUTPUT_NAME="session"
-    fi
+if [ -z "$OUTPUT_NAME" ] && [ $# -gt 0 ] && [[ "$1" != *=* ]]; then
+    OUTPUT_NAME="$1"
 fi
 
-# Run Picat with the file and any additional arguments
+# Run Picat
 cd "$PROJECT_ROOT"
-
-# Clean compiled files to ensure fresh compilation
 rm -f "$PROJECT_ROOT/picat/"*.qi
 
-# Check if output= is already in the args
-HAS_OUTPUT_ARG=false
-for arg in "$@"; do
-    if [[ "$arg" == output=* ]]; then
-        HAS_OUTPUT_ARG=true
-        break
-    fi
-done
-
-# If we determined an OUTPUT_NAME and output= is not in args, pass it to Picat
+# Build Picat args, appending output= if not already present
 PICAT_ARGS=("$@")
-if [ -n "$OUTPUT_NAME" ] && [ "$HAS_OUTPUT_ARG" = false ]; then
-    PICAT_ARGS+=("output=${OUTPUT_NAME}.json")
+if [ -n "$OUTPUT_NAME" ]; then
+    HAS_OUTPUT_ARG=false
+    for arg in "$@"; do
+        if [[ "$arg" == output=* ]]; then
+            HAS_OUTPUT_ARG=true
+            break
+        fi
+    done
+    if [ "$HAS_OUTPUT_ARG" = false ]; then
+        PICAT_ARGS+=("output=${OUTPUT_NAME}.json")
+    fi
 fi
 
 echo "Running: picat $FILE ${PICAT_ARGS[*]}"
@@ -259,121 +211,82 @@ echo "PICATPATH: $PICATPATH"
 echo ""
 picat "$FILE" "${PICAT_ARGS[@]}"
 
-# Find JSON files for post-processing
-# Supports multiple outputs from count=N option (session_1.json, session_2.json, etc.)
-find_json_files() {
-    local base_name="$1"
-    local files=()
+# --- Post-processing ---
 
-    # Check for numbered files (from count=N option)
-    for f in "${base_name}"_*.json; do
-        if [ -f "$f" ]; then
-            files+=("$f")
-        fi
-    done
+NEEDS_POST=$( [[ "$CONVERT_MIDI" = true || "$CONVERT_LILYPOND" = true || "$CONVERT_SAMPLER" = true ]] && echo true || echo false )
+if [ "$NEEDS_POST" = false ]; then
+    exit 0
+fi
 
-    # If no numbered files, check for single file
-    if [ ${#files[@]} -eq 0 ]; then
-        if [ -f "${base_name}.json" ]; then
-            files=("${base_name}.json")
-        fi
+# Collect JSON output files
+collect_json_files() {
+    local base="$1"
+    local found=()
+    # Check for numbered files first (from count=N)
+    while IFS= read -r -d '' f; do
+        found+=("$f")
+    done < <(find . -maxdepth 1 -name "${base}_*.json" -print0 2>/dev/null | sort -zV)
+    # Fall back to single file
+    if [ ${#found[@]} -eq 0 ] && [ -f "${base}.json" ]; then
+        found=("${base}.json")
     fi
-
-    echo "${files[@]}"
+    printf '%s\n' "${found[@]}"
 }
 
-# Determine base name for output files
-# First try the expected output name, then fall back to session.json
-OUTPUT_BASE=""
-if [ -n "$OUTPUT_NAME" ]; then
-    # Check if files with OUTPUT_NAME were actually created
-    OUTPUT_BASE="${OUTPUT_NAME%.json}"  # Remove .json if present
-    if [ ! -f "${OUTPUT_BASE}.json" ] && ! ls "${OUTPUT_BASE}"_*.json &>/dev/null 2>&1; then
-        # Expected output not found, check for session.json (preset functions may hard-code this)
-        if [ -f "session.json" ] || ls session_*.json &>/dev/null 2>&1; then
-            OUTPUT_BASE="session"
-        else
-            OUTPUT_BASE=""  # No output found
-        fi
-    fi
-elif [ -f "session.json" ] || ls session_*.json &>/dev/null 2>&1; then
-    OUTPUT_BASE="session"
-fi
-
-# Get list of JSON files to process
+# Try OUTPUT_NAME first, fall back to "session"
 JSON_FILES=()
-if [ -n "$OUTPUT_BASE" ]; then
-    mapfile -t JSON_FILES < <(find_json_files "$OUTPUT_BASE" | tr ' ' '\n' | sort -V)
+for base in "${OUTPUT_NAME:-}" "session"; do
+    [ -z "$base" ] && continue
+    base="${base%.json}"
+    mapfile -t JSON_FILES < <(collect_json_files "$base" | grep -v '^$')
+    [ ${#JSON_FILES[@]} -gt 0 ] && break
+done
+
+if [ ${#JSON_FILES[@]} -eq 0 ]; then
+    echo ""
+    echo "Warning: No JSON output file found for conversion"
+    echo "Expected: ${OUTPUT_NAME:-session}.json or ${OUTPUT_NAME:-session}_*.json"
+    exit 0
 fi
 
-# Convert to MIDI if requested
-if [ "$CONVERT_MIDI" = true ] && [ ${#JSON_FILES[@]} -gt 0 ]; then
+# Helper: run a Python converter on all JSON files
+run_converter() {
+    local script="$1"
+    shift
     echo ""
     if [ ${#JSON_FILES[@]} -gt 1 ]; then
-        echo "Converting ${#JSON_FILES[@]} JSON files to MIDI..."
+        echo "Converting ${#JSON_FILES[@]} JSON files with $(basename "$script")..."
     fi
-
-    for JSON_FILE in "${JSON_FILES[@]}"; do
-        if [ -f "$JSON_FILE" ]; then
-            echo "Converting $JSON_FILE to MIDI..."
-            "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_writer.py" "$JSON_FILE"
-        fi
+    for json_file in "${JSON_FILES[@]}"; do
+        echo "Converting $json_file..."
+        "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/$script" "$json_file" "$@"
     done
+}
 
-    # Play first MIDI file if requested
+if [ "$CONVERT_MIDI" = true ]; then
+    run_converter midi_writer.py
+
     if [ "$PLAY_MIDI" = true ]; then
-        FIRST_JSON="${JSON_FILES[0]}"
-        MIDI_FILE="${FIRST_JSON%.json}.mid"
-        if [ -f "$MIDI_FILE" ]; then
-            play_midi "$MIDI_FILE"
+        if [ ${#JSON_FILES[@]} -gt 0 ]; then
+            MIDI_FILE="${JSON_FILES[0]%.json}.mid"
+            if [ -z "$MIDI_FILE" ] || [ "$MIDI_FILE" = ".mid" ]; then
+                echo "Warning: Invalid MIDI file path (skipping playback)"
+            elif [ -f "$MIDI_FILE" ]; then
+                play_midi "$MIDI_FILE"
+            else
+                echo "Note: MIDI file not yet accessible at $MIDI_FILE"
+            fi
         else
-            echo "Warning: MIDI file not found: $MIDI_FILE"
+            echo "Warning: No JSON files to play"
         fi
     fi
 fi
 
-# Convert to LilyPond if requested
-if [ "$CONVERT_LILYPOND" = true ] && [ ${#JSON_FILES[@]} -gt 0 ]; then
-    echo ""
-    if [ ${#JSON_FILES[@]} -gt 1 ]; then
-        echo "Converting ${#JSON_FILES[@]} JSON files to LilyPond..."
-    fi
-
-    for JSON_FILE in "${JSON_FILES[@]}"; do
-        if [ -f "$JSON_FILE" ]; then
-            echo "Converting $JSON_FILE to LilyPond..."
-            "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/lilypond_writer.py" "$JSON_FILE"
-
-            LY_FILE="${JSON_FILE%.json}.ly"
-            if [ -f "$LY_FILE" ]; then
-                echo "LilyPond file created: $LY_FILE"
-            fi
-        fi
-    done
+if [ "$CONVERT_LILYPOND" = true ]; then
+    run_converter lilypond_writer.py
     echo "To generate PDFs: lilypond *.ly"
 fi
 
-# Convert to sampler format if requested
-if [ "$CONVERT_SAMPLER" = true ] && [ ${#JSON_FILES[@]} -gt 0 ]; then
-    echo ""
-    if [ ${#JSON_FILES[@]} -gt 1 ]; then
-        echo "Converting ${#JSON_FILES[@]} JSON files to sampler format..."
-    fi
-
-    for JSON_FILE in "${JSON_FILES[@]}"; do
-        if [ -f "$JSON_FILE" ]; then
-            echo "Converting $JSON_FILE to sampler format..."
-            "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/sampler_writer.py" \
-                "$JSON_FILE" --format midi_cc --library "$SAMPLER_LIBRARY"
-        fi
-    done
-fi
-
-# Report if no JSON file found for post-processing
-if [ "$CONVERT_MIDI" = true ] || [ "$CONVERT_LILYPOND" = true ] || [ "$CONVERT_SAMPLER" = true ]; then
-    if [ ${#JSON_FILES[@]} -eq 0 ]; then
-        echo ""
-        echo "Warning: No JSON output file found for conversion"
-        echo "Expected: session.json or session_*.json"
-    fi
+if [ "$CONVERT_SAMPLER" = true ]; then
+    run_converter sampler_writer.py --format midi_cc --library "$SAMPLER_LIBRARY"
 fi

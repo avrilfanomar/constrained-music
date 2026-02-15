@@ -75,6 +75,10 @@ rm -f picat/*.qi
 - `constraint_registry.pi` - Central registry of all constraints
 - `constraint_selector.pi` - Selects constraints based on genre and preferences
 
+**Accompaniment:**
+- `harmonizer.pi` - Melody-to-chord-progression analysis (diatonic scoring algorithm)
+- `accompaniment.pi` - Chord-to-note rendering with genre-specific patterns
+
 **Instrument-Specific:**
 - `violin_types.pi` - Violin articulations, bowing, expression
 - `violin_constraints.pi` - Violin-specific playing constraints
@@ -155,6 +159,8 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ./scripts/run_picat.sh picat/test_genre_profiles.pi         # Genre configuration tests
 ./scripts/run_picat.sh picat/test_diagnostics.pi            # Constraint conflict detection tests
 ./scripts/run_picat.sh picat/test_transition.pi             # Mood transition planning tests
+./scripts/run_picat.sh picat/test_variation.pi              # Variation generation tests
+./scripts/run_picat.sh picat/test_accompaniment.pi          # Accompaniment & harmonizer tests
 ```
 
 The **constraint validation test suite** (`test_constraint_validation.pi`) validates that famous musical masterpieces satisfy the implemented constraints:
@@ -295,6 +301,89 @@ Phase 4 adds post-processing and analysis features that improve output quality w
   - `score_all_constraints(Pitches, Root)` - Returns list of 26 (constraint_name, violation_count) tuples.
   - `print_violation_report(Pitches, Root, GenreId)` - Formatted report with categories (Melodic Motion, Contour & Structure, Tonal & Harmonic, Cadence & Period, Motivic). Indicators: `[.]`=clean, `[*]`=1-2 violations, `[!]`=3+ violations.
   - Automatically printed after genre-based generation.
+
+### Phase 5: Piano Accompaniment
+
+Adds a left-hand piano accompaniment (bass line + chord patterns) to the generated melody, transforming single-voice output into a two-handed piano arrangement. This is purely post-processing — the melody pipeline stays untouched.
+
+**Architecture:**
+```
+melody.pi (unchanged) → harmonizer.pi → accompaniment.pi
+         ↓                    ↓                 ↓
+   melody notes        chord progression   accompaniment notes
+         ↓                                       ↓
+              companion.pi merges both note lists
+                           ↓
+                midi_writer.py (multi-track: melody=Track 0, accomp=Track 1)
+```
+
+**Modules:**
+- `harmonizer.pi` — Analyzes melody per bar, selects best-fitting diatonic chord via scoring algorithm (+3 root match on strong beat, +2 chord tone, +1 weak match, -1 non-chord tone). Applies cadence overrides (V-I classical, ii-V-I jazz). Outputs `$chord_assignment(Bar, Degree, Quality, RootPitchClass, BassNote)` with smooth bass voice leading.
+- `accompaniment.pi` — Renders chord progressions into `$note()` structures using genre-appropriate patterns. VoiceId=10 (left-hand piano). Bass register: MIDI 36-55 (C2-G3), chord voicing: 48-67 (C3-G4).
+- `test_accompaniment.pi` — 17 tests covering harmonization, pattern rendering, genre mapping, and integration.
+
+**5 Accompaniment Patterns:**
+
+| Pattern | Description | Genre Usage |
+|---------|-------------|-------------|
+| `block` | All chord notes on beat 1, sustained | folk, sacred, children, minimalist, contemporary |
+| `alberti` | Root-5th-3rd-5th quarter notes | classical_period, galant, high_classical |
+| `arpeggiated` | Bass-Root-3rd-5th ascending | baroque, romantic, modal, sturm_und_drang |
+| `waltz` | Bass on 1, chord on 2-3 (3/4 time) | (future) |
+| `stride` | Bass on 1,3 + chord on 2,4 | jazz, blues |
+
+**Usage:**
+```bash
+# Accompaniment is automatic with genre-based generation
+./scripts/run_picat.sh --play picat/companion.pi demo genre=classical_period  # Alberti bass
+./scripts/run_picat.sh --play picat/companion.pi demo genre=baroque           # Arpeggiated
+./scripts/run_picat.sh --play picat/companion.pi demo genre=traditional_jazz  # Stride
+
+# Override accompaniment pattern
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period accomp=stride
+
+# Disable accompaniment
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period accomp=none
+```
+
+**Multi-track MIDI:** `midi_writer.py` groups notes by voice field — voices ≤9 map to Track 0 "Melody (RH)", voice ≥10 maps to Track 1 "Accompaniment (LH)". Backward compatible: single-voice JSON produces single-track MIDI.
+
+### Variation Generation
+
+Generate variations of well-known classical music works via `variation.pi`:
+
+**Continuation mode** — keep the first part of a piece, generate the rest via CP constraints:
+```bash
+./scripts/run_picat.sh picat/variation.pi continue piece=mozart_k545_theme split=50
+./scripts/run_picat.sh picat/variation.pi continue piece=bach_invention1_subject split=8n genre=romantic
+```
+
+**Transform mode** — apply genre transfer or classical techniques:
+```bash
+# Genre transfer (preserves contour, applies new genre constraints)
+./scripts/run_picat.sh picat/variation.pi transform piece=twinkle_twinkle genre=baroque
+
+# Classical techniques
+./scripts/run_picat.sh picat/variation.pi transform piece=mozart_k545_theme technique=inversion
+./scripts/run_picat.sh picat/variation.pi transform piece=beethoven_ode_to_joy technique=retrograde
+./scripts/run_picat.sh picat/variation.pi transform piece=beethoven_ode_to_joy technique=augmentation
+./scripts/run_picat.sh picat/variation.pi transform piece=beethoven_ode_to_joy technique=diminution
+
+# Combined: technique + genre transfer
+./scripts/run_picat.sh picat/variation.pi transform piece=mozart_k545_theme technique=inversion genre=baroque
+
+# MIDI output
+./scripts/run_picat.sh --midi picat/variation.pi continue piece=mozart_k545_theme split=50
+```
+
+**Split format**: `split=50` = first 50%, `split=8n` = first 8 notes.
+
+**Architecture**:
+- `variation.pi` — CLI entry point, piece lookup, orchestration
+- `variation_engine.pi` — Core logic: `continue_melody` (CP), `genre_transfer` (CP with contour similarity), `invert_melody`, `retrograde_melody`, `snap_to_scale`
+- `test_variation.pi` — 17 tests covering all modes
+
+Genre transfer uses a contour similarity soft constraint (weight 50) that penalizes deviating from the original melody's directional pattern, so the result preserves the melodic shape while respecting the target genre's rules.
 
 ### File Organization
 
