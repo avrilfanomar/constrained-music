@@ -52,35 +52,44 @@
                 </div>
             </section>
 
-            <!-- Right Column: Genre, Form, Constraints -->
+            <!-- Right Column: Genre & Advanced -->
             <section class="panel genre-section">
                 <h2 class="panel-title">Genre & Style</h2>
                 <div id="genre-cards" class="genre-cards"></div>
 
-                <div class="form-accomp-row">
-                    <div class="select-group">
-                        <label class="select-label">Form</label>
-                        <select id="form-select" class="styled-select"></select>
-                    </div>
-                    <div class="select-group">
-                        <label class="select-label">Accompaniment</label>
-                        <select id="accomp-select" class="styled-select"></select>
-                    </div>
-                    <div class="select-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="rhythm-toggle">
-                            <span>Variable rhythm</span>
-                        </label>
-                    </div>
+                <!-- Advanced Settings (hidden by default) -->
+                <div class="advanced-toggle-row">
+                    <button id="advanced-toggle" class="advanced-toggle" aria-expanded="false">
+                        <span class="advanced-toggle-icon">&#9662;</span>
+                        Advanced Settings
+                    </button>
                 </div>
+                <div id="advanced-section" class="advanced-section collapsed">
+                    <div class="form-accomp-row">
+                        <div class="select-group">
+                            <label class="select-label">Form</label>
+                            <select id="form-select" class="styled-select"></select>
+                        </div>
+                        <div class="select-group">
+                            <label class="select-label">Accompaniment</label>
+                            <select id="accomp-select" class="styled-select"></select>
+                        </div>
+                        <div class="select-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="rhythm-toggle">
+                                <span>Variable rhythm</span>
+                            </label>
+                        </div>
+                    </div>
 
-                <div class="ornament">&#x2767;</div>
+                    <div class="ornament">&#x2767;</div>
 
-                <h2 class="panel-title">Constraints</h2>
-                <div class="constraint-toolbar">
-                    <button id="reset-constraints" class="btn-small" title="Reset to genre defaults">Reset to Genre Defaults</button>
+                    <h2 class="panel-title constraints-title">Constraints</h2>
+                    <div class="constraint-toolbar">
+                        <button id="reset-constraints" class="btn-small" title="Reset to genre defaults">Reset to Genre Defaults</button>
+                    </div>
+                    <div id="constraint-panel" class="constraint-panel"></div>
                 </div>
-                <div id="constraint-panel" class="constraint-panel"></div>
             </section>
         </div>
 

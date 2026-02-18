@@ -37,6 +37,8 @@ const timeDisplay = document.getElementById('time-display');
 const downloadMidi = document.getElementById('download-midi');
 const picatOutput = document.getElementById('picat-output');
 const resetConstraints = document.getElementById('reset-constraints');
+const advancedToggle = document.getElementById('advanced-toggle');
+const advancedSection = document.getElementById('advanced-section');
 
 let config = null;
 let currentIntensity = 'standard';
@@ -121,6 +123,14 @@ function wireEvents() {
             accompSelect.value = 'auto';
         }
     };
+
+    // Advanced toggle
+    advancedToggle.addEventListener('click', () => {
+        const isOpen = !advancedSection.classList.contains('collapsed');
+        advancedSection.classList.toggle('collapsed', isOpen);
+        advancedToggle.classList.toggle('open', !isOpen);
+        advancedToggle.setAttribute('aria-expanded', !isOpen);
+    });
 
     // Reset constraints button
     resetConstraints.addEventListener('click', () => constraintPanel.resetToGenre());
