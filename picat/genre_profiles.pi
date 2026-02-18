@@ -495,3 +495,133 @@ apply_intensity(SoftList, Intensity) = Modified =>
 soft_constraints_with_intensity(GenreId, Intensity) = SoftList =>
     BaseSoft = soft_constraints(GenreId),
     SoftList = apply_intensity(BaseSoft, Intensity).
+
+% ==============================================================================
+% RHYTHM PROFILES
+% ==============================================================================
+% Genre-specific soft constraint weights for rhythmic constraints.
+% Each returns a list of (constraint_id, weight) tuples.
+% Weight 0 or absent = not active for this genre.
+
+% Classical Period (Mozart, Haydn) - clear metric structure
+rhythm_profile(classical_period) = [
+    (opening_note_duration, 65),
+    (rhythmic_acceleration, 55),
+    (strong_phrase_start, 70),
+    (rhythmic_cadence, 65),
+    (no_short_note_isolation, 55)
+].
+
+% Baroque (Bach, Handel) - continuous motion
+rhythm_profile(baroque) = [
+    (opening_note_duration, 50),
+    (rhythmic_acceleration, 40),
+    (strong_phrase_start, 55),
+    (rhythmic_cadence, 50),
+    (no_short_note_isolation, 45)
+].
+
+% Romantic - expressive timing
+rhythm_profile(romantic) = [
+    (opening_note_duration, 55),
+    (strong_phrase_start, 50),
+    (rhythmic_cadence, 55),
+    (no_short_note_isolation, 40)
+].
+
+% Traditional Jazz - syncopated, fewer restrictions
+rhythm_profile(traditional_jazz) = [
+    (strong_phrase_start, 40),
+    (rhythmic_cadence, 35),
+    (no_short_note_isolation, 30)
+].
+
+% Folk - simple, regular rhythms
+rhythm_profile(folk_traditional) = [
+    (opening_note_duration, 60),
+    (strong_phrase_start, 65),
+    (rhythmic_cadence, 60),
+    (no_short_note_isolation, 50)
+].
+
+% Contemporary - minimal rhythmic rules
+rhythm_profile(contemporary) = [
+    (rhythmic_cadence, 30),
+    (no_short_note_isolation, 25)
+].
+
+% Sacred Chant - long notes, regular
+rhythm_profile(sacred_chant) = [
+    (opening_note_duration, 75),
+    (strong_phrase_start, 80),
+    (rhythmic_cadence, 70),
+    (no_short_note_isolation, 60)
+].
+
+% Children's Songs - very simple, clear meter
+rhythm_profile(children_songs) = [
+    (opening_note_duration, 70),
+    (strong_phrase_start, 75),
+    (rhythmic_cadence, 70),
+    (no_short_note_isolation, 65)
+].
+
+% Minimalist - repetitive patterns
+rhythm_profile(minimalist) = [
+    (opening_note_duration, 50),
+    (strong_phrase_start, 55),
+    (rhythmic_cadence, 45),
+    (no_short_note_isolation, 50)
+].
+
+% Modal/Impressionist - free timing
+rhythm_profile(modal) = [
+    (opening_note_duration, 45),
+    (rhythmic_cadence, 40),
+    (no_short_note_isolation, 35)
+].
+
+% Blues - expressive timing
+rhythm_profile(blues) = [
+    (strong_phrase_start, 45),
+    (rhythmic_cadence, 45),
+    (no_short_note_isolation, 35)
+].
+
+% Galant (Early Classical) - light, decorative
+rhythm_profile(galant) = [
+    (opening_note_duration, 65),
+    (rhythmic_acceleration, 50),
+    (strong_phrase_start, 70),
+    (rhythmic_cadence, 65),
+    (no_short_note_isolation, 55)
+].
+
+% High Classical - maximum structure
+rhythm_profile(high_classical) = [
+    (opening_note_duration, 70),
+    (rhythmic_acceleration, 60),
+    (strong_phrase_start, 75),
+    (rhythmic_cadence, 70),
+    (no_short_note_isolation, 60)
+].
+
+% Sturm und Drang - dramatic, fewer rhythmic rules
+rhythm_profile(sturm_und_drang) = [
+    (opening_note_duration, 50),
+    (rhythmic_acceleration, 45),
+    (strong_phrase_start, 55),
+    (rhythmic_cadence, 50),
+    (no_short_note_isolation, 40)
+].
+
+% Catch-all for unknown genres (must be contiguous with other rhythm_profile clauses)
+rhythm_profile(_) = [].
+
+% Accessor function: get rhythm constraints for a genre
+rhythm_constraints(GenreId) = Constraints =>
+    if genre_exists(GenreId) then
+        Constraints = rhythm_profile(GenreId)
+    else
+        Constraints = []
+    end.

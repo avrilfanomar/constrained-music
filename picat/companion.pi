@@ -272,15 +272,33 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     SegmentMood = get_segment_mood(Seg),
     MoodPrefs = [mood=SegmentMood | Preferences],
 
+    % Check if rhythm mode is active
+    if find_first_key(Preferences, rhythm, RhythmVal1), RhythmVal1 == on then
+        UseRhythm = true
+    else
+        UseRhythm = false
+    end,
+
     % Generate melody with genre constraints + motif memory
     if Acc == [] then
         % First segment: no motif constraint
-        once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
+        if UseRhythm == true,
+           once(melody.generate_segment_melody_with_rhythm(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody0R)) then
+            SegmentMelody = SegmentMelody0R
+        else
+            once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
+        end
     else
         % Connect to previous segment with motif reference
         PrevMelody = head(Acc),
         PrevLastPitch = melody.last_pitch(PrevMelody),
-        if MotifIntervals != [],
+        if UseRhythm == true, MotifIntervals != [],
+           once(melody.generate_connected_segment_with_rhythm_and_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody1R)) then
+            SegmentMelody = SegmentMelody1R
+        elseif UseRhythm == true,
+           once(melody.generate_connected_segment_with_rhythm(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody2R)) then
+            SegmentMelody = SegmentMelody2R
+        elseif MotifIntervals != [],
            once(melody.generate_connected_segment_with_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody0)) then
             SegmentMelody = SegmentMelody0
         elseif once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody1)) then
@@ -551,11 +569,23 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     SegmentMood = get_segment_mood(Seg),
     MoodPrefs = [mood=SegmentMood | Preferences],
 
+    % Check if rhythm mode is active
+    if find_first_key(Preferences, rhythm, RhythmValF), RhythmValF == on then
+        UseRhythmF = true
+    else
+        UseRhythmF = false
+    end,
+
     % Generate melody
     if Acc == [] then
         % First segment
         if Genre != none then
-            once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
+            if UseRhythmF == true,
+               once(melody.generate_segment_melody_with_rhythm(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelodyR0)) then
+                SegmentMelody = SegmentMelodyR0
+            else
+                once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
+            end
         else
             once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
         end
@@ -564,7 +594,13 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
         PrevMelody = head(Acc),
         PrevLastPitch = last_pitch(PrevMelody),
         if Genre != none then
-            if MotifIntervals != [],
+            if UseRhythmF == true, MotifIntervals != [],
+               once(melody.generate_connected_segment_with_rhythm_and_motif(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelodyR1)) then
+                SegmentMelody = SegmentMelodyR1
+            elseif UseRhythmF == true,
+               once(melody.generate_connected_segment_with_rhythm(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelodyR2)) then
+                SegmentMelody = SegmentMelodyR2
+            elseif MotifIntervals != [],
                once(melody.generate_connected_segment_with_motif(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody0)) then
                 SegmentMelody = SegmentMelody0
             elseif once(melody.generate_connected_segment_with_genre(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody1)) then
@@ -828,7 +864,8 @@ main(Args) =>
         Randomness = get_arg(ParsedOpts, randomness, 0.0),
         Genre = get_arg(ParsedOpts, genre, none),
         Accomp = get_arg(ParsedOpts, accomp, auto),
-        demo_with_options(Randomness, Genre, Accomp),
+        Rhythm = get_arg(ParsedOpts, rhythm, off),
+        demo_with_options(Randomness, Genre, Accomp, Rhythm),
         halt
     elseif FirstArg == "path" then
         demo_path(),
@@ -963,6 +1000,8 @@ set_arg(Map, "intensity", Value) = Map =>
     Map.put(intensity, to_atom(Value)).
 set_arg(Map, "accomp", Value) = Map =>
     Map.put(accomp, to_atom(Value)).
+set_arg(Map, "rhythm", Value) = Map =>
+    Map.put(rhythm, to_atom(Value)).
 set_arg(Map, "count", Value) = Map =>
     Map.put(count, to_integer(Value)).
 set_arg(Map, Key, Value) = Map =>
@@ -992,6 +1031,12 @@ to_atom(S) = A =>
 join([], _) = "".
 join([X], _) = X.
 join([X|Rest], Sep) = X ++ Sep ++ join(Rest, Sep).
+
+% Helper: find first Key=Value in a list of Key=Value pairs
+% Returns true and binds Value if found, false otherwise
+find_first_key([], _Key, _Value) => fail.
+find_first_key([K=V|_Rest], Key, Value) ?=> K == Key, Value = V.
+find_first_key([_|Rest], Key, Value) => find_first_key(Rest, Key, Value).
 
 % Print usage information
 print_usage() =>
@@ -1029,6 +1074,11 @@ print_usage() =>
     println("                   rondo:   ABACA - recurring refrain with episodes"),
     println("                   through: no repetition (free form)"),
     nl,
+    println("Rhythm Options:"),
+    println("  rhythm=on        Enable variable rhythm (default: off/uniform durations)"),
+    println("                   Generates melodies with mixed note durations"),
+    println("                   Requires genre= to be set"),
+    nl,
     println("Genre Options (for weighted constraint optimization):"),
     println("  genre=GENRE      Use genre-based constraint selection"),
     println("                   (classical_period, baroque, romantic, traditional_jazz,"),
@@ -1056,6 +1106,10 @@ print_usage() =>
     println("  picat companion.pi genre=jazz disable=leap_recovery"),
     println("  picat companion.pi genre=folk_traditional weight:mostly_stepwise=90"),
     nl,
+    println("Rhythm examples:"),
+    println("  picat companion.pi demo genre=classical_period rhythm=on"),
+    println("  picat companion.pi from=calm_peaceful to=energized genre=baroque rhythm=on"),
+    nl,
     println("After generating the JSON file, run:"),
     println("  python scripts/midi_writer.py session.json session.mid").
 
@@ -1079,6 +1133,11 @@ build_preferences(ParsedArgs) = Preferences =>
     Accomp = get_arg(ParsedArgs, accomp, none),
     if Accomp != none then
         Prefs := Prefs ++ [accomp=Accomp]
+    end,
+    % Add rhythm mode
+    Rhythm = get_arg(ParsedArgs, rhythm, off),
+    if Rhythm == on then
+        Prefs := Prefs ++ [rhythm=on]
     end,
     Preferences = Prefs.
 
@@ -1108,10 +1167,13 @@ demo() =>
 demo_with_randomness(Randomness) =>
     run_companion_presets(sad_depressed, energized, 60, "session.json", Randomness).
 
-% Quick demo with genre and accompaniment options
-demo_with_options(Randomness, Genre, Accomp) =>
+% Quick demo with genre, accompaniment, and rhythm options
+demo_with_options(Randomness, Genre, Accomp, Rhythm) =>
     % Build preferences list
     Prefs = cond(Accomp != auto, [accomp=Accomp], []),
+    if Rhythm == on then
+        Prefs := Prefs ++ [rhythm=on]
+    end,
     % If genre specified, use run_companion_with_genre; otherwise use run_companion_presets
     if Genre != none then
         run_companion_with_genre(mood_preset(sad_depressed), mood_preset(energized), 60, "session.json", Randomness, Genre, Prefs)

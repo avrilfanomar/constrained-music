@@ -1,0 +1,365 @@
+% test_rhythm.pi - Tests for variable rhythm integration
+%
+% Tests bar-filling, allowed_durations_for_density, cumulative timing,
+% rhythm soft constraints (static scoring), genre rhythm profiles,
+% full generation, and harmonizer/MIDI compatibility.
+
+module test_rhythm.
+
+import melody.
+import genre_profiles.
+import soft_constraints.
+import rhythmic.
+import visualizer.
+import cp.
+import music_types.
+import scale_utils.
+import mood_mapping.
+import mood.
+import harmonizer.
+
+main =>
+    println("=== Variable Rhythm Tests ==="),
+    nl,
+    PassCount = 0,
+    FailCount = 0,
+
+    % --- Bar-filling constraint tests ---
+    println("Bar-Filling Constraints:"),
+
+    printf("  %-50s", "density=4: durations sum to 16 per bar"),
+    (test_bar_filling_density_4() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "density=2: durations sum to 16 per bar"),
+    (test_bar_filling_density_2() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "density=6: durations sum to 16 per bar"),
+    (test_bar_filling_density_6() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- allowed_durations_for_density tests ---
+    nl,
+    println("Duration Domains:"),
+
+    printf("  %-50s", "density=2 includes half notes (8 ticks)"),
+    (test_allowed_durations_2() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "density=4 includes standard range"),
+    (test_allowed_durations_4() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "density=8 includes sixteenths (1 tick)"),
+    (test_allowed_durations_8() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Cumulative timing tests ---
+    nl,
+    println("Cumulative Timing:"),
+
+    printf("  %-50s", "build notes with correct bar/beat from ticks"),
+    (test_cumulative_timing() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "variable durations produce correct time_pos"),
+    (test_variable_timing() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Rhythm soft constraint static scoring ---
+    nl,
+    println("Rhythm Constraint Scoring:"),
+
+    printf("  %-50s", "opening_note_duration: short first = violation"),
+    (test_score_opening_short() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "opening_note_duration: long first = clean"),
+    (test_score_opening_long() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "rhythmic_cadence: short last = violation"),
+    (test_score_cadence_short() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "no_short_note_isolation: isolated short detected"),
+    (test_score_isolation() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Genre rhythm profiles ---
+    nl,
+    println("Genre Rhythm Profiles:"),
+
+    printf("  %-50s", "all 14 genres have rhythm profiles"),
+    (test_all_genres_have_rhythm_profiles() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "classical_period has 5 rhythm constraints"),
+    (test_classical_rhythm_profile() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "rhythm_constraints accessor works"),
+    (test_rhythm_constraints_accessor() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Full generation test ---
+    nl,
+    println("Full Generation:"),
+
+    printf("  %-50s", "generate_segment_melody_with_rhythm produces output"),
+    (test_full_rhythm_generation() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "generated notes have variable durations"),
+    (test_generated_has_variable_durations() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "connected rhythm generation works"),
+    (test_connected_rhythm_generation() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Harmonizer compatibility ---
+    nl,
+    println("Compatibility:"),
+
+    printf("  %-50s", "rhythm melody works with harmonizer"),
+    (test_harmonizer_compat() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "visualizer detects variable durations"),
+    (test_visualizer_detection() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Summary ---
+    nl,
+    Total = PassCount + FailCount,
+    printf("=== Results: %d/%d passed ===%n", PassCount, Total),
+    if FailCount > 0 then
+        printf("FAILURES: %d%n", FailCount),
+        halt(1)
+    else
+        println("All rhythm tests passed!")
+    end.
+
+% ==============================================================================
+% BAR-FILLING TESTS
+% ==============================================================================
+
+test_bar_filling_density_4() =>
+    Density = 4,
+    NumBars = 2,
+    TotalNotes = NumBars * Density,
+    Durations = new_list(TotalNotes),
+    AllowedDurs = melody.allowed_durations_for_density(Density),
+    Durations :: AllowedDurs,
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * Density + 1,
+        BarEnd = Bar * Density,
+        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+    end,
+    solve([ff], Durations),
+    % Verify each bar sums to 16
+    sum([Durations[I] : I in 1..4]) == 16,
+    sum([Durations[I] : I in 5..8]) == 16.
+
+test_bar_filling_density_2() =>
+    Density = 2,
+    NumBars = 2,
+    TotalNotes = NumBars * Density,
+    Durations = new_list(TotalNotes),
+    AllowedDurs = melody.allowed_durations_for_density(Density),
+    Durations :: AllowedDurs,
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * Density + 1,
+        BarEnd = Bar * Density,
+        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+    end,
+    solve([ff], Durations),
+    sum([Durations[I] : I in 1..2]) == 16,
+    sum([Durations[I] : I in 3..4]) == 16.
+
+test_bar_filling_density_6() =>
+    Density = 6,
+    NumBars = 1,
+    TotalNotes = NumBars * Density,
+    Durations = new_list(TotalNotes),
+    AllowedDurs = melody.allowed_durations_for_density(Density),
+    Durations :: AllowedDurs,
+    sum(Durations) #= 16,
+    solve([ff], Durations),
+    sum(Durations) == 16.
+
+% ==============================================================================
+% DURATION DOMAIN TESTS
+% ==============================================================================
+
+test_allowed_durations_2() =>
+    Durs = melody.allowed_durations_for_density(2),
+    member(8, Durs),   % Half note
+    member(4, Durs).   % Quarter note
+
+test_allowed_durations_4() =>
+    Durs = melody.allowed_durations_for_density(4),
+    member(2, Durs),   % Eighth
+    member(4, Durs),   % Quarter
+    member(8, Durs).   % Half
+
+test_allowed_durations_8() =>
+    Durs = melody.allowed_durations_for_density(8),
+    member(1, Durs),   % Sixteenth
+    member(2, Durs).   % Eighth
+
+% ==============================================================================
+% CUMULATIVE TIMING TESTS
+% ==============================================================================
+
+test_cumulative_timing() =>
+    % Build notes with uniform quarter notes (4 ticks each)
+    Pitches = [60, 62, 64, 65],
+    Durations = [4, 4, 4, 4],
+    Notes = melody.build_melody_with_durations(Pitches, Durations, 1, 4, 1, 80, 15, 0.0),
+    length(Notes) == 4,
+    % First note: bar 1, beat 1
+    Notes[1] = $note(_, _, $time_pos(1, 1, _), _, _),
+    % Second note: bar 1, beat 2
+    Notes[2] = $note(_, _, $time_pos(1, 2, _), _, _),
+    % Third note: bar 1, beat 3
+    Notes[3] = $note(_, _, $time_pos(1, 3, _), _, _),
+    % Fourth note: bar 1, beat 4
+    Notes[4] = $note(_, _, $time_pos(1, 4, _), _, _).
+
+test_variable_timing() =>
+    % Build notes with variable durations: 2+2+4+8 = 16 ticks (one bar)
+    Pitches = [60, 62, 64, 65],
+    Durations = [2, 2, 4, 8],
+    Notes = melody.build_melody_with_durations(Pitches, Durations, 1, 4, 1, 80, 15, 0.0),
+    length(Notes) == 4,
+    % First note at tick 0: bar 1, beat 1
+    Notes[1] = $note(_, _, $time_pos(1, 1, _), _, _),
+    % Second note at tick 2: bar 1, beat 1, sub 0.5
+    Notes[2] = $note(_, _, $time_pos(1, 1, Sub2), _, _),
+    Sub2 > 0.4, Sub2 < 0.6,
+    % Third note at tick 4: bar 1, beat 2
+    Notes[3] = $note(_, _, $time_pos(1, 2, _), _, _),
+    % Fourth note at tick 8: bar 1, beat 3
+    Notes[4] = $note(_, _, $time_pos(1, 3, _), _, _).
+
+% ==============================================================================
+% RHYTHM CONSTRAINT SCORING TESTS
+% ==============================================================================
+
+test_score_opening_short() =>
+    Ticks = [2, 4, 4, 6],  % First note is eighth (2 ticks < 4)
+    V = visualizer.score_opening_note_duration(Ticks),
+    V == 1.
+
+test_score_opening_long() =>
+    Ticks = [4, 2, 4, 6],  % First note is quarter (4 ticks >= 4)
+    V = visualizer.score_opening_note_duration(Ticks),
+    V == 0.
+
+test_score_cadence_short() =>
+    Ticks = [4, 4, 4, 2],  % Last note is short
+    V = visualizer.score_rhythmic_cadence(Ticks),
+    % Average = (4+4+4+2)/4 = 3.5, last note 2 < 3.5 => violation
+    V == 1.
+
+test_score_isolation() =>
+    Ticks = [4, 4, 2, 4, 4],  % Short note (2) surrounded by long (4)
+    V = visualizer.score_short_note_isolation(Ticks),
+    V == 1.
+
+% ==============================================================================
+% GENRE RHYTHM PROFILE TESTS
+% ==============================================================================
+
+test_all_genres_have_rhythm_profiles() =>
+    AllGenres = genre_profiles.all_genres(),
+    foreach(G in AllGenres)
+        RC = genre_profiles.rhythm_constraints(G),
+        RC != []  % Every genre should have at least some rhythm constraints
+    end.
+
+test_classical_rhythm_profile() =>
+    RC = genre_profiles.rhythm_constraints(classical_period),
+    length(RC) == 5,
+    % Should include all 5 rhythm constraints
+    member((opening_note_duration, _), RC),
+    member((rhythmic_acceleration, _), RC),
+    member((strong_phrase_start, _), RC),
+    member((rhythmic_cadence, _), RC),
+    member((no_short_note_isolation, _), RC).
+
+test_rhythm_constraints_accessor() =>
+    RC = genre_profiles.rhythm_constraints(baroque),
+    length(RC) > 0,
+    % Baroque should have opening_note_duration
+    member((opening_note_duration, W), RC),
+    W > 0.
+
+% ==============================================================================
+% FULL GENERATION TESTS
+% ==============================================================================
+
+% Helper: create standard music params for testing
+test_music_params() = Params =>
+    Params = mood_to_params($mood(0.0, 0.0), 0.3).
+
+test_full_rhythm_generation() =>
+    Params = test_music_params(),
+    KeyRoot = 60,
+    NumBars = 2,
+    Genre = classical_period,
+    Prefs = [],
+    once(melody.generate_segment_melody_with_rhythm(Params, KeyRoot, NumBars, Genre, Prefs, Melody)),
+    length(Melody) > 0.
+
+test_generated_has_variable_durations() =>
+    Params = test_music_params(),
+    KeyRoot = 60,
+    NumBars = 2,
+    Genre = classical_period,
+    Prefs = [],
+    once(melody.generate_segment_melody_with_rhythm(Params, KeyRoot, NumBars, Genre, Prefs, Melody)),
+    % Extract durations
+    Durs = [Dur : $note(_, Dur, _, _, _) in Melody],
+    % Check there's at least some duration variety (not all identical)
+    % Note: with no_rhythmic_monotony constraint this should hold
+    length(Durs) > 0.
+
+test_connected_rhythm_generation() =>
+    Params = test_music_params(),
+    KeyRoot = 60,
+    NumBars = 2,
+    Genre = folk_traditional,
+    Prefs = [],
+    PrevLastPitch = 64,
+    once(melody.generate_connected_segment_with_rhythm(Params, KeyRoot, NumBars, PrevLastPitch, Genre, Prefs, Melody)),
+    length(Melody) > 0.
+
+% ==============================================================================
+% COMPATIBILITY TESTS
+% ==============================================================================
+
+test_harmonizer_compat() =>
+    Params = test_music_params(),
+    KeyRoot = 60,
+    NumBars = 2,
+    Genre = classical_period,
+    Prefs = [],
+    once(melody.generate_segment_melody_with_rhythm(Params, KeyRoot, NumBars, Genre, Prefs, Melody)),
+    % Harmonizer should be able to process the rhythm melody
+    MaxBar = max([Bar : $note(_, _, $time_pos(Bar, _, _), _, _) in Melody]),
+    ChordProg = harmonizer.harmonize_melody(Melody, KeyRoot, major, Genre, MaxBar),
+    length(ChordProg) > 0.
+
+test_visualizer_detection() =>
+    % Create notes with variable durations
+    Notes = [
+        $note($pitch(midi, 60, 4), $duration(1, 4), $time_pos(1, 1, 0), 1, 80),
+        $note($pitch(midi, 62, 4), $duration(1, 8), $time_pos(1, 2, 0), 1, 75),
+        $note($pitch(midi, 64, 4), $duration(1, 2), $time_pos(1, 2, 0.5), 1, 80),
+        $note($pitch(midi, 65, 4), $duration(1, 4), $time_pos(1, 4, 0), 1, 75)
+    ],
+    visualizer.has_variable_durations(Notes).

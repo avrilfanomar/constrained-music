@@ -72,10 +72,19 @@ print_violation_report(Notes, KeyRoot, Genre) =>
             ("motivic_fragment", lookup(Results, motivic_fragmentation))
         ]),
 
+        % Rhythm section (only if variable durations detected)
+        if has_variable_durations(Notes) then
+            RhythmResults = score_rhythm_constraints(Notes),
+            print_category("Rhythm", RhythmResults),
+            AllResults = Results ++ RhythmResults
+        else
+            AllResults = Results
+        end,
+
         % Summary
-        TotalViolations = sum([V : (_, V) in Results]),
-        NumConstraints = length(Results),
-        NumClean = length([1 : (_, V) in Results, V == 0]),
+        TotalViolations = sum([V : (_, V) in AllResults]),
+        NumConstraints = length(AllResults),
+        NumClean = length([1 : (_, V) in AllResults, V == 0]),
         printf("  SUMMARY: %d/%d constraints clean, %d total violations%n",
                NumClean, NumConstraints, TotalViolations),
         nl
@@ -526,4 +535,85 @@ sign(X) = S =>
     if X > 0 then S = 1
     elseif X < 0 then S = -1
     else S = 0
+    end.
+
+% ==============================================================================
+% RHYTHM ANALYSIS
+% ==============================================================================
+
+% Convert duration fraction to ticks (16 ticks = whole note)
+duration_to_ticks(duration(1, 16)) = 1.
+duration_to_ticks(duration(1, 8)) = 2.
+duration_to_ticks(duration(3, 16)) = 3.
+duration_to_ticks(duration(1, 4)) = 4.
+duration_to_ticks(duration(3, 8)) = 6.
+duration_to_ticks(duration(1, 2)) = 8.
+duration_to_ticks(duration(3, 4)) = 12.
+duration_to_ticks(duration(1, 1)) = 16.
+duration_to_ticks(_) = 4.  % Default: quarter note
+
+% Extract durations as tick values from note list
+extract_durations_as_ticks(Notes) = Ticks =>
+    Ticks = [duration_to_ticks(Dur) : $note(_, Dur, _, _, _) in Notes].
+
+% Check if a melody has variable (non-uniform) durations
+has_variable_durations(Notes) =>
+    Ticks = extract_durations_as_ticks(Notes),
+    Ticks != [],
+    length(remove_dups_v(Ticks)) > 1.
+
+% Remove duplicates helper
+remove_dups_v([]) = [].
+remove_dups_v([X|Xs]) = [X|remove_dups_v([Y : Y in Xs, Y != X])].
+
+% Score all rhythm constraints (static scoring on ground durations)
+score_rhythm_constraints(Notes) = Results =>
+    Ticks = extract_durations_as_ticks(Notes),
+    Results = [
+        ("opening_note_dur", score_opening_note_duration(Ticks)),
+        ("rhythmic_accel", score_rhythmic_acceleration(Ticks)),
+        ("strong_start", score_strong_phrase_start(Ticks)),
+        ("rhythmic_cadence", score_rhythmic_cadence(Ticks)),
+        ("short_note_isol", score_short_note_isolation(Ticks))
+    ].
+
+% Static scorers for rhythm constraints (mirror soft_constraints.pi reified versions)
+
+score_opening_note_duration(Ticks) = V =>
+    if Ticks != [], Ticks[1] < 4 then V = 1 else V = 0 end.
+
+score_rhythmic_acceleration(Ticks) = V =>
+    Len = length(Ticks),
+    if Len < 4 then V = 0
+    else
+        Half = Len // 2,
+        FirstHalfSum = sum([Ticks[I] : I in 1..Half]),
+        SecondHalfSum = sum([Ticks[I] : I in Half+1..Len]),
+        FirstHalfLen = Half,
+        SecondHalfLen = Len - Half,
+        if SecondHalfSum * FirstHalfLen >= FirstHalfSum * SecondHalfLen then V = 1 else V = 0 end
+    end.
+
+score_strong_phrase_start(Ticks) = V =>
+    Len = length(Ticks),
+    if Len < 2 then V = 0
+    else
+        TotalDur = sum(Ticks),
+        if Ticks[1] * Len < TotalDur then V = 1 else V = 0 end
+    end.
+
+score_rhythmic_cadence(Ticks) = V =>
+    Len = length(Ticks),
+    if Len < 2 then V = 0
+    else
+        TotalDur = sum(Ticks),
+        if Ticks[Len] * Len < TotalDur then V = 1 else V = 0 end
+    end.
+
+score_short_note_isolation(Ticks) = V =>
+    Len = length(Ticks),
+    if Len < 3 then V = 0
+    else
+        V = length([I : I in 2..Len-1,
+            Ticks[I] =< 2, Ticks[I-1] >= 4, Ticks[I+1] >= 4])
     end.

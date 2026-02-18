@@ -22,6 +22,10 @@ Constraint-based music generation system using Picat. Generates melodies using c
 ./scripts/run_picat.sh picat/companion.pi from=sad_depressed to=energized duration=300
 ./scripts/run_picat.sh picat/companion.pi genre=classical_period randomness=0.3
 
+# Generate with variable rhythm
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period rhythm=on
+./scripts/run_picat.sh picat/companion.pi from=calm_peaceful to=energized genre=baroque rhythm=on
+
 # Generate MIDI output
 ./scripts/run_picat.sh --midi picat/companion.pi demo       # Creates demo.mid
 ./scripts/run_picat.sh --play picat/companion.pi demo       # Creates and plays with auto-detected player
@@ -163,6 +167,7 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ./scripts/run_picat.sh picat/test_variation.pi              # Variation generation tests
 ./scripts/run_picat.sh picat/test_accompaniment.pi          # Accompaniment & harmonizer tests
 ./scripts/run_picat.sh picat/test_emotional.pi              # Emotional constraint tests
+./scripts/run_picat.sh picat/test_rhythm.pi                 # Variable rhythm tests
 ```
 
 The **constraint validation test suite** (`test_constraint_validation.pi`) validates that famous musical masterpieces satisfy the implemented constraints:
@@ -267,6 +272,47 @@ Genre-specific weights:
 2. **`no_short_note_isolation`**: Rhythmic constraint that penalizes isolated short notes (≤2 ticks) surrounded by longer notes (≥4 ticks). Prevents choppy mid-phrase articulations. Simplified alternative to true rest placement.
 
 3. **`motivic_fragmentation`**: Checks if interval patterns from the first quarter of the melody appear in the second half (sentence-style fragmentation). Returns 0 violations if ANY first-quarter interval is reused, 1 otherwise. Complements `rhythmic_acceleration` and `motivic_repetition`.
+
+### Variable Rhythm
+
+By default, all melodies use uniform note durations (e.g., density=4 means all quarter notes). The `rhythm=on` flag activates CP-based variable rhythm generation, creating melodies with mixed note durations.
+
+**Duration tick system:** 16 ticks = whole note. Values: 1=sixteenth, 2=eighth, 3=dotted-eighth, 4=quarter, 6=dotted-quarter, 8=half, 12=dotted-half, 16=whole.
+
+**Bar-filling constraint:** Each bar's note durations must sum to exactly 16 ticks (one 4/4 bar). Density-specific duration domains ensure solvability:
+
+| Density | Allowed Durations (ticks) | Note Types |
+|---------|---------------------------|------------|
+| 2 | 4, 6, 8, 12 | Quarter to dotted-half |
+| 3 | 2, 4, 6, 8 | Eighth to half |
+| 4 | 2, 3, 4, 6, 8 | Eighth to half |
+| 5-6 | 2, 3, 4 | Eighth to quarter |
+| 7-8 | 1, 2, 3, 4 | Sixteenth to quarter |
+
+**Duration variety constraint:** `no_rhythmic_monotony` prevents all-same-duration solutions.
+
+**Genre rhythm profiles:** Each genre has rhythm-specific soft constraint weights in `genre_profiles.pi`:
+
+| Constraint | Description | Classical | Baroque | Folk | Jazz | Children |
+|------------|-------------|-----------|---------|------|------|----------|
+| `opening_note_duration` | First note ≥ quarter | 65 | 50 | 60 | — | 70 |
+| `rhythmic_acceleration` | Second half shorter avg | 55 | 40 | — | — | — |
+| `strong_phrase_start` | First note ≥ average | 70 | 55 | 65 | 40 | 75 |
+| `rhythmic_cadence` | Last note ≥ average | 65 | 50 | 60 | 35 | 70 |
+| `no_short_note_isolation` | No isolated short notes | 55 | 45 | 50 | 30 | 65 |
+
+**Cumulative timing:** Notes use absolute tick positions for correct Bar/Beat/Sub calculation (not index-based).
+
+**Solve strategy:** 5s optimization timeout → 3s satisficing timeout → separate pitch/duration solve.
+
+**Usage:**
+```bash
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period rhythm=on
+./scripts/run_picat.sh picat/companion.pi from=calm_peaceful to=energized genre=baroque rhythm=on
+./scripts/run_picat.sh picat/companion.pi from=sad_depressed to=happy genre=folk_traditional rhythm=on form=ternary
+```
+
+**Visualizer:** When variable durations are detected, the constraint violation report includes a "Rhythm" category with 5 rhythm constraint scores.
 
 ### Emotional Constraints
 

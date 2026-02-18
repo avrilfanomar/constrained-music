@@ -1279,10 +1279,23 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
-    % Duration variables (NEW)
-    % Duration values in "ticks": 1=sixteenth, 2=eighth, 3=dotted-eighth, 4=quarter, 6=dotted-quarter, 8=half
+    % Duration variables (in ticks: 1=sixteenth, 2=eighth, 3=dotted-eighth, 4=quarter, 6=dotted-quarter, 8=half)
     Durations = new_list(TotalNotes),
-    Durations :: [2, 3, 4, 6, 8],  % Eighth note to half note range
+    AllowedDurs = allowed_durations_for_density(Density),
+    Durations :: AllowedDurs,
+
+    % Bar-filling constraint: durations in each bar must sum to 16 ticks (one 4/4 bar)
+    NotesPerBar = Density,
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * NotesPerBar + 1,
+        BarEnd = Bar * NotesPerBar,
+        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+    end,
+
+    % Duration variety: prevent all-same-duration solutions
+    if TotalNotes >= 4 then
+        rhythmic.no_rhythmic_monotony(Durations, Density)
+    end,
 
     % Get constraints for genre
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
@@ -1300,7 +1313,7 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
 
-    % Apply rhythm constraints (NEW)
+    % Apply rhythm constraints
     RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
 
     % Combined cost
@@ -1312,69 +1325,89 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     % Build melody with variable durations
     Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
 
+% Allowed durations for a given density (notes per bar in 4/4 = 16 ticks)
+% Returns a list of tick values that can sum to 16 for that density
+allowed_durations_for_density(2) = [4, 6, 8, 12].    % Half/dotted-quarter/quarter/dotted-half
+allowed_durations_for_density(3) = [2, 4, 6, 8].     % Eighth to half
+allowed_durations_for_density(4) = [2, 3, 4, 6, 8].  % Eighth to half (default)
+allowed_durations_for_density(5) = [2, 3, 4].         % Eighth to quarter
+allowed_durations_for_density(6) = [2, 3, 4].         % Eighth to quarter
+allowed_durations_for_density(7) = [1, 2, 3, 4].     % Sixteenth to quarter
+allowed_durations_for_density(8) = [1, 2, 3, 4].     % Sixteenth to quarter
+allowed_durations_for_density(_) = [2, 3, 4, 6, 8].  % Default fallback
+
 % Apply rhythm soft constraints and return total cost
 apply_rhythm_soft_constraints(Durations, Genre) = TotalCost =>
-    % Get rhythm constraints for genre with default weights
-    RhythmConstraints = [
-        (opening_note_duration, 65),
-        (rhythmic_acceleration, 55),
-        (strong_phrase_start, 70),
-        (rhythmic_cadence, 60),
-        (no_short_note_isolation, 55)
-    ],
+    % Get rhythm constraints from genre profile (or default)
+    RhythmConstraints = genre_profiles.rhythm_constraints(Genre),
 
-    % Apply weights based on genre (classical gets full weight, others reduced)
-    WeightMod = cond(member(Genre, [classical_period, baroque]), 1.0, 0.5),
-
-    NumConstraints = length(RhythmConstraints),
-    Costs = new_list(NumConstraints),
-    Costs :: 0..10000,  % Cost domain
-    foreach(I in 1..NumConstraints)
-        (CId, BaseWeight) = RhythmConstraints[I],
-        Weight = round(BaseWeight * WeightMod),
-        soft_constraints.apply_soft_rhythm(CId, Durations, Weight, Costs[I])
-    end,
-    TotalCost :: 0..40000,
-    TotalCost #= sum(Costs).
+    if RhythmConstraints == [] then
+        TotalCost = 0
+    else
+        NumConstraints = length(RhythmConstraints),
+        Costs = new_list(NumConstraints),
+        Costs :: 0..10000,
+        foreach(I in 1..NumConstraints)
+            (CId, Weight) = RhythmConstraints[I],
+            soft_constraints.apply_soft_rhythm(CId, Durations, Weight, Costs[I])
+        end,
+        TotalCost :: 0..40000,
+        TotalCost #= sum(Costs)
+    end.
 
 % Solve for pitches and durations together
 solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness) =>
     Vars = Pitches ++ Durations ++ [TotalCost],
     SolveOpts = constraint_selector.picat_solve_options(Randomness),
 
-    % Try optimization with timeout, fallback to satisficing
-    if time_out(solve($[min(TotalCost)|SolveOpts], Vars), 3000, Status), Status == success then
+    % Try optimization with timeout (5s), fallback to satisficing, then separate solve
+    if time_out(solve($[min(TotalCost)|SolveOpts], Vars), 5000, Status1), Status1 == success then
+        true
+    elseif time_out(solve(SolveOpts, Pitches ++ Durations), 3000, Status2), Status2 == success then
         true
     else
-        % Fallback: solve without optimization
-        solve(SolveOpts, Pitches ++ Durations)
+        % Last resort: solve pitches first, then durations separately
+        % (duration constraints are independent of pitches after posting)
+        solve(SolveOpts, Pitches),
+        solve([ff], Durations)
     end.
 
-% Build melody with variable durations
-build_melody_with_durations(Pitches, Durations, _NumBars, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Melody =>
+% Build melody with variable durations using cumulative tick positions
+build_melody_with_durations(Pitches, Durations, _NumBars, _NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Melody =>
     Len = length(Pitches),
-    Melody = [build_note_with_duration(Pitches[I], Durations[I], I, NotesPerBar, VoiceId, VelBase, VelVar, Randomness)
+    % Compute cumulative tick positions: TickPos[1]=0, TickPos[I]=TickPos[I-1]+Durations[I-1]
+    TickPos = new_list(Len),
+    TickPos[1] = 0,
+    foreach(I in 2..Len)
+        TickPos[I] = TickPos[I-1] + Durations[I-1]
+    end,
+    Melody = [build_note_with_duration(Pitches[I], Durations[I], TickPos[I], VoiceId, VelBase, VelVar, Randomness)
               : I in 1..Len].
 
-% Build a single note with variable duration
-build_note_with_duration(MidiPitch, DurationTicks, Index, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Note =>
+% Build a single note with variable duration using absolute tick position
+build_note_with_duration(MidiPitch, DurationTicks, AbsoluteTick, VoiceId, VelBase, VelVar, Randomness) = Note =>
     Octave = MidiPitch // 12 - 1,
-    Bar = ((Index - 1) // NotesPerBar) + 1,
-    Beat = ((Index - 1) mod NotesPerBar) + 1,
+
+    % Compute Bar and Beat from absolute tick position
+    % 16 ticks per bar in 4/4, 4 ticks per beat
+    Bar = (AbsoluteTick // 16) + 1,
+    TickInBar = AbsoluteTick mod 16,
+    Beat = (TickInBar // 4) + 1,
+    Sub = (TickInBar mod 4) / 4.0,
 
     % Convert ticks to duration fraction
-    % Ticks: 1=1/16, 2=1/8, 3=3/16, 4=1/4, 6=3/8, 8=1/2
     Duration = ticks_to_duration(DurationTicks),
 
-    % Velocity variation
-    VelOffset = cond(Beat == 1, VelVar // 2, -VelVar // 4),
+    % Strong-beat velocity boost: beat 1 (tick 0) or beat 3 (tick 8)
+    IsStrongBeat = (TickInBar == 0 ; TickInBar == 8),
+    VelOffset = cond(IsStrongBeat, VelVar // 2, -VelVar // 4),
     RandomPerturbation = round((rand01() - 0.5) * 2 * 15 * Randomness),
     Velocity = max(40, min(127, VelBase + VelOffset + RandomPerturbation)),
 
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
         Duration,
-        $time_pos(Bar, Beat, 0),
+        $time_pos(Bar, Beat, Sub),
         VoiceId,
         Velocity
     ).
@@ -1411,8 +1444,21 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
+    % Duration variables with density-specific domains + bar-filling
     Durations = new_list(TotalNotes),
-    Durations :: [2, 3, 4, 6, 8],
+    AllowedDurs = allowed_durations_for_density(Density),
+    Durations :: AllowedDurs,
+
+    NotesPerBar = Density,
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * NotesPerBar + 1,
+        BarEnd = Bar * NotesPerBar,
+        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+    end,
+
+    if TotalNotes >= 4 then
+        rhythmic.no_rhythmic_monotony(Durations, Density)
+    end,
 
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
     MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
@@ -1429,6 +1475,68 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     end,
 
     TotalCost #= PitchCost + RhythmCost,
+    solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness),
+
+    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% ==============================================================================
+% CONNECTED SEGMENT WITH RHYTHM AND MOTIF
+% ==============================================================================
+
+% Generate connected segment with genre, rhythm, AND motif reference constraint
+generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, MotifIntervals, MotifWeight, Melody) =>
+    Mode = get_mode(MusicParams),
+    Density = get_note_density(MusicParams),
+    Voice = get_voice(MusicParams),
+    VelBase = get_velocity_base(MusicParams),
+    VelVar = get_velocity_var(MusicParams),
+    Randomness = get_randomness(MusicParams),
+
+    TotalNotes = NumBars * Density,
+    Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
+    ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
+
+    Pitches = new_list(TotalNotes),
+    Pitches :: ScaleNotes,
+
+    % Duration variables with density-specific domains + bar-filling
+    Durations = new_list(TotalNotes),
+    AllowedDurs = allowed_durations_for_density(Density),
+    Durations :: AllowedDurs,
+
+    NotesPerBar = Density,
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * NotesPerBar + 1,
+        BarEnd = Bar * NotesPerBar,
+        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+    end,
+
+    if TotalNotes >= 4 then
+        rhythmic.no_rhythmic_monotony(Durations, Density)
+    end,
+
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
+    MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
+
+    apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
+    apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
+    PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
+
+    % Connection constraint
+    ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
+    if ValidConnectionNotes != [] then
+        Pitches[1] :: ValidConnectionNotes
+    end,
+
+    % Motif constraint
+    if MotifIntervals != [], not constraint_selector.skip_soft_optimization(Randomness) then
+        motif.apply_contour_constraint(Pitches, MotifIntervals, MotifWeight, MotifCost),
+        TotalCost #= PitchCost + RhythmCost + MotifCost
+    else
+        TotalCost #= PitchCost + RhythmCost
+    end,
+
     solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness),
 
     Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
