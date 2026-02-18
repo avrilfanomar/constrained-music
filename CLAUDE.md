@@ -79,6 +79,7 @@ rm -f picat/*.qi
 - `genre_profiles.pi` - Genre-specific constraint configurations
 - `constraint_registry.pi` - Central registry of all constraints
 - `constraint_selector.pi` - Selects constraints based on genre and preferences
+- `refiner.pi` - Post-generation refinement via multi-start best-of-N
 
 **Accompaniment:**
 - `harmonizer.pi` - Melody-to-chord-progression analysis (diatonic scoring algorithm)
@@ -168,6 +169,7 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ./scripts/run_picat.sh picat/test_accompaniment.pi          # Accompaniment & harmonizer tests
 ./scripts/run_picat.sh picat/test_emotional.pi              # Emotional constraint tests
 ./scripts/run_picat.sh picat/test_rhythm.pi                 # Variable rhythm tests
+./scripts/run_picat.sh picat/test_refine.pi                # Refinement tests
 ```
 
 The **constraint validation test suite** (`test_constraint_validation.pi`) validates that famous musical masterpieces satisfy the implemented constraints:
@@ -342,6 +344,54 @@ The mood system (Valence-Arousal model) now influences **which constraints are a
 **Architecture:** Mood is injected into the Preferences pipeline via `mood=Mood` key. `constraint_selector.pi` extracts it, applies multipliers via `emotional_constraints.mood_weight_multipliers()`, and appends new constraints via `emotional_constraints.mood_emotional_constraints()`. No melody.pi signature changes needed.
 
 **Module:** `emotional_constraints.pi` — contains `mood_emotional_constraints()`, `mood_weight_multipliers()`, and 5 `reify_*` implementations.
+
+### Post-Generation Refinement
+
+The refinement system re-generates melodies multiple times and keeps the best result, reducing soft constraint violations without changing the CP solver.
+
+**Two modes:**
+- **`refine=N`** — Per-segment refinement: each segment is generated N times independently, keeping the lowest-scoring result
+- **`refine_piece=N`** — Per-piece refinement: the entire multi-segment piece is generated N times, keeping the best
+- Both accept `on` as shorthand for `3`
+
+**How it works:**
+1. Round 1 generates normally (deterministic or with user-set randomness)
+2. The melody is scored using `visualizer.score_all_constraints()` weighted by genre-active soft constraint weights
+3. Rounds 2..N: advance random state, inject minimum randomness (0.4) for solver diversity, boost weights of top-3 worst-violated constraints via `$weight_override`, regenerate and score
+4. All rounds scored with the same base weights for fair comparison; best-scoring melody is kept
+
+**Weight boosting:** Each round identifies the 3 constraints with highest weighted violations and increases their weights by a multiplier: round 2 = 1.25x, round 3 = 1.5x, ..., capped at 2.0x and weight 100.
+
+**Module:** `refiner.pi` — contains `score_for_refinement()`, `boost_worst_constraints()`, `extract_pitches()`, `ensure_min_randomness()`, and preference helpers.
+
+**Usage:**
+```bash
+# Per-segment: 3 rounds (default with 'on')
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period refine=on
+
+# Per-segment: 5 rounds
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period refine=5
+
+# Per-piece: 3 rounds
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period refine_piece=3
+
+# Combined: segment + piece refinement
+./scripts/run_picat.sh picat/companion.pi demo genre=classical_period refine=3 refine_piece=2
+
+# Best with some randomness (gives solver more diverse starting points)
+./scripts/run_picat.sh picat/companion.pi from=sad_depressed to=energized genre=baroque refine=5 randomness=0.3
+```
+
+**Expected output:**
+```
+    Refining (3 rounds)...
+    Round 1: score=2294
+    Round 2: score=1744  (boosted: phrase_arch_contour, chord_tone_on_strong_beats, prefer_smaller_intervals)
+    Round 3: score=2554  (boosted: phrase_rhyme, chord_tone_on_strong_beats, prefer_smaller_intervals)
+    -> Selected best (score=1744, -23% vs round 1)
+```
+
+**Performance:** Each refinement round adds ~3s per segment (solver timeout). `refine=3` on a 60s demo (~8 segments) adds ~16s total. Per-piece refinement multiplies the entire generation time.
 
 ### Style Packages
 

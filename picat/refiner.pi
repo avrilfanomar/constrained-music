@@ -1,0 +1,187 @@
+% refiner.pi - Post-generation refinement via multi-start best-of-N
+%
+% Scores melodies using the static scorers from visualizer.pi, weighted
+% by genre-active soft constraint weights. Identifies worst-violated
+% constraints and boosts their weights for subsequent rounds.
+
+module refiner.
+
+import visualizer.
+import constraint_selector.
+import genre_profiles.
+import mood_mapping.
+
+% ==============================================================================
+% SCORING
+% ==============================================================================
+
+% Score a melody using static scorers weighted by genre-active constraints.
+% Returns integer score (lower = better).
+% Pitches: list of MIDI pitch integers
+% KeyRoot: root pitch (MIDI number)
+% Genre: genre atom
+% Preferences: list of preference entries
+score_for_refinement(Pitches, KeyRoot, Genre, Preferences) = Score =>
+    % Get raw violation counts from visualizer
+    RawResults = visualizer.score_all_constraints(Pitches, KeyRoot),
+
+    % Get active soft constraints with weights for this genre
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, 0.0),
+    ConstraintSet = $constraints(hard=_, soft=SoftList, params=_),
+
+    % Build weight map from active soft constraints
+    WeightMap = new_map(),
+    foreach((Id, W) in SoftList)
+        WeightMap.put(Id, W)
+    end,
+
+    % Compute weighted score
+    Total = 0,
+    foreach((Id, Violations) in RawResults)
+        if WeightMap.has_key(Id) then
+            Total := Total + Violations * WeightMap.get(Id)
+        else
+            % Non-genre constraint: weight 1
+            Total := Total + Violations
+        end
+    end,
+    Score = Total.
+
+% Score with rhythm constraints included (for variable-rhythm melodies)
+score_for_refinement_with_rhythm(Notes, KeyRoot, Genre, Preferences) = Score =>
+    Pitches = extract_pitches(Notes),
+    BaseScore = score_for_refinement(Pitches, KeyRoot, Genre, Preferences),
+
+    % Add rhythm constraint scores if variable durations present
+    if visualizer.has_variable_durations(Notes) then
+        RhythmResults = visualizer.score_rhythm_constraints(Notes),
+        RhythmScore = sum([V : (_, V) in RhythmResults]),
+        Score = BaseScore + RhythmScore * 50  % Default rhythm weight
+    else
+        Score = BaseScore
+    end.
+
+% ==============================================================================
+% WEIGHT BOOSTING
+% ==============================================================================
+
+% Analyze violations and boost top-3 worst-weighted-violated active constraints.
+% Returns updated Preferences with weight_override entries.
+% Round: current refinement round (2, 3, ...)
+boost_worst_constraints(Pitches, KeyRoot, Genre, Preferences, Round) = BoostedPrefs =>
+    % Get raw violations
+    RawResults = visualizer.score_all_constraints(Pitches, KeyRoot),
+
+    % Get active soft constraints
+    ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, 0.0),
+    ConstraintSet = $constraints(hard=_, soft=SoftList, params=_),
+
+    % Build map of active constraint weights
+    ActiveMap = new_map(),
+    foreach((Id, W) in SoftList)
+        ActiveMap.put(Id, W)
+    end,
+
+    % Compute weighted violation per active constraint
+    WeightedViolations = [],
+    foreach((Id, Violations) in RawResults)
+        if ActiveMap.has_key(Id), Violations > 0 then
+            WV = Violations * ActiveMap.get(Id),
+            WeightedViolations := [(WV, Id, ActiveMap.get(Id)) | WeightedViolations]
+        end
+    end,
+
+    % Sort descending by weighted violation
+    Sorted = sort_descending(WeightedViolations),
+
+    % Take top 3
+    TopN = min(3, length(Sorted)),
+    Top3 = [Sorted[I] : I in 1..TopN],
+
+    % Compute boost multiplier: 1.0 + (Round-1)*0.25, capped at 2.0
+    Multiplier = min(2.0, 1.0 + (Round - 1) * 0.25),
+
+    % Create weight overrides
+    Overrides = [],
+    BoostedNames = [],
+    foreach((_, Id, BaseW) in Top3)
+        NewW = min(100, round(BaseW * Multiplier)),
+        Overrides := [$weight_override(Id, NewW) | Overrides],
+        BoostedNames := [Id | BoostedNames]
+    end,
+
+    % Merge overrides into preferences (remove any existing overrides for same IDs)
+    FilteredPrefs = [P : P in Preferences,
+        not (P = $weight_override(WId, _), member_check(WId, BoostedNames))],
+    BoostedPrefs = FilteredPrefs ++ Overrides.
+
+% Simple descending sort by first element of tuple
+sort_descending(List) = Sorted =>
+    Sorted = sort(List).reverse().
+
+% Deterministic membership check (no backtracking)
+member_check(_, []) => fail.
+member_check(X, [X|_]) => true.
+member_check(X, [_|T]) => member_check(X, T).
+
+% ==============================================================================
+% PITCH EXTRACTION
+% ==============================================================================
+
+% Extract MIDI pitch values from a list of note structures
+extract_pitches(Notes) = Pitches =>
+    Pitches = [P : $note($pitch(midi, P, _), _, _, _, _) in Notes].
+
+% ==============================================================================
+% REFINEMENT HELPERS
+% ==============================================================================
+
+% Get number of refinement rounds from preferences (default 1 = no refinement)
+get_refine_rounds(Preferences) = N =>
+    Found = false,
+    N0 = 1,
+    foreach(P in Preferences)
+        if P = (refine=Val), not Found then
+            N0 := Val,
+            Found := true
+        end
+    end,
+    N = N0.
+
+% Get number of piece-level refinement rounds (default 1)
+get_refine_piece_rounds(Preferences) = N =>
+    Found = false,
+    N0 = 1,
+    foreach(P in Preferences)
+        if P = (refine_piece=Val), not Found then
+            N0 := Val,
+            Found := true
+        end
+    end,
+    N = N0.
+
+% Format boosted constraint names for display
+format_boosted(Preferences) = Str =>
+    Names = [],
+    foreach(P in Preferences)
+        if P = $weight_override(Id, _) then
+            Names := [to_string(Id) | Names]
+        end
+    end,
+    if Names == [] then
+        Str = ""
+    else
+        Str = "  (boosted: " ++ join_strs(reverse(Names), ", ") ++ ")"
+    end.
+
+% Ensure MusicParams has minimum randomness for solver diversity
+% During refinement rounds 2+, we need rand_val in the solver to get different melodies
+ensure_min_randomness(Params, MinRand) = NewParams =>
+    Params = $music_params(T, M, D, I, V, VB, VV, L, Dis, R),
+    NewR = max(R, MinRand),
+    NewParams = $music_params(T, M, D, I, V, VB, VV, L, Dis, NewR).
+
+% Join strings with separator
+join_strs([], _) = "".
+join_strs([X], _) = X.
+join_strs([X|Rest], Sep) = X ++ Sep ++ join_strs(Rest, Sep).

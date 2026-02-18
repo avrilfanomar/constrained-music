@@ -23,6 +23,7 @@ import motif.
 import visualizer.
 import harmonizer.
 import accompaniment.
+import refiner.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -227,7 +228,36 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     % Generate melodies with genre constraints
     println("Generating music with genre constraints..."),
     KeyRoot = 60,  % C4
-    AllNotes = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
+
+    % Per-piece refinement: generate entire piece N times, keep best
+    PieceRounds = refiner.get_refine_piece_rounds(Preferences),
+    if PieceRounds > 1 then
+        printf("  Per-piece refinement (%d rounds)...%n", PieceRounds),
+        % Round 1
+        PieceNotes1 = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
+        PiecePitches1 = refiner.extract_pitches(PieceNotes1),
+        PieceScore1 = refiner.score_for_refinement(PiecePitches1, KeyRoot, Genre, Preferences),
+        printf("  Piece round 1: score=%d (%d notes)%n", PieceScore1, length(PieceNotes1)),
+        BestPieceNotes = PieceNotes1,
+        BestPieceScore = PieceScore1,
+        % Rounds 2..N
+        foreach(PR in 2..PieceRounds)
+            advance_random_state(PR * 137),
+            PieceNotesR = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
+            PiecePitchesR = refiner.extract_pitches(PieceNotesR),
+            PieceScoreR = refiner.score_for_refinement(PiecePitchesR, KeyRoot, Genre, Preferences),
+            printf("  Piece round %d: score=%d (%d notes)%n", PR, PieceScoreR, length(PieceNotesR)),
+            if PieceScoreR < BestPieceScore then
+                BestPieceScore := PieceScoreR,
+                BestPieceNotes := PieceNotesR
+            end
+        end,
+        PieceImprovePct = cond(PieceScore1 > 0, (PieceScore1 - BestPieceScore) * 100 // PieceScore1, 0),
+        printf("  -> Selected best piece (score=%d, -%d%% vs round 1)%n", BestPieceScore, PieceImprovePct),
+        AllNotes = BestPieceNotes
+    else
+        AllNotes = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences)
+    end,
     printf("  Generated %d total notes%n%n", length(AllNotes)),
 
     % Apply velocity curves (phrase-level dynamics per segment)
@@ -270,7 +300,6 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
 
     % Inject segment mood into preferences for emotional constraints
     SegmentMood = get_segment_mood(Seg),
-    MoodPrefs = [mood=SegmentMood | Preferences],
 
     % Check if rhythm mode is active
     if find_first_key(Preferences, rhythm, RhythmVal1), RhythmVal1 == on then
@@ -279,34 +308,54 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
         UseRhythm = false
     end,
 
-    % Generate melody with genre constraints + motif memory
+    % Determine connection info
     if Acc == [] then
-        % First segment: no motif constraint
-        if UseRhythm == true,
-           once(melody.generate_segment_melody_with_rhythm(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody0R)) then
-            SegmentMelody = SegmentMelody0R
-        else
-            once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
-        end
+        PrevLastPitch = none
     else
-        % Connect to previous segment with motif reference
-        PrevMelody = head(Acc),
-        PrevLastPitch = melody.last_pitch(PrevMelody),
-        if UseRhythm == true, MotifIntervals != [],
-           once(melody.generate_connected_segment_with_rhythm_and_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody1R)) then
-            SegmentMelody = SegmentMelody1R
-        elseif UseRhythm == true,
-           once(melody.generate_connected_segment_with_rhythm(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody2R)) then
-            SegmentMelody = SegmentMelody2R
-        elseif MotifIntervals != [],
-           once(melody.generate_connected_segment_with_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody0)) then
-            SegmentMelody = SegmentMelody0
-        elseif once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody1)) then
-            SegmentMelody = SegmentMelody1
-        else
-            % Fallback: generate without connection
-            once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
-        end
+        PrevLastPitch = melody.last_pitch(head(Acc))
+    end,
+
+    % Determine refinement rounds
+    NumRounds = refiner.get_refine_rounds(Preferences),
+
+    % Round 1: generate normally
+    MoodPrefs1 = [mood=SegmentMood | Preferences],
+    SegMelody1 = try_genre_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs1, UseRhythm, PrevLastPitch, MotifIntervals, MotifWeight),
+
+    % Refinement rounds
+    if NumRounds > 1, SegMelody1 != [] then
+        Pitches1 = refiner.extract_pitches(SegMelody1),
+        Score1 = refiner.score_for_refinement(Pitches1, KeyRoot, Genre, Preferences),
+        printf("    Refining (%d rounds)...%n", NumRounds),
+        printf("    Round 1: score=%d%n", Score1),
+        BestScore = Score1,
+        BestMelody = SegMelody1,
+        foreach(Round in 2..NumRounds)
+            advance_random_state(Round * 73),
+            BoostedPrefs = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelody), KeyRoot, Genre, Preferences, Round),
+            BoostedMoodPrefs = [mood=SegmentMood | BoostedPrefs],
+            % Ensure randomness for solver diversity in refinement rounds
+            RefinedParams = refiner.ensure_min_randomness(Params, 0.4),
+            CandidateMelody = try_genre_segment(RefinedParams, KeyRoot, NumBars, Genre, BoostedMoodPrefs, UseRhythm, PrevLastPitch, MotifIntervals, MotifWeight),
+            if CandidateMelody != [] then
+                CandidatePitches = refiner.extract_pitches(CandidateMelody),
+                % Score with base preferences (not boosted) for fair comparison
+                CandidateScore = refiner.score_for_refinement(CandidatePitches, KeyRoot, Genre, Preferences),
+                BoostedInfo = refiner.format_boosted(BoostedPrefs),
+                printf("    Round %d: score=%d%s%n", Round, CandidateScore, BoostedInfo),
+                if CandidateScore < BestScore then
+                    BestScore := CandidateScore,
+                    BestMelody := CandidateMelody
+                end
+            else
+                printf("    Round %d: generation failed, skipping%n", Round)
+            end
+        end,
+        ImprovePct = cond(Score1 > 0, (Score1 - BestScore) * 100 // Score1, 0),
+        printf("    -> Selected best (score=%d, -%d%% vs round 1)%n", BestScore, ImprovePct),
+        SegmentMelody = BestMelody
+    else
+        SegmentMelody = SegMelody1
     end,
 
     % Extract motif from first segment
@@ -330,6 +379,45 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
     Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals).
+
+% ==============================================================================
+% SEGMENT GENERATION HELPERS (for refinement)
+% ==============================================================================
+
+% Try one genre segment generation attempt
+% PrevLastPitch = none for first segment, MIDI pitch otherwise
+% Returns melody notes or [] on failure
+try_genre_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs, UseRhythm, PrevLastPitch, MotifIntervals, MotifWeight) = SegmentMelody =>
+    if PrevLastPitch == none then
+        % First segment: no connection needed
+        if UseRhythm == true,
+           once(melody.generate_segment_melody_with_rhythm(Params, KeyRoot, NumBars, Genre, MoodPrefs, M1)) then
+            SegmentMelody = M1
+        elseif once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, M2)) then
+            SegmentMelody = M2
+        else
+            SegmentMelody = []
+        end
+    else
+        % Connect to previous segment with motif reference
+        if UseRhythm == true, MotifIntervals != [],
+           once(melody.generate_connected_segment_with_rhythm_and_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, M3)) then
+            SegmentMelody = M3
+        elseif UseRhythm == true,
+           once(melody.generate_connected_segment_with_rhythm(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, M4)) then
+            SegmentMelody = M4
+        elseif MotifIntervals != [],
+           once(melody.generate_connected_segment_with_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, M5)) then
+            SegmentMelody = M5
+        elseif once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, M6)) then
+            SegmentMelody = M6
+        elseif once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, M7)) then
+            % Fallback: generate without connection
+            SegmentMelody = M7
+        else
+            SegmentMelody = []
+        end
+    end.
 
 % ==============================================================================
 % FORM-BASED COMPANION
@@ -557,17 +645,13 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     SectionKey = get_form_segment_key(Seg),
     SectionMode = get_form_segment_mode(Seg),
     SectionLabel = get_form_segment_label(Seg),
-    IsFinal = get_form_segment_is_final(Seg),
+    _IsFinal = get_form_segment_is_final(Seg),
 
     % Transpose key root by section key (relative to C)
     TransposedKeyRoot = KeyRoot + SectionKey,
 
-    % Determine cadence type for segment end
-    CadenceType = cond(IsFinal, authentic, half),
-
     % Inject segment mood into preferences for emotional constraints
     SegmentMood = get_segment_mood(Seg),
-    MoodPrefs = [mood=SegmentMood | Preferences],
 
     % Check if rhythm mode is active
     if find_first_key(Preferences, rhythm, RhythmValF), RhythmValF == on then
@@ -576,41 +660,63 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
         UseRhythmF = false
     end,
 
-    % Generate melody
+    % Determine connection info
     if Acc == [] then
-        % First segment
-        if Genre != none then
-            if UseRhythmF == true,
-               once(melody.generate_segment_melody_with_rhythm(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelodyR0)) then
-                SegmentMelody = SegmentMelodyR0
-            else
-                once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
-            end
+        PrevLastPitchF = none
+    else
+        PrevLastPitchF = last_pitch(head(Acc))
+    end,
+
+    % Determine refinement rounds (only for genre-based generation)
+    NumRoundsF = cond(Genre != none, refiner.get_refine_rounds(Preferences), 1),
+
+    % Generate melody (genre-based path uses try_genre_segment; non-genre uses direct calls)
+    if Genre != none then
+        % Genre-based: use try_genre_segment with refinement
+        MoodPrefsF1 = [mood=SegmentMood | Preferences],
+        SegMelodyF1 = try_genre_segment(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefsF1, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
+
+        if NumRoundsF > 1, SegMelodyF1 != [] then
+            PitchesF1 = refiner.extract_pitches(SegMelodyF1),
+            ScoreF1 = refiner.score_for_refinement(PitchesF1, TransposedKeyRoot, Genre, Preferences),
+            printf("    Refining (%d rounds)...%n", NumRoundsF),
+            printf("    Round 1: score=%d%n", ScoreF1),
+            BestScoreF = ScoreF1,
+            BestMelodyF = SegMelodyF1,
+            foreach(RoundF in 2..NumRoundsF)
+                advance_random_state(RoundF * 73),
+                BoostedPrefsF = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelodyF), TransposedKeyRoot, Genre, Preferences, RoundF),
+                BoostedMoodPrefsF = [mood=SegmentMood | BoostedPrefsF],
+                % Ensure randomness for solver diversity in refinement rounds
+                RefinedParamsF = refiner.ensure_min_randomness(Params, 0.4),
+                CandidateMelodyF = try_genre_segment(RefinedParamsF, TransposedKeyRoot, NumBars, Genre, BoostedMoodPrefsF, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
+                if CandidateMelodyF != [] then
+                    CandidatePitchesF = refiner.extract_pitches(CandidateMelodyF),
+                    % Score with base preferences (not boosted) for fair comparison
+                    CandidateScoreF = refiner.score_for_refinement(CandidatePitchesF, TransposedKeyRoot, Genre, Preferences),
+                    BoostedInfoF = refiner.format_boosted(BoostedPrefsF),
+                    printf("    Round %d: score=%d%s%n", RoundF, CandidateScoreF, BoostedInfoF),
+                    if CandidateScoreF < BestScoreF then
+                        BestScoreF := CandidateScoreF,
+                        BestMelodyF := CandidateMelodyF
+                    end
+                else
+                    printf("    Round %d: generation failed, skipping%n", RoundF)
+                end
+            end,
+            ImprovePctF = cond(ScoreF1 > 0, (ScoreF1 - BestScoreF) * 100 // ScoreF1, 0),
+            printf("    -> Selected best (score=%d, -%d%% vs round 1)%n", BestScoreF, ImprovePctF),
+            SegmentMelody = BestMelodyF
         else
-            once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
+            SegmentMelody = SegMelodyF1
         end
     else
-        % Connect to previous segment with motif reference
-        PrevMelody = head(Acc),
-        PrevLastPitch = last_pitch(PrevMelody),
-        if Genre != none then
-            if UseRhythmF == true, MotifIntervals != [],
-               once(melody.generate_connected_segment_with_rhythm_and_motif(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelodyR1)) then
-                SegmentMelody = SegmentMelodyR1
-            elseif UseRhythmF == true,
-               once(melody.generate_connected_segment_with_rhythm(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelodyR2)) then
-                SegmentMelody = SegmentMelodyR2
-            elseif MotifIntervals != [],
-               once(melody.generate_connected_segment_with_motif(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody0)) then
-                SegmentMelody = SegmentMelody0
-            elseif once(melody.generate_connected_segment_with_genre(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody1)) then
-                SegmentMelody = SegmentMelody1
-            else
-                once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
-            end
+        % Non-genre: direct generation, no refinement
+        if PrevLastPitchF == none then
+            once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
         else
-            if once(generate_connected_segment_melody(Params, TransposedKeyRoot, NumBars, PrevLastPitch, SegmentMelody0)) then
-                SegmentMelody = SegmentMelody0
+            if once(generate_connected_segment_melody(Params, TransposedKeyRoot, NumBars, PrevLastPitchF, SegMelodyF0)) then
+                SegmentMelody = SegMelodyF0
             else
                 once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
             end
@@ -865,7 +971,9 @@ main(Args) =>
         Genre = get_arg(ParsedOpts, genre, none),
         Accomp = get_arg(ParsedOpts, accomp, auto),
         Rhythm = get_arg(ParsedOpts, rhythm, off),
-        demo_with_options(Randomness, Genre, Accomp, Rhythm),
+        Refine = get_arg(ParsedOpts, refine, 1),
+        RefinePiece = get_arg(ParsedOpts, refine_piece, 1),
+        demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece),
         halt
     elseif FirstArg == "path" then
         demo_path(),
@@ -1004,6 +1112,18 @@ set_arg(Map, "rhythm", Value) = Map =>
     Map.put(rhythm, to_atom(Value)).
 set_arg(Map, "count", Value) = Map =>
     Map.put(count, to_integer(Value)).
+set_arg(Map, "refine", Value) = Map =>
+    if Value == "on" then
+        Map.put(refine, 3)
+    else
+        Map.put(refine, to_integer(Value))
+    end.
+set_arg(Map, "refine_piece", Value) = Map =>
+    if Value == "on" then
+        Map.put(refine_piece, 3)
+    else
+        Map.put(refine_piece, to_integer(Value))
+    end.
 set_arg(Map, Key, Value) = Map =>
     % Check for weight:constraint=value pattern
     if append("weight:", ConstraintStr, Key) then
@@ -1074,6 +1194,12 @@ print_usage() =>
     println("                   rondo:   ABACA - recurring refrain with episodes"),
     println("                   through: no repetition (free form)"),
     nl,
+    println("Refinement Options:"),
+    println("  refine=N         Per-segment refinement: generate each segment N times,"),
+    println("                   keep best (default: 1 = no refinement, 'on' = 3)"),
+    println("  refine_piece=N   Per-piece refinement: generate entire piece N times,"),
+    println("                   keep best (default: 1 = no refinement, 'on' = 3)"),
+    nl,
     println("Rhythm Options:"),
     println("  rhythm=on        Enable variable rhythm (default: off/uniform durations)"),
     println("                   Generates melodies with mixed note durations"),
@@ -1105,6 +1231,12 @@ print_usage() =>
     println("  picat companion.pi genre=baroque intensity=strict"),
     println("  picat companion.pi genre=jazz disable=leap_recovery"),
     println("  picat companion.pi genre=folk_traditional weight:mostly_stepwise=90"),
+    nl,
+    println("Refinement examples:"),
+    println("  picat companion.pi demo genre=classical_period refine=on"),
+    println("  picat companion.pi demo genre=classical_period refine=5"),
+    println("  picat companion.pi demo genre=classical_period refine_piece=3"),
+    println("  picat companion.pi from=sad_depressed to=energized genre=baroque refine=5"),
     nl,
     println("Rhythm examples:"),
     println("  picat companion.pi demo genre=classical_period rhythm=on"),
@@ -1139,6 +1271,15 @@ build_preferences(ParsedArgs) = Preferences =>
     if Rhythm == on then
         Prefs := Prefs ++ [rhythm=on]
     end,
+    % Add refinement rounds
+    Refine = get_arg(ParsedArgs, refine, 1),
+    if Refine > 1 then
+        Prefs := Prefs ++ [refine=Refine]
+    end,
+    RefinePiece = get_arg(ParsedArgs, refine_piece, 1),
+    if RefinePiece > 1 then
+        Prefs := Prefs ++ [refine_piece=RefinePiece]
+    end,
     Preferences = Prefs.
 
 % Print all available genres
@@ -1167,12 +1308,18 @@ demo() =>
 demo_with_randomness(Randomness) =>
     run_companion_presets(sad_depressed, energized, 60, "session.json", Randomness).
 
-% Quick demo with genre, accompaniment, and rhythm options
-demo_with_options(Randomness, Genre, Accomp, Rhythm) =>
+% Quick demo with genre, accompaniment, rhythm, and refinement options
+demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece) =>
     % Build preferences list
     Prefs = cond(Accomp != auto, [accomp=Accomp], []),
     if Rhythm == on then
         Prefs := Prefs ++ [rhythm=on]
+    end,
+    if Refine > 1 then
+        Prefs := Prefs ++ [refine=Refine]
+    end,
+    if RefinePiece > 1 then
+        Prefs := Prefs ++ [refine_piece=RefinePiece]
     end,
     % If genre specified, use run_companion_with_genre; otherwise use run_companion_presets
     if Genre != none then
