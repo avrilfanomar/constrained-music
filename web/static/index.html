@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Constrained Music Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Cormorant+Garamond:wght@400;500;600&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header class="app-header">
+        <h1 class="app-title">Constrained Music Studio</h1>
+        <p class="app-subtitle">Constraint-based music generation with emotional expression</p>
+    </header>
+
+    <main class="app-main">
+        <div class="controls-row">
+            <!-- Left Column: Mood + Sliders -->
+            <section class="panel mood-section">
+                <h2 class="panel-title">Mood Transition</h2>
+                <div class="mood-pad-container">
+                    <canvas id="mood-pad" width="300" height="300"></canvas>
+                    <div class="mood-coordinates">
+                        <span id="start-coords">Start: V=0.00, A=0.00</span>
+                        <span id="end-coords">End: V=0.00, A=0.00</span>
+                    </div>
+                </div>
+                <div class="ornament">&#x2767;</div>
+                <div class="slider-group">
+                    <label class="slider-label">
+                        <span>Duration</span>
+                        <span id="duration-value" class="slider-value">60s</span>
+                    </label>
+                    <input type="range" id="duration-slider" min="10" max="300" value="60" class="styled-slider">
+                </div>
+                <div class="slider-group">
+                    <label class="slider-label">
+                        <span>Randomness</span>
+                        <span id="randomness-value" class="slider-value">0.30</span>
+                    </label>
+                    <input type="range" id="randomness-slider" min="0" max="100" value="30" class="styled-slider">
+                </div>
+                <div class="slider-group">
+                    <label class="slider-label"><span>Intensity</span></label>
+                    <div class="segmented-control" id="intensity-control">
+                        <button data-value="light">Light</button>
+                        <button data-value="standard" class="active">Standard</button>
+                        <button data-value="strict">Strict</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Genre, Form, Constraints -->
+            <section class="panel genre-section">
+                <h2 class="panel-title">Genre & Style</h2>
+                <div id="genre-cards" class="genre-cards"></div>
+
+                <div class="form-accomp-row">
+                    <div class="select-group">
+                        <label class="select-label">Form</label>
+                        <select id="form-select" class="styled-select"></select>
+                    </div>
+                    <div class="select-group">
+                        <label class="select-label">Accompaniment</label>
+                        <select id="accomp-select" class="styled-select"></select>
+                    </div>
+                    <div class="select-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="rhythm-toggle">
+                            <span>Variable rhythm</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="ornament">&#x2767;</div>
+
+                <h2 class="panel-title">Constraints</h2>
+                <div class="constraint-toolbar">
+                    <button id="reset-constraints" class="btn-small" title="Reset to genre defaults">Reset to Genre Defaults</button>
+                </div>
+                <div id="constraint-panel" class="constraint-panel"></div>
+            </section>
+        </div>
+
+        <!-- Generate Button -->
+        <div class="generate-row">
+            <button id="generate-btn" class="btn-generate">
+                <span class="btn-generate-icon">&#9835;</span>
+                <span class="btn-generate-text">Generate</span>
+            </button>
+        </div>
+
+        <!-- Piano Roll -->
+        <section class="panel piano-roll-section" id="output-section" style="display:none;">
+            <h2 class="panel-title">Output</h2>
+            <div class="piano-roll-container">
+                <canvas id="piano-roll" width="900" height="200"></canvas>
+            </div>
+            <div class="transport-bar">
+                <button id="play-btn" class="btn-transport" title="Play">&#9654;</button>
+                <button id="pause-btn" class="btn-transport" title="Pause" disabled>&#10074;&#10074;</button>
+                <button id="stop-btn" class="btn-transport" title="Stop" disabled>&#9632;</button>
+                <div class="progress-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+                <span id="time-display" class="time-display">0:00 / 0:00</span>
+                <button id="download-midi" class="btn-small btn-download" title="Download MIDI">&#11015; MIDI</button>
+            </div>
+            <details class="generation-log">
+                <summary>Generation Log</summary>
+                <pre id="picat-output"></pre>
+            </details>
+        </section>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay" style="display:none;">
+            <div class="loading-spinner">
+                <div class="treble-clef">&#119070;</div>
+                <p>Generating music...</p>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script type="module" src="/static/js/mood-pad.js"></script>
+    <script type="module" src="/static/js/genre-selector.js"></script>
+    <script type="module" src="/static/js/constraint-panel.js"></script>
+    <script type="module" src="/static/js/piano-roll.js"></script>
+    <script type="module" src="/static/js/playback.js"></script>
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

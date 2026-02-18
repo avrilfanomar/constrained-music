@@ -1,0 +1,682 @@
+/* ===========================================================================
+   Constrained Music Studio - Design System
+   Classical Music Elegance: Ivory, Gold, Burgundy, Navy
+   =========================================================================== */
+
+/* --- CSS Custom Properties --- */
+:root {
+    --ivory: #FAF7F0;
+    --ivory-dark: #F0EBE0;
+    --gold: #D4A843;
+    --gold-dark: #B8860B;
+    --gold-light: #E8C97A;
+    --burgundy: #722F37;
+    --burgundy-light: #8B3A42;
+    --navy: #1B2A4A;
+    --navy-light: #2A3D66;
+    --charcoal: #333333;
+    --text: #2C2C2C;
+    --text-muted: #6B6B6B;
+    --white: #FFFFFF;
+    --shadow-soft: 0 2px 12px rgba(27, 42, 74, 0.08);
+    --shadow-medium: 0 4px 20px rgba(27, 42, 74, 0.12);
+    --shadow-strong: 0 8px 32px rgba(27, 42, 74, 0.16);
+    --radius: 8px;
+    --radius-lg: 12px;
+    --transition: 300ms ease;
+
+    --font-display: 'Playfair Display', Georgia, serif;
+    --font-body: 'Cormorant Garamond', Garamond, serif;
+    --font-ui: 'Source Sans 3', 'Segoe UI', sans-serif;
+}
+
+/* --- Reset & Base --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: var(--font-ui);
+    font-weight: 400;
+    color: var(--text);
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(212, 168, 67, 0.06) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 80%, rgba(114, 47, 55, 0.04) 0%, transparent 50%),
+        var(--ivory);
+    min-height: 100vh;
+    line-height: 1.5;
+}
+
+/* --- Header --- */
+.app-header {
+    text-align: center;
+    padding: 28px 20px 18px;
+    border-bottom: 1px solid rgba(184, 134, 11, 0.15);
+}
+
+.app-title {
+    font-family: var(--font-display);
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--navy);
+    letter-spacing: 0.02em;
+}
+
+.app-subtitle {
+    font-family: var(--font-body);
+    font-size: 1.05rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    font-weight: 500;
+}
+
+/* --- Main Layout --- */
+.app-main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px 20px 40px;
+}
+
+.controls-row {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 24px;
+    margin-bottom: 20px;
+}
+
+/* --- Panels --- */
+.panel {
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(184, 134, 11, 0.12);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--shadow-soft);
+}
+
+.panel-title {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--navy);
+    margin-bottom: 14px;
+}
+
+.ornament {
+    text-align: center;
+    color: var(--gold);
+    font-size: 1.2rem;
+    margin: 14px 0;
+    opacity: 0.5;
+}
+
+/* --- Mood Pad --- */
+.mood-pad-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#mood-pad {
+    border: 2px solid var(--gold);
+    border-radius: var(--radius);
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.mood-coordinates {
+    display: flex;
+    justify-content: space-between;
+    width: 300px;
+    margin-top: 6px;
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* --- Sliders --- */
+.slider-group {
+    margin-bottom: 12px;
+}
+
+.slider-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.slider-value {
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    color: var(--gold-dark);
+    font-weight: 600;
+}
+
+.styled-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--ivory-dark);
+    outline: none;
+    transition: background var(--transition);
+}
+
+.styled-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--burgundy);
+    border: 2px solid var(--white);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    cursor: pointer;
+    transition: transform var(--transition);
+}
+
+.styled-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+}
+
+.styled-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--burgundy);
+    border: 2px solid var(--white);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    cursor: pointer;
+}
+
+/* --- Segmented Control (Intensity) --- */
+.segmented-control {
+    display: flex;
+    border: 1px solid rgba(184, 134, 11, 0.25);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.segmented-control button {
+    flex: 1;
+    padding: 6px 12px;
+    border: none;
+    background: var(--white);
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.segmented-control button + button {
+    border-left: 1px solid rgba(184, 134, 11, 0.15);
+}
+
+.segmented-control button.active {
+    background: var(--gold);
+    color: var(--white);
+    font-weight: 600;
+}
+
+.segmented-control button:hover:not(.active) {
+    background: var(--ivory-dark);
+}
+
+/* --- Genre Cards --- */
+.genre-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.genre-card {
+    padding: 6px 14px;
+    border: 1px solid rgba(184, 134, 11, 0.2);
+    border-radius: 20px;
+    background: var(--white);
+    font-family: var(--font-ui);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.genre-card:hover {
+    border-color: var(--gold);
+    box-shadow: 0 2px 8px rgba(212, 168, 67, 0.2);
+}
+
+.genre-card.active {
+    background: var(--navy);
+    color: var(--white);
+    border-color: var(--navy);
+}
+
+.genre-card .genre-card-name {
+    pointer-events: none;
+}
+
+/* --- Select / Form row --- */
+.form-accomp-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 4px;
+    align-items: flex-end;
+}
+
+.select-group {
+    flex: 1;
+}
+
+.select-label {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 3px;
+}
+
+.styled-select {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid rgba(184, 134, 11, 0.2);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font-ui);
+    font-size: 0.82rem;
+    color: var(--text);
+    cursor: pointer;
+    outline: none;
+    transition: border-color var(--transition);
+}
+
+.styled-select:focus {
+    border-color: var(--gold);
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-ui);
+    font-size: 0.82rem;
+    cursor: pointer;
+    padding-bottom: 8px;
+}
+
+.checkbox-label input[type="checkbox"] {
+    accent-color: var(--burgundy);
+}
+
+/* --- Constraint Panel --- */
+.constraint-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+
+.constraint-panel {
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.constraint-panel::-webkit-scrollbar {
+    width: 6px;
+}
+
+.constraint-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.constraint-panel::-webkit-scrollbar-thumb {
+    background: rgba(184, 134, 11, 0.2);
+    border-radius: 3px;
+}
+
+.constraint-category {
+    margin-bottom: 8px;
+}
+
+.constraint-category-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0;
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--navy);
+    user-select: none;
+    border-bottom: 1px solid rgba(184, 134, 11, 0.08);
+}
+
+.constraint-category-header .arrow {
+    font-size: 0.7rem;
+    transition: transform var(--transition);
+    color: var(--gold-dark);
+}
+
+.constraint-category-header .arrow.open {
+    transform: rotate(90deg);
+}
+
+.constraint-category-header .count {
+    font-family: var(--font-ui);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.constraint-list {
+    padding-left: 4px;
+}
+
+.constraint-list.collapsed {
+    display: none;
+}
+
+.constraint-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.78rem;
+}
+
+.constraint-item input[type="checkbox"] {
+    accent-color: var(--burgundy);
+    flex-shrink: 0;
+}
+
+.constraint-item .constraint-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-ui);
+    color: var(--text);
+    cursor: help;
+}
+
+.constraint-item .constraint-weight {
+    width: 60px;
+    flex-shrink: 0;
+}
+
+.constraint-item .constraint-weight input {
+    width: 100%;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    border-radius: 2px;
+    background: var(--ivory-dark);
+    outline: none;
+}
+
+.constraint-item .constraint-weight input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--gold-dark);
+    cursor: pointer;
+}
+
+.constraint-item .constraint-weight input::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--gold-dark);
+    cursor: pointer;
+    border: none;
+}
+
+.constraint-item .weight-val {
+    width: 24px;
+    text-align: right;
+    font-family: var(--font-ui);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.constraint-item.disabled .constraint-name {
+    color: var(--text-muted);
+    text-decoration: line-through;
+}
+
+/* --- Generate Button --- */
+.generate-row {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.btn-generate {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 48px;
+    border: none;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+    color: var(--white);
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    box-shadow: var(--shadow-medium);
+    transition: all var(--transition);
+}
+
+.btn-generate:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-strong);
+}
+
+.btn-generate:active {
+    transform: translateY(0);
+}
+
+.btn-generate:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-generate-icon {
+    font-size: 1.3rem;
+}
+
+/* --- Piano Roll --- */
+.piano-roll-section {
+    margin-top: 8px;
+}
+
+.piano-roll-container {
+    width: 100%;
+    overflow-x: auto;
+    margin-bottom: 12px;
+    background: var(--navy);
+    border-radius: var(--radius);
+    padding: 4px;
+}
+
+#piano-roll {
+    display: block;
+    width: 100%;
+    height: 200px;
+    border-radius: 4px;
+}
+
+/* --- Transport Bar --- */
+.transport-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+}
+
+.btn-transport {
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(184, 134, 11, 0.2);
+    border-radius: 50%;
+    background: var(--white);
+    font-size: 0.85rem;
+    color: var(--navy);
+    cursor: pointer;
+    transition: all var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-transport:hover:not(:disabled) {
+    border-color: var(--gold);
+    background: var(--ivory-dark);
+}
+
+.btn-transport:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.progress-container {
+    flex: 1;
+    height: 6px;
+    background: var(--ivory-dark);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--gold), var(--gold-dark));
+    border-radius: 3px;
+    transition: width 0.1s linear;
+}
+
+.time-display {
+    font-family: var(--font-ui);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    min-width: 80px;
+    text-align: center;
+}
+
+.btn-small {
+    padding: 5px 12px;
+    border: 1px solid rgba(184, 134, 11, 0.2);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    color: var(--text);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.btn-small:hover {
+    border-color: var(--gold);
+    background: var(--ivory-dark);
+}
+
+.btn-download {
+    color: var(--burgundy);
+    font-weight: 500;
+}
+
+/* --- Generation Log --- */
+.generation-log {
+    margin-top: 12px;
+    border: 1px solid rgba(184, 134, 11, 0.1);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.generation-log summary {
+    padding: 8px 12px;
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    background: rgba(255,255,255,0.5);
+}
+
+.generation-log pre {
+    padding: 12px;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    max-height: 250px;
+    overflow-y: auto;
+    background: var(--navy);
+    color: #C8D0DC;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* --- Loading Overlay --- */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(250, 247, 240, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+
+.loading-spinner {
+    text-align: center;
+}
+
+.treble-clef {
+    font-size: 4rem;
+    color: var(--gold);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.1); }
+}
+
+.loading-spinner p {
+    font-family: var(--font-body);
+    font-size: 1.1rem;
+    color: var(--navy);
+    margin-top: 8px;
+}
+
+/* --- Responsive --- */
+@media (max-width: 800px) {
+    .controls-row {
+        grid-template-columns: 1fr;
+    }
+
+    .mood-pad-container {
+        align-items: center;
+    }
+
+    .form-accomp-row {
+        flex-direction: column;
+    }
+}
