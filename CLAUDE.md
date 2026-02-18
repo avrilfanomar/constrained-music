@@ -69,6 +69,7 @@ rm -f picat/*.qi
 - `mood.pi` - Valence-Arousal model (-1 to +1 each axis)
 - `mood_mapping.pi` - Maps moods to musical parameters (tempo, mode, density)
 - `transition.pi` - Plans smooth paths between emotional states with easing
+- `emotional_constraints.pi` - Mood-driven constraint weights and emotional melodic idioms
 
 **Genre/Style:**
 - `genre_profiles.pi` - Genre-specific constraint configurations
@@ -161,6 +162,7 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ./scripts/run_picat.sh picat/test_transition.pi             # Mood transition planning tests
 ./scripts/run_picat.sh picat/test_variation.pi              # Variation generation tests
 ./scripts/run_picat.sh picat/test_accompaniment.pi          # Accompaniment & harmonizer tests
+./scripts/run_picat.sh picat/test_emotional.pi              # Emotional constraint tests
 ```
 
 The **constraint validation test suite** (`test_constraint_validation.pi`) validates that famous musical masterpieces satisfy the implemented constraints:
@@ -265,6 +267,35 @@ Genre-specific weights:
 2. **`no_short_note_isolation`**: Rhythmic constraint that penalizes isolated short notes (≤2 ticks) surrounded by longer notes (≥4 ticks). Prevents choppy mid-phrase articulations. Simplified alternative to true rest placement.
 
 3. **`motivic_fragmentation`**: Checks if interval patterns from the first quarter of the melody appear in the second half (sentence-style fragmentation). Returns 0 violations if ANY first-quarter interval is reused, 1 otherwise. Complements `rhythmic_acceleration` and `motivic_repetition`.
+
+### Emotional Constraints
+
+The mood system (Valence-Arousal model) now influences **which constraints are active and their weights**. Two mechanisms:
+
+**1. Mood-Driven Weight Adjustments** — existing soft constraint weights are scaled based on the current mood:
+
+| Mood Region | Constraint | Effect |
+|---|---|---|
+| Sad (V < -0.3) | `mostly_stepwise` | Up to 1.3× weight |
+| Sad (V < -0.3) | `phrase_ends_stable` | Up to 1.2× weight |
+| Calm (A < -0.3) | `register_consistency` | Up to 1.4× weight |
+| Calm (A < -0.3) | `no_repetitive_intervals` | Down to 0.5× weight |
+| Energized (A > 0.3) | `balanced_motion` | Up to 1.3× weight |
+| Happy (V > 0.3) | `consonant_leaps_only` | Up to 1.2× weight |
+
+**2. Emotion-Specific Soft Constraints** — 5 new constraints activated by mood:
+
+| Constraint | Violation | Mood Trigger |
+|---|---|---|
+| `descending_motion` | Each ascending interval | Low V (< -0.3) |
+| `ascending_motion` | Each descending interval | High V (> 0.3) AND High A (> 0) |
+| `narrow_range` | Pitch range in semitones | Low A (< -0.3) |
+| `contour_smoothness` | Each direction change | Low A (< -0.3) AND V > 0 |
+| `expressive_leaps` | Each interval < 3 semitones | High \|V\| (> 0.5) AND High A (> 0.3) |
+
+**Architecture:** Mood is injected into the Preferences pipeline via `mood=Mood` key. `constraint_selector.pi` extracts it, applies multipliers via `emotional_constraints.mood_weight_multipliers()`, and appends new constraints via `emotional_constraints.mood_emotional_constraints()`. No melody.pi signature changes needed.
+
+**Module:** `emotional_constraints.pi` — contains `mood_emotional_constraints()`, `mood_weight_multipliers()`, and 5 `reify_*` implementations.
 
 ### Style Packages
 

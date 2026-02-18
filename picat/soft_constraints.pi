@@ -10,6 +10,7 @@ module soft_constraints.
 
 import cp.
 import music_constraints.
+import emotional_constraints.
 
 % ==============================================================================
 % MAIN INTERFACE
@@ -170,6 +171,27 @@ apply_soft(motivic_fragmentation, Notes, _Root, Weight, Cost) =>
 % Register Constraints
 apply_soft(register_consistency, Notes, _Root, Weight, Cost) =>
     reify_register_consistency(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Emotional Constraints
+apply_soft(descending_motion, Notes, _Root, Weight, Cost) =>
+    emotional_constraints.reify_descending_motion(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(ascending_motion, Notes, _Root, Weight, Cost) =>
+    emotional_constraints.reify_ascending_motion(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(narrow_range, Notes, _Root, Weight, Cost) =>
+    emotional_constraints.reify_narrow_range(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(contour_smoothness, Notes, _Root, Weight, Cost) =>
+    emotional_constraints.reify_contour_smoothness(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+apply_soft(expressive_leaps, Notes, _Root, Weight, Cost) =>
+    emotional_constraints.reify_expressive_leaps(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
 % Default: unknown constraint returns 0 cost (no penalty)
@@ -1437,7 +1459,12 @@ supported_soft_constraints() = [
     motivic_repetition,
     motivic_fragmentation,
     antecedent_consequent,
-    register_consistency
+    register_consistency,
+    descending_motion,
+    ascending_motion,
+    narrow_range,
+    contour_smoothness,
+    expressive_leaps
 ].
 
 % Check if a constraint ID is supported for soft application

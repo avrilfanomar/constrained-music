@@ -587,6 +587,55 @@ constraint_def(
 ).
 
 % ==============================================================================
+% EMOTIONAL CONSTRAINTS
+% ==============================================================================
+
+constraint_def(
+    descending_motion,
+    emotional,
+    soft,
+    50,
+    [],
+    "Penalize ascending intervals (sad melodies gravitate downward)"
+).
+
+constraint_def(
+    ascending_motion,
+    emotional,
+    soft,
+    50,
+    [],
+    "Penalize descending intervals (joyful melodies tend to rise)"
+).
+
+constraint_def(
+    narrow_range,
+    emotional,
+    soft,
+    50,
+    [],
+    "Penalize wide pitch range (calm music stays in narrow register)"
+).
+
+constraint_def(
+    contour_smoothness,
+    emotional,
+    soft,
+    50,
+    [],
+    "Penalize direction changes (peaceful melodies flow smoothly)"
+).
+
+constraint_def(
+    expressive_leaps,
+    emotional,
+    soft,
+    50,
+    [],
+    "Penalize small intervals (dramatic music uses wide leaps)"
+).
+
+% ==============================================================================
 % RHYTHMIC CONSTRAINTS
 % ==============================================================================
 
@@ -692,7 +741,7 @@ is_soft_constraint(Id) =>
     constraint_def(Id, _, soft, _, _, _).
 
 % Get all categories
-all_categories() = [melodic, harmonic, voice_leading, phrase_structure, motivic, idiomatic].
+all_categories() = [melodic, harmonic, voice_leading, phrase_structure, motivic, idiomatic, emotional].
 
 % Get all genres
 all_genres() = [

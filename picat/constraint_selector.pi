@@ -5,6 +5,7 @@ module constraint_selector.
 
 import genre_profiles.
 import soft_constraints.
+import emotional_constraints.
 
 % ==============================================================================
 % MAIN SELECTION INTERFACE
@@ -21,9 +22,12 @@ select_constraints(Genre, Preferences, Randomness) = ConstraintSet =>
     % Apply preferences (disable/enable, weight overrides)
     (HardFiltered, SoftAdjusted) = apply_preferences(HardBase, SoftBase, Preferences),
 
+    % Apply mood-driven weight adjustments and emotional constraints
+    SoftWithMood = apply_mood_adjustments(SoftAdjusted, Preferences),
+
     % Apply intensity if specified in preferences
     Intensity = get_intensity(Preferences),
-    SoftWithIntensity = genre_profiles.apply_intensity(SoftAdjusted, Intensity),
+    SoftWithIntensity = genre_profiles.apply_intensity(SoftWithMood, Intensity),
 
     % Randomize weights based on randomness level
     SoftFinal = randomize_weights(SoftWithIntensity, Randomness),
@@ -84,6 +88,43 @@ get_intensity(Preferences) = Intensity =>
         Intensity = I
     else
         Intensity = standard
+    end.
+
+% ==============================================================================
+% MOOD-DRIVEN ADJUSTMENTS
+% ==============================================================================
+
+% Apply mood-driven weight multipliers and add emotional constraints
+apply_mood_adjustments(SoftList, Preferences) = Result =>
+    Mood = get_mood(Preferences),
+    if Mood != none then
+        % Apply weight multipliers to existing constraints
+        Multipliers = emotional_constraints.mood_weight_multipliers(Mood),
+        SoftMultiplied = apply_multipliers(SoftList, Multipliers),
+        % Append mood-specific emotional constraints
+        EmotionalConstraints = emotional_constraints.mood_emotional_constraints(Mood),
+        Result = SoftMultiplied ++ EmotionalConstraints
+    else
+        Result = SoftList
+    end.
+
+% Get mood from preferences (returns none if not present)
+get_mood(Preferences) = Mood =>
+    if member(mood=M, Preferences) then
+        Mood = M
+    else
+        Mood = none
+    end.
+
+% Apply weight multipliers: multiply existing weights by mood-derived factors
+apply_multipliers(SoftList, Multipliers) = Result =>
+    Result = [apply_single_multiplier(Id, W, Multipliers) : (Id, W) in SoftList].
+
+apply_single_multiplier(Id, BaseWeight, Multipliers) = (Id, FinalWeight) =>
+    if member((Id, Mult), Multipliers) then
+        FinalWeight = max(1, min(100, round(BaseWeight * Mult)))
+    else
+        FinalWeight = BaseWeight
     end.
 
 % Apply weight overrides to soft constraint list

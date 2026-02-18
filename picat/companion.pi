@@ -268,22 +268,26 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     Params = get_segment_params(Seg),
     MotifWeight = 50,  % Default motif reference weight
 
+    % Inject segment mood into preferences for emotional constraints
+    SegmentMood = get_segment_mood(Seg),
+    MoodPrefs = [mood=SegmentMood | Preferences],
+
     % Generate melody with genre constraints + motif memory
     if Acc == [] then
         % First segment: no motif constraint
-        once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+        once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
     else
         % Connect to previous segment with motif reference
         PrevMelody = head(Acc),
         PrevLastPitch = melody.last_pitch(PrevMelody),
         if MotifIntervals != [],
-           once(melody.generate_connected_segment_with_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, MotifIntervals, MotifWeight, SegmentMelody0)) then
+           once(melody.generate_connected_segment_with_motif(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody0)) then
             SegmentMelody = SegmentMelody0
-        elseif once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody1)) then
+        elseif once(melody.generate_connected_segment_with_genre(Params, KeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody1)) then
             SegmentMelody = SegmentMelody1
         else
             % Fallback: generate without connection
-            once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+            once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
         end
     end,
 
@@ -543,11 +547,15 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     % Determine cadence type for segment end
     CadenceType = cond(IsFinal, authentic, half),
 
+    % Inject segment mood into preferences for emotional constraints
+    SegmentMood = get_segment_mood(Seg),
+    MoodPrefs = [mood=SegmentMood | Preferences],
+
     % Generate melody
     if Acc == [] then
         % First segment
         if Genre != none then
-            once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+            once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
         else
             once(generate_segment_melody(Params, TransposedKeyRoot, NumBars, SegmentMelody))
         end
@@ -557,12 +565,12 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
         PrevLastPitch = last_pitch(PrevMelody),
         if Genre != none then
             if MotifIntervals != [],
-               once(melody.generate_connected_segment_with_motif(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, Preferences, MotifIntervals, MotifWeight, SegmentMelody0)) then
+               once(melody.generate_connected_segment_with_motif(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, MotifIntervals, MotifWeight, SegmentMelody0)) then
                 SegmentMelody = SegmentMelody0
-            elseif once(melody.generate_connected_segment_with_genre(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, Preferences, SegmentMelody1)) then
+            elseif once(melody.generate_connected_segment_with_genre(Params, TransposedKeyRoot, NumBars, PrevLastPitch, Genre, MoodPrefs, SegmentMelody1)) then
                 SegmentMelody = SegmentMelody1
             else
-                once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, Preferences, SegmentMelody))
+                once(melody.generate_segment_melody_with_genre(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefs, SegmentMelody))
             end
         else
             if once(generate_connected_segment_melody(Params, TransposedKeyRoot, NumBars, PrevLastPitch, SegmentMelody0)) then

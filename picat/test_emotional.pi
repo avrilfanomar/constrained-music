@@ -1,0 +1,327 @@
+% test_emotional.pi - Tests for emotional constraints module
+%
+% Tests mood_emotional_constraints, mood_weight_multipliers,
+% each reify function, and end-to-end constraint selection integration.
+
+module test_emotional.
+
+import emotional_constraints.
+import constraint_selector.
+import genre_profiles.
+import soft_constraints.
+import cp.
+
+main =>
+    println("=== Emotional Constraints Tests ==="),
+    nl,
+    PassCount = 0,
+    FailCount = 0,
+
+    % --- mood_emotional_constraints tests ---
+    println("Mood Emotional Constraints:"),
+
+    printf("  %-50s", "sad mood returns descending_motion"),
+    (test_sad_constraints() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "joyful mood returns ascending_motion"),
+    (test_joyful_constraints() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "calm mood returns narrow_range"),
+    (test_calm_constraints() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "peaceful mood returns contour_smoothness"),
+    (test_peaceful_constraints() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "dramatic mood returns expressive_leaps"),
+    (test_dramatic_constraints() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "neutral mood returns empty list"),
+    (test_neutral_constraints() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- mood_weight_multipliers tests ---
+    nl,
+    println("Mood Weight Multipliers:"),
+
+    printf("  %-50s", "sad mood boosts mostly_stepwise"),
+    (test_sad_multipliers() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "calm mood boosts register_consistency"),
+    (test_calm_multipliers() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "energized mood boosts balanced_motion"),
+    (test_energized_multipliers() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "happy mood boosts consonant_leaps_only"),
+    (test_happy_multipliers() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "neutral mood returns empty multipliers"),
+    (test_neutral_multipliers() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Reify function tests ---
+    nl,
+    println("Reify Functions:"),
+
+    printf("  %-50s", "descending_motion: ascending seq has violations"),
+    (test_reify_descending_ascending() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "descending_motion: descending seq no violations"),
+    (test_reify_descending_descending() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "ascending_motion: descending seq has violations"),
+    (test_reify_ascending_descending() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "ascending_motion: ascending seq no violations"),
+    (test_reify_ascending_ascending() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "narrow_range: octave range = 12 violations"),
+    (test_reify_narrow_range() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "narrow_range: step range = 2 violations"),
+    (test_reify_narrow_range_small() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "contour_smoothness: zigzag has violations"),
+    (test_reify_contour_zigzag() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "contour_smoothness: smooth has no violations"),
+    (test_reify_contour_smooth() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "expressive_leaps: stepwise has violations"),
+    (test_reify_expressive_stepwise() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "expressive_leaps: leapy has no violations"),
+    (test_reify_expressive_leapy() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Integration tests ---
+    nl,
+    println("Integration:"),
+
+    printf("  %-50s", "sad mood changes constraint profile"),
+    (test_integration_sad() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "happy mood changes constraint profile"),
+    (test_integration_happy() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "no mood = no emotional constraints"),
+    (test_integration_no_mood() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-50s", "apply_soft dispatches emotional constraints"),
+    (test_apply_soft_dispatch() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    % --- Summary ---
+    nl,
+    Total = PassCount + FailCount,
+    printf("Results: %d/%d passed", PassCount, Total),
+    if FailCount > 0 then
+        printf(" (%d FAILED)", FailCount)
+    end,
+    nl,
+    if FailCount > 0 then
+        halt(1)
+    end.
+
+% ==============================================================================
+% MOOD EMOTIONAL CONSTRAINTS TESTS
+% ==============================================================================
+
+test_sad_constraints() =>
+    Constraints = mood_emotional_constraints($mood(-0.7, -0.3)),
+    has_constraint(Constraints, descending_motion),
+    % Weight should scale with |V|: round(0.7 * 80) = 56
+    get_weight(Constraints, descending_motion, W),
+    W > 0.
+
+test_joyful_constraints() =>
+    Constraints = mood_emotional_constraints($mood(0.9, 0.6)),
+    has_constraint(Constraints, ascending_motion).
+
+test_calm_constraints() =>
+    Constraints = mood_emotional_constraints($mood(0.0, -0.7)),
+    has_constraint(Constraints, narrow_range).
+
+test_peaceful_constraints() =>
+    % Low arousal + positive valence
+    Constraints = mood_emotional_constraints($mood(0.5, -0.5)),
+    has_constraint(Constraints, contour_smoothness),
+    has_constraint(Constraints, narrow_range).
+
+test_dramatic_constraints() =>
+    % High |V| + high arousal
+    Constraints = mood_emotional_constraints($mood(0.8, 0.6)),
+    has_constraint(Constraints, expressive_leaps).
+
+test_neutral_constraints() =>
+    Constraints = mood_emotional_constraints($mood(0.0, 0.0)),
+    Constraints == [].
+
+% ==============================================================================
+% MOOD WEIGHT MULTIPLIERS TESTS
+% ==============================================================================
+
+test_sad_multipliers() =>
+    Multipliers = mood_weight_multipliers($mood(-0.7, 0.0)),
+    has_multiplier(Multipliers, mostly_stepwise),
+    get_multiplier(Multipliers, mostly_stepwise, M),
+    M > 1.0,
+    has_multiplier(Multipliers, phrase_ends_stable).
+
+test_calm_multipliers() =>
+    Multipliers = mood_weight_multipliers($mood(0.0, -0.7)),
+    has_multiplier(Multipliers, register_consistency),
+    get_multiplier(Multipliers, register_consistency, M),
+    M > 1.0.
+
+test_energized_multipliers() =>
+    Multipliers = mood_weight_multipliers($mood(0.0, 0.8)),
+    has_multiplier(Multipliers, balanced_motion),
+    get_multiplier(Multipliers, balanced_motion, M),
+    M > 1.0.
+
+test_happy_multipliers() =>
+    Multipliers = mood_weight_multipliers($mood(0.8, 0.0)),
+    has_multiplier(Multipliers, consonant_leaps_only),
+    get_multiplier(Multipliers, consonant_leaps_only, M),
+    M > 1.0,
+    has_multiplier(Multipliers, arch_contour).
+
+test_neutral_multipliers() =>
+    Multipliers = mood_weight_multipliers($mood(0.0, 0.0)),
+    Multipliers == [].
+
+% ==============================================================================
+% REIFY FUNCTION TESTS
+% ==============================================================================
+
+test_reify_descending_ascending() =>
+    Notes = [60, 62, 64, 66, 68],  % All ascending
+    reify_descending_motion(Notes, V),
+    V == 4.  % Every interval is ascending = violation
+
+test_reify_descending_descending() =>
+    Notes = [68, 66, 64, 62, 60],  % All descending
+    reify_descending_motion(Notes, V),
+    V == 0.  % No ascending intervals
+
+test_reify_ascending_descending() =>
+    Notes = [68, 66, 64, 62, 60],  % All descending
+    reify_ascending_motion(Notes, V),
+    V == 4.  % Every interval is descending = violation
+
+test_reify_ascending_ascending() =>
+    Notes = [60, 62, 64, 66, 68],  % All ascending
+    reify_ascending_motion(Notes, V),
+    V == 0.  % No descending intervals
+
+test_reify_narrow_range() =>
+    Notes = [60, 65, 72, 67, 60],  % Range: 72-60 = 12
+    reify_narrow_range(Notes, V),
+    V == 12.
+
+test_reify_narrow_range_small() =>
+    Notes = [60, 62, 61, 60, 62],  % Range: 62-60 = 2
+    reify_narrow_range(Notes, V),
+    V == 2.
+
+test_reify_contour_zigzag() =>
+    Notes = [60, 65, 60, 65, 60],  % Up-down-up-down: 3 direction changes
+    reify_contour_smoothness(Notes, V),
+    V == 3.
+
+test_reify_contour_smooth() =>
+    Notes = [60, 62, 64, 66, 68],  % All ascending: 0 direction changes
+    reify_contour_smoothness(Notes, V),
+    V == 0.
+
+test_reify_expressive_stepwise() =>
+    Notes = [60, 61, 62, 63, 64],  % All semitone steps (interval=1, < 3)
+    reify_expressive_leaps(Notes, V),
+    V == 4.  % All intervals < 3
+
+test_reify_expressive_leapy() =>
+    Notes = [60, 64, 67, 72, 76],  % All leaps >= 3 semitones
+    reify_expressive_leaps(Notes, V),
+    V == 0.  % No small intervals
+
+% ==============================================================================
+% INTEGRATION TESTS
+% ==============================================================================
+
+test_integration_sad() =>
+    % Sad mood should add descending_motion to constraint profile
+    SadPrefs = [mood=$mood(-0.7, -0.3)],
+    CS = select_constraints(classical_period, SadPrefs, 0.0),
+    CS = $constraints(hard=_, soft=Soft, params=_),
+    % descending_motion should be in soft list
+    has_constraint(Soft, descending_motion).
+
+test_integration_happy() =>
+    % Happy mood should add ascending_motion and boost consonant_leaps_only
+    HappyPrefs = [mood=$mood(0.8, 0.5)],
+    CS = select_constraints(classical_period, HappyPrefs, 0.0),
+    CS = $constraints(hard=_, soft=Soft, params=_),
+    has_constraint(Soft, ascending_motion),
+    has_constraint(Soft, expressive_leaps).
+
+test_integration_no_mood() =>
+    % No mood in preferences = no emotional constraints added
+    CS1 = select_constraints(classical_period, [], 0.0),
+    CS1 = $constraints(hard=_, soft=Soft1, params=_),
+    not has_constraint(Soft1, descending_motion),
+    not has_constraint(Soft1, ascending_motion),
+    not has_constraint(Soft1, narrow_range),
+    not has_constraint(Soft1, contour_smoothness),
+    not has_constraint(Soft1, expressive_leaps).
+
+test_apply_soft_dispatch() =>
+    % Test that apply_soft correctly dispatches emotional constraints
+    Notes = [60, 62, 64, 66, 68],
+    apply_soft(descending_motion, Notes, 60, 10, Cost1),
+    Cost1 == 40,  % 4 ascending intervals * weight 10
+    apply_soft(ascending_motion, Notes, 60, 10, Cost2),
+    Cost2 == 0,  % 0 descending intervals * weight 10
+    apply_soft(narrow_range, Notes, 60, 5, Cost3),
+    Cost3 == 40,  % (68-60) * 5 = 40
+    apply_soft(contour_smoothness, Notes, 60, 10, Cost4),
+    Cost4 == 0,  % All ascending, no direction changes
+    apply_soft(expressive_leaps, Notes, 60, 10, Cost5),
+    Cost5 == 40.  % 4 intervals of 2 semitones (< 3) * 10
+
+% ==============================================================================
+% HELPERS
+% ==============================================================================
+
+has_constraint(List, Id) =>
+    member((Id, _), List).
+
+get_weight(List, Id, Weight) =>
+    member((Id, Weight), List).
+
+has_multiplier(List, Id) =>
+    member((Id, _), List).
+
+get_multiplier(List, Id, Mult) =>
+    member((Id, Mult), List).

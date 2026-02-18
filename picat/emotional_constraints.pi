@@ -1,0 +1,175 @@
+% emotional_constraints.pi - Mood-driven constraint selection and emotional melodic idioms
+%
+% Maps the Valence-Arousal mood model to:
+% 1. Weight multipliers for existing soft constraints
+% 2. New emotion-specific soft constraints with mood-derived weights
+
+module emotional_constraints.
+
+import cp.
+
+% ==============================================================================
+% MOOD-DRIVEN CONSTRAINT SELECTION
+% ==============================================================================
+
+% Returns emotional constraint IDs with mood-derived weights (0-80 range)
+% Only returns constraints relevant to the current mood quadrant
+% mood_emotional_constraints(Mood) = [(constraint_id, weight), ...]
+mood_emotional_constraints(mood(V, A)) = Constraints =>
+    Constraints0 = [],
+
+    % Sad (low valence): descending motion
+    if V < -0.3 then
+        W1 = min(80, round(abs(V) * 80)),
+        Constraints0 := Constraints0 ++ [(descending_motion, W1)]
+    end,
+
+    % Joyful (high valence + high arousal): ascending motion
+    if V > 0.3, A > 0.0 then
+        W2 = min(80, round(V * 60)),
+        Constraints0 := Constraints0 ++ [(ascending_motion, W2)]
+    end,
+
+    % Calm (low arousal): narrow range
+    if A < -0.3 then
+        W3 = min(80, round(abs(A) * 70)),
+        Constraints0 := Constraints0 ++ [(narrow_range, W3)]
+    end,
+
+    % Peaceful (low arousal + positive valence): contour smoothness
+    if A < -0.3, V > 0.0 then
+        W4 = min(80, round(abs(A) * 60)),
+        Constraints0 := Constraints0 ++ [(contour_smoothness, W4)]
+    end,
+
+    % Dramatic (high |V| + high arousal): expressive leaps
+    if abs(V) > 0.5, A > 0.3 then
+        W5 = min(80, round(A * 60)),
+        Constraints0 := Constraints0 ++ [(expressive_leaps, W5)]
+    end,
+
+    Constraints = Constraints0.
+
+% Returns weight multipliers for existing constraints based on mood
+% mood_weight_multipliers(Mood) = [(constraint_id, multiplier), ...]
+% Multiplier is a float, e.g. 1.3 means 130% of base weight
+mood_weight_multipliers(mood(V, A)) = Multipliers =>
+    Multipliers0 = [],
+
+    % Sad (V < -0.3): boost stepwise and stable endings
+    if V < -0.3 then
+        M1 = 1.0 + abs(V) * 0.3,  % up to 1.3x
+        Multipliers0 := Multipliers0 ++ [(mostly_stepwise, M1)],
+        M2 = 1.0 + abs(V) * 0.2,
+        Multipliers0 := Multipliers0 ++ [(phrase_ends_stable, M2)]
+    end,
+
+    % Calm (A < -0.3): boost register consistency, reduce repetitive intervals penalty
+    if A < -0.3 then
+        M3 = 1.0 + abs(A) * 0.4,
+        Multipliers0 := Multipliers0 ++ [(register_consistency, M3)],
+        M4 = max(0.5, 1.0 - abs(A) * 0.3),
+        Multipliers0 := Multipliers0 ++ [(no_repetitive_intervals, M4)]
+    end,
+
+    % Energized (A > 0.3): boost balanced motion and variety
+    if A > 0.3 then
+        M5 = 1.0 + A * 0.3,
+        Multipliers0 := Multipliers0 ++ [(balanced_motion, M5)],
+        M6 = 1.0 + A * 0.2,
+        Multipliers0 := Multipliers0 ++ [(no_repetitive_intervals, M6)]
+    end,
+
+    % Happy (V > 0.3): boost consonance and arch contour
+    if V > 0.3 then
+        M7 = 1.0 + V * 0.2,
+        Multipliers0 := Multipliers0 ++ [(consonant_leaps_only, M7)],
+        M8 = 1.0 + V * 0.2,
+        Multipliers0 := Multipliers0 ++ [(arch_contour, M8)]
+    end,
+
+    Multipliers = Multipliers0.
+
+% ==============================================================================
+% REIFIED CONSTRAINT IMPLEMENTATIONS
+% ==============================================================================
+
+% Descending motion: each ascending interval is a violation
+% Sad melodies gravitate downward (sighing motifs, lament)
+reify_descending_motion(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            % Violation if ascending (next note higher than current)
+            Violations[I] #<=> (Notes[I+1] #> Notes[I])
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Ascending motion: each descending interval is a violation
+% Joyful melodies tend to rise (uplifting energy)
+reify_ascending_motion(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            % Violation if descending (next note lower than current)
+            Violations[I] #<=> (Notes[I+1] #< Notes[I])
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Narrow range: violation = max(Notes) - min(Notes) (range in semitones)
+% Calm/introspective music stays in narrow register
+reify_narrow_range(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        MaxPitch = max(Notes),
+        MinPitch = min(Notes),
+        ViolationCount #= MaxPitch - MinPitch
+    else
+        ViolationCount = 0
+    end.
+
+% Contour smoothness: each direction change (up->down or down->up) is a violation
+% Peaceful melodies flow smoothly without zigzag
+reify_contour_smoothness(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 1..Len-2)
+            % Direction change: intervals have opposite signs
+            % (Notes[I+1]-Notes[I]) * (Notes[I+2]-Notes[I+1]) < 0 means direction change
+            Violations[I] #<=> (
+                (Notes[I+1] - Notes[I]) * (Notes[I+2] - Notes[I+1]) #< 0
+            )
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Expressive leaps: each interval < 3 semitones is a violation
+% Dramatic/passionate music uses wide leaps
+reify_expressive_leaps(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 2 then
+        Violations = new_list(Len - 1),
+        Violations :: 0..1,
+        foreach(I in 1..Len-1)
+            Interval = $abs(Notes[I+1] - Notes[I]),
+            % Violation if interval is too small (< 3 semitones)
+            Violations[I] #<=> (Interval #< 3)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
