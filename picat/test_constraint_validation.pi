@@ -366,6 +366,24 @@ score_consonant_leaps_only(Pitches) = Violations =>
         Violations = Count
     end.
 
+% Score consonant outline violations
+% Penalizes 3-note groups with dissonant outlined intervals (mod 12): 1, 6, 10, 11
+score_consonant_outline(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then
+        Violations = 0
+    else
+        Count = 0,
+        foreach(I in 1..Len-2)
+            OutlineInterval = abs(Pitches[I+2] - Pitches[I]) mod 12,
+            if OutlineInterval == 1 ; OutlineInterval == 6 ;
+               OutlineInterval == 10 ; OutlineInterval == 11 then
+                Count := Count + 1
+            end
+        end,
+        Violations = Count
+    end.
+
 % Score antecedent-consequent structure violations
 % Checks: midpoint note is on degree 2, 5, or 7 (half cadence) AND
 %          final note is on tonic (authentic cadence)
@@ -1143,6 +1161,9 @@ test_soft_constraint_baselines =>
     % Test single climax
     test_climax_baselines(),
 
+    % Test consonant outlines
+    test_consonant_outline_baselines(),
+
     println("  Soft constraint baselines: OK").
 
 test_leap_recovery_baselines =>
@@ -1174,6 +1195,19 @@ test_climax_baselines =>
     % Amazing Grace should have clear climax
     GraceClimax = score_single_climax(get_melody(amazing_grace())),
     assert_violation_count_below("single_climax", GraceClimax, 2, amazing_grace).
+
+test_consonant_outline_baselines =>
+    % Folk melodies should have very few dissonant outlines
+    TwinkleOutlines = score_consonant_outline(get_melody(twinkle_twinkle())),
+    MaryOutlines = score_consonant_outline(get_melody(mary_had_a_little_lamb())),
+    assert_violation_count_below("consonant_outline", TwinkleOutlines, 2, twinkle_twinkle),
+    assert_violation_count_below("consonant_outline", MaryOutlines, 2, mary_had_a_little_lamb),
+
+    % Classical themes should have few dissonant outlines
+    OdeOutlines = score_consonant_outline(get_melody(ode_to_joy())),
+    K545Outlines = score_consonant_outline(get_melody(k545_theme())),
+    assert_violation_count_below("consonant_outline", OdeOutlines, 3, ode_to_joy),
+    assert_violation_count_below("consonant_outline", K545Outlines, 3, k545_theme).
 
 % ==============================================================================
 % HELPER: COUNT SATB VOICE LEADING VIOLATIONS

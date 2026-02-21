@@ -197,4 +197,4 @@ test_vis_phrase_ends_stable =>
 test_vis_score_all =>
     Pitches = [60, 62, 64, 65, 67, 65, 64, 62, 60, 62, 64, 65, 67, 65, 64, 60],
     Results = visualizer.score_all_constraints(Pitches, 60),
-    length(Results) == 29.
+    length(Results) == 30.

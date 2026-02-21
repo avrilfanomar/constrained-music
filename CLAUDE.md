@@ -250,7 +250,7 @@ The leap threshold (`base_interval_category(leap)` in `intervals.pi`) is set to 
 
 ### Melodic Motion Constraints
 
-Three soft constraints based on Classical period music theory (see `docs/classical_constraint_ideas.md`):
+Four soft constraints based on Classical period music theory (see `docs/classical_constraint_ideas.md`):
 
 1. **`large_leap_recovery`**: Leaps of 8+ semitones (minor 6th and above) require stepwise motion on both sides. If a large leap enters a note, the exit must be stepwise (≤2 semitones), and vice versa. This enforces the classical rule that octave leaps need careful preparation and resolution.
 
@@ -261,6 +261,11 @@ Three soft constraints based on Classical period music theory (see `docs/classic
    Mozart's melodies characteristically use consonant leaps.
 
 3. **`peak_approach_exit`**: The melodic climax (highest note) should be approached from below (ascending motion) and left by descending stepwise motion (1-2 semitones down). This creates the classic arch contour with a highlighted peak.
+
+4. **`consonant_outline`**: Penalizes groups of 3 consecutive notes where the outer interval (first to third note) is dissonant. Catches cases where individual leaps are consonant but the combined outline sounds wrong:
+   - Consonant outlines (mod 12): 0 (unison/octave), 2 (M2), 3 (m3), 4 (M3), 5 (P4), 7 (P5), 8 (m6), 9 (M6)
+   - Dissonant outlines (mod 12): 1 (m2/M7), 6 (tritone), 10 (m7), 11 (M7)
+   - Example: C→E→B — both leaps are consonant (M3, P5), but the outline C→B = M7 is dissonant
 
 Genre-specific weights:
 - Classical period, baroque, folk: High weights (70-85) for classical melodic rules

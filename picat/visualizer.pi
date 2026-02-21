@@ -38,7 +38,8 @@ print_violation_report(Notes, KeyRoot, Genre) =>
             ("prefer_small_int", lookup(Results, prefer_smaller_intervals)),
             ("no_repetitive_int", lookup(Results, no_repetitive_intervals)),
             ("large_leap_recovery", lookup(Results, large_leap_recovery)),
-            ("consonant_leaps", lookup(Results, consonant_leaps_only))
+            ("consonant_leaps", lookup(Results, consonant_leaps_only)),
+            ("consonant_outline", lookup(Results, consonant_outline))
         ]),
 
         print_category("Contour & Structure", [
@@ -122,7 +123,8 @@ score_all_constraints(Pitches, KeyRoot) = Results =>
         (motivic_fragmentation, score_motivic_fragmentation(Pitches)),
         (register_target, score_register_target(Pitches)),
         (sequential_repetition, score_sequential_repetition(Pitches)),
-        (weak_beat_justified, score_weak_beat_justified(Pitches))
+        (weak_beat_justified, score_weak_beat_justified(Pitches)),
+        (consonant_outline, score_consonant_outline(Pitches))
     ].
 
 % ==============================================================================
@@ -220,6 +222,23 @@ is_consonant_interval(8) => true.
 is_consonant_interval(9) => true.
 is_consonant_interval(12) => true.
 is_consonant_interval(_) => fail.
+
+% Consonant outline: penalizes 3-note groups with dissonant outlined intervals
+% Dissonant outlines (mod 12): 1 (m2/M7), 6 (tritone), 10 (m7), 11 (M7)
+score_consonant_outline(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then Violations = 0
+    else
+        Count = 0,
+        foreach(I in 1..Len-2)
+            OutlineInterval = abs(Pitches[I+2] - Pitches[I]) mod 12,
+            if OutlineInterval == 1 ; OutlineInterval == 6 ;
+               OutlineInterval == 10 ; OutlineInterval == 11 then
+                Count := Count + 1
+            end
+        end,
+        Violations = Count
+    end.
 
 score_single_climax(Pitches) = Violations =>
     Len = length(Pitches),

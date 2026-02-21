@@ -54,7 +54,8 @@ genre_profile(
         (register_target, 50),
         (motivic_fragmentation, 50),
         (single_climax, 50),
-        (registral_return, 50)
+        (registral_return, 50),
+        (consonant_outline, 75)
     ],
     [max_interval=5, tempo_range=(80,140), accomp_pattern=alberti]
 ).
@@ -81,7 +82,8 @@ genre_profile(
         (motivic_fragmentation, 45),
         (register_consistency, 45),
         (register_target, 40),
-        (no_repetitive_intervals, 40)
+        (no_repetitive_intervals, 40),
+        (consonant_outline, 70)
     ],
     [max_interval=6, tempo_range=(60,120), accomp_pattern=arpeggiated]
 ).
@@ -105,7 +107,8 @@ genre_profile(
         (register_target, 45),
         (large_leap_recovery, 45),
         (weak_beat_justified, 40),
-        (prefer_smaller_intervals, 35)
+        (prefer_smaller_intervals, 35),
+        (consonant_outline, 50)
     ],
     [max_interval=7, tempo_range=(50,160), min_range=7, accomp_pattern=arpeggiated]
 ).
@@ -129,7 +132,8 @@ genre_profile(
         (large_leap_recovery, 35),
         (sequential_repetition, 30),
         (register_target, 30),
-        (prefer_smaller_intervals, 30)
+        (prefer_smaller_intervals, 30),
+        (consonant_outline, 35)
     ],
     [max_interval=8, tempo_range=(100,240), min_range=10, accomp_pattern=stride]
 ).
@@ -156,7 +160,8 @@ genre_profile(
         (no_repetitive_intervals, 50),
         (tonic_anchoring, 50),
         (weak_beat_justified, 50),
-        (sequential_repetition, 45)
+        (sequential_repetition, 45),
+        (consonant_outline, 80)
     ],
     [max_interval=4, tempo_range=(70,130), max_range=12, accomp_pattern=block]
 ).
@@ -176,7 +181,8 @@ genre_profile(
         (large_leap_recovery, 25),
         (register_target, 25),
         (prefer_smaller_intervals, 20),
-        (consonant_leaps_only, 20)
+        (consonant_leaps_only, 20),
+        (consonant_outline, 25)
     ],
     [max_interval=10, tempo_range=(40,200), accomp_pattern=block]
 ).
@@ -200,7 +206,8 @@ genre_profile(
         (phrase_ends_stable, 70),
         (weak_beat_justified, 60),
         (peak_approach_exit, 60),
-        (no_repetitive_intervals, 35)
+        (no_repetitive_intervals, 35),
+        (consonant_outline, 80)
     ],
     [max_interval=3, tempo_range=(50,80), max_range=10, accomp_pattern=block]
 ).
@@ -224,7 +231,8 @@ genre_profile(
         (peak_approach_exit, 65),
         (arch_contour, 60),
         (tonic_anchoring, 55),
-        (no_repetitive_intervals, 45)
+        (no_repetitive_intervals, 45),
+        (consonant_outline, 85)
     ],
     [max_interval=4, tempo_range=(80,120), max_range=8, accomp_pattern=block]
 ).
@@ -244,7 +252,8 @@ genre_profile(
         (register_consistency, 65),
         (peak_approach_exit, 40),
         (no_immediate_repeat, 30),
-        (no_repetitive_intervals, 25)   % low weight - repetition is the style!
+        (no_repetitive_intervals, 25),   % low weight - repetition is the style!
+        (consonant_outline, 60)
     ],
     [max_interval=3, tempo_range=(90,140), max_range=7, accomp_pattern=block]
 ).
@@ -266,7 +275,8 @@ genre_profile(
         (prefer_smaller_intervals, 50),
         (peak_approach_exit, 50),
         (single_climax, 45),
-        (register_target, 40)
+        (register_target, 40),
+        (consonant_outline, 55)
     ],
     [max_interval=6, tempo_range=(50,100), accomp_pattern=arpeggiated]
 ).
@@ -286,7 +296,8 @@ genre_profile(
         (large_leap_recovery, 50),
         (peak_approach_exit, 45),
         (prefer_smaller_intervals, 40),
-        (weak_beat_justified, 35)
+        (weak_beat_justified, 35),
+        (consonant_outline, 40)
     ],
     [max_interval=7, tempo_range=(60,120), min_range=5, accomp_pattern=stride]
 ).
@@ -319,7 +330,8 @@ genre_profile(
         (no_repetitive_intervals, 55),
         (motivic_repetition, 50),
         (registral_return, 50),
-        (register_target, 45)
+        (register_target, 45),
+        (consonant_outline, 80)
     ],
     [max_interval=4, tempo_range=(80,130), max_range=12, accomp_pattern=alberti]
 ).
@@ -363,7 +375,8 @@ genre_profile(
         (motivic_repetition, 55),
         (register_target, 50),
         (single_climax, 50),
-        (registral_return, 50)
+        (registral_return, 50),
+        (consonant_outline, 75)
     ],
     [max_interval=5, tempo_range=(80,140), accomp_pattern=alberti]
 ).
@@ -396,7 +409,8 @@ genre_profile(
         (weak_beat_justified, 40),
         (register_target, 35),
         (single_climax, 35),
-        (registral_return, 35)
+        (registral_return, 35),
+        (consonant_outline, 45)
     ],
     [max_interval=7, tempo_range=(70,160), accomp_pattern=arpeggiated]
 ).

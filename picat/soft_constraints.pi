@@ -214,6 +214,11 @@ apply_soft(expressive_leaps, Notes, _Root, Weight, Cost) =>
     emotional_constraints.reify_expressive_leaps(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+% Consonant outline: 3-note groups should not outline dissonant intervals
+apply_soft(consonant_outline, Notes, _Root, Weight, Cost) =>
+    reify_consonant_outline(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown constraint returns 0 cost (no penalty)
 apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
     Cost #= 0.
@@ -1565,6 +1570,31 @@ reify_register_consistency(Notes, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% Consonant outline: penalizes 3-note groups where the outer interval is dissonant
+% Catches patterns like C->E->B (both leaps consonant, but outline = M7 = dissonant)
+% Dissonant outlines (mod 12): 1 (m2/M7), 6 (tritone), 10 (m7), 11 (M7)
+reify_consonant_outline(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 1..Len-2)
+            OutlineAbs = $abs(Notes[I+2] - Notes[I]),
+            OutlineMod :: 0..11,
+            QO :: 0..20,
+            OutlineAbs #= 12 * QO + OutlineMod,
+            Violations[I] #<=> (
+                (OutlineMod #= 1) #\/
+                (OutlineMod #= 6) #\/
+                (OutlineMod #= 10) #\/
+                (OutlineMod #= 11)
+            )
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
 % ==============================================================================
 % UTILITY FUNCTIONS
 % ==============================================================================
@@ -1616,7 +1646,8 @@ supported_soft_constraints() = [
     ascending_motion,
     narrow_range,
     contour_smoothness,
-    expressive_leaps
+    expressive_leaps,
+    consonant_outline
 ].
 
 % Check if a constraint ID is supported for soft application

@@ -445,6 +445,15 @@ constraint_def(
 ).
 
 constraint_def(
+    consonant_outline,
+    melodic,
+    soft,
+    75,
+    [classical_period, baroque, folk_traditional, children_songs, sacred_chant, galant, high_classical],
+    "3 consecutive notes should not outline dissonant intervals (tritone, m2, m7, M7)"
+).
+
+constraint_def(
     peak_approach_exit,
     melodic,
     soft,
