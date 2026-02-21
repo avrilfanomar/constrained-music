@@ -97,11 +97,17 @@ run_continue_cmd(Args) =>
     SplitSpec = get_arg(Args, split, "50"),
     Genre = get_arg(Args, genre, none),
     Randomness = get_arg(Args, randomness, 0.0),
+    Extend = get_arg(Args, extend, 1.0),
     Output = get_arg(Args, output, "variation.json"),
 
-    run_continue(PieceId, SplitSpec, Genre, Randomness, Output).
+    if Extend < 0.5 ; Extend > 5.0 then
+        printf("Error: extend must be between 0.5 and 5.0 (got %.1f)%n", Extend),
+        halt(1)
+    end,
 
-run_continue(PieceId, SplitSpec, GenreOverride, Randomness, Output) =>
+    run_continue(PieceId, SplitSpec, Genre, Randomness, Extend, Output).
+
+run_continue(PieceId, SplitSpec, GenreOverride, Randomness, Extend, Output) =>
     println("=== Variation: Continue ==="),
     nl,
 
@@ -119,7 +125,7 @@ run_continue(PieceId, SplitSpec, GenreOverride, Randomness, Output) =>
         println("Error: split must keep at least 1 note"),
         halt(1)
     end,
-    if SplitPoint >= TotalNotes then
+    if SplitPoint >= TotalNotes, Extend =< 1.0 then
         println("Error: split must leave room for generation"),
         halt(1)
     end,
@@ -135,11 +141,14 @@ run_continue(PieceId, SplitSpec, GenreOverride, Randomness, Output) =>
         Genre = OrigGenre
     end,
 
-    RemainingCount = TotalNotes - SplitPoint,
+    RemainingCount = max(1, round(TotalNotes * Extend) - SplitPoint),
     Prefix = [Pitches[I] : I in 1..SplitPoint],
 
     printf("  Piece: %w (%d notes)%n", PieceId, TotalNotes),
     printf("  Keeping first %d notes, generating %d more%n", SplitPoint, RemainingCount),
+    if Extend != 1.0 then
+        printf("  Extend: %.1fx (total output: %d notes)%n", Extend, SplitPoint + RemainingCount)
+    end,
     printf("  Key: %d, Mode: %w, Genre: %w%n", KeyRoot, Mode, Genre),
     printf("  Randomness: %.2f%n", Randomness),
     nl,
@@ -382,6 +391,8 @@ set_parsed_arg(Map, "randomness", Value) = Map =>
     Map.put(randomness, to_float(Value)).
 set_parsed_arg(Map, "random", Value) = Map =>
     Map.put(randomness, to_float(Value)).
+set_parsed_arg(Map, "extend", Value) = Map =>
+    Map.put(extend, to_float(Value)).
 set_parsed_arg(Map, "output", Value) = Map =>
     Map.put(output, Value).
 set_parsed_arg(Map, Key, _Value) = Map =>
@@ -416,6 +427,7 @@ print_usage() =>
     println("  piece=ID          Piece to continue (required)"),
     println("  split=50          Keep first 50% (default: 50)"),
     println("  split=8n          Keep first 8 notes"),
+    println("  extend=2.0        Output length multiplier 0.5-5.0 (default: 1.0)"),
     println("  genre=GENRE       Genre for generated part (default: original)"),
     println("  randomness=0.3    Variation amount 0.0-1.0 (default: 0.0)"),
     println("  output=FILE       Output JSON path (default: variation.json)"),

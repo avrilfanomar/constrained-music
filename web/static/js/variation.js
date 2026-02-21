@@ -95,6 +95,14 @@ export class VarySection {
             splitValue.textContent = `${splitSlider.value}%`;
         });
 
+        // Extend slider
+        const extendSlider = document.getElementById('extend-slider');
+        const extendValue = document.getElementById('extend-value');
+        extendSlider.addEventListener('input', () => {
+            const val = parseFloat(extendSlider.value) / 2;
+            extendValue.textContent = `${val}\u00d7`;
+        });
+
         // Vary randomness slider
         const randSlider = document.getElementById('vary-randomness-slider');
         const randValue = document.getElementById('vary-randomness-value');
@@ -121,6 +129,7 @@ export class VarySection {
                 mode: 'continue',
                 piece: this.selectedPieceId,
                 split: document.getElementById('split-slider').value,
+                extend: parseFloat(document.getElementById('extend-slider').value) / 2,
                 genre: document.getElementById('vary-genre-select').value,
                 randomness,
             };

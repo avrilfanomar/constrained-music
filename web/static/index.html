@@ -168,6 +168,14 @@
                             <input type="range" id="split-slider" min="10" max="90" value="50" class="styled-slider">
                             <div class="vary-hint">Notes before this point are kept; the rest is generated.</div>
                         </div>
+                        <div class="slider-group">
+                            <label class="slider-label">
+                                <span>Output length</span>
+                                <span id="extend-value" class="slider-value">1&times;</span>
+                            </label>
+                            <input type="range" id="extend-slider" min="2" max="8" value="2" class="styled-slider">
+                            <div class="vary-hint">Total output length relative to original piece.</div>
+                        </div>
                         <div class="select-group">
                             <label class="select-label">Genre override</label>
                             <select id="vary-genre-select" class="styled-select"></select>

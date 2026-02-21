@@ -443,6 +443,7 @@ class VariationRequest(BaseModel):
     mode: str = Field("continue")          # "continue" or "transform"
     piece: str = Field("mozart_k545_theme")
     split: str = Field("50")              # percentage "50" or note count "8n"
+    extend: float = Field(1.0, ge=0.5, le=5.0)  # output length multiplier
     technique: str = Field("")            # "inversion" | "retrograde" | "augmentation" | "diminution" | ""
     genre: str = Field("")               # target genre (optional override)
     randomness: float = Field(0.3, ge=0.0, le=1.0)
@@ -605,6 +606,8 @@ async def variation_generate(req: VariationRequest):
 
     if req.mode == "continue":
         args.append(f"split={req.split}")
+        if req.extend != 1.0:
+            args.append(f"extend={req.extend}")
         if req.genre:
             args.append(f"genre={req.genre}")
     elif req.mode == "transform":
