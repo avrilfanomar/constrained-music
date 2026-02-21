@@ -24,6 +24,8 @@ const intensityControl = document.getElementById('intensity-control');
 const formSelect = document.getElementById('form-select');
 const accompSelect = document.getElementById('accomp-select');
 const rhythmToggle = document.getElementById('rhythm-toggle');
+const refineSelect = document.getElementById('refine-select');
+const refinePieceSelect = document.getElementById('refine-piece-select');
 const generateBtn = document.getElementById('generate-btn');
 const outputSection = document.getElementById('output-section');
 const loadingOverlay = document.getElementById('loading-overlay');
@@ -39,9 +41,22 @@ const picatOutput = document.getElementById('picat-output');
 const resetConstraints = document.getElementById('reset-constraints');
 const advancedToggle = document.getElementById('advanced-toggle');
 const advancedSection = document.getElementById('advanced-section');
+const loadingText = document.getElementById('loading-text');
 
 let config = null;
 let currentIntensity = 'standard';
+let loadingInterval = null;
+
+const LOADING_MESSAGES = [
+    'Composing your piece...',
+    'Applying constraints...',
+    'Resolving harmonies...',
+    'Shaping melodic contour...',
+    'Balancing voice leading...',
+    'Crafting cadences...',
+    'Refining expression...',
+    'Almost there...',
+];
 
 // --- Init ---
 async function init() {
@@ -190,12 +205,22 @@ async function doGenerate() {
         accompaniment: accompSelect.value,
         intensity: currentIntensity,
         rhythm: rhythmToggle.checked,
+        refine: parseInt(refineSelect.value),
+        refine_piece: parseInt(refinePieceSelect.value),
         disabled_constraints: overrides.disabled_constraints,
         weight_overrides: overrides.weight_overrides,
     };
 
     loadingOverlay.style.display = 'flex';
     generateBtn.disabled = true;
+
+    // Rotate loading messages
+    let msgIdx = 0;
+    loadingText.textContent = LOADING_MESSAGES[0];
+    loadingInterval = setInterval(() => {
+        msgIdx = (msgIdx + 1) % LOADING_MESSAGES.length;
+        loadingText.textContent = LOADING_MESSAGES[msgIdx];
+    }, 3000);
 
     try {
         const resp = await fetch('/api/generate', {
@@ -233,6 +258,7 @@ async function doGenerate() {
     } catch (e) {
         alert('Error: ' + e.message);
     } finally {
+        clearInterval(loadingInterval);
         loadingOverlay.style.display = 'none';
         generateBtn.disabled = false;
     }

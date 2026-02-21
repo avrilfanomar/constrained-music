@@ -404,6 +404,8 @@ class GenerateRequest(BaseModel):
     disabled_constraints: list[str] = Field(default_factory=list)
     weight_overrides: dict[str, int] = Field(default_factory=dict)
     rhythm: bool = Field(False)
+    refine: int = Field(1, ge=1, le=10)
+    refine_piece: int = Field(1, ge=1, le=5)
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +455,12 @@ async def generate(req: GenerateRequest):
     if req.rhythm:
         args.append("rhythm=on")
 
+    if req.refine > 1:
+        args.append(f"refine={req.refine}")
+
+    if req.refine_piece > 1:
+        args.append(f"refine_piece={req.refine_piece}")
+
     for c in req.disabled_constraints:
         args.append(f"disable={c}")
 
@@ -469,6 +477,9 @@ async def generate(req: GenerateRequest):
     companion_path = "picat/companion.pi"
     cmd = [script_path, companion_path] + args
 
+    # Timeout: base 120s + extra for refinement rounds
+    timeout_sec = 120 + (req.refine - 1) * 30 + (req.refine_piece - 1) * 120
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -476,7 +487,7 @@ async def generate(req: GenerateRequest):
             stderr=asyncio.subprocess.STDOUT,
             cwd=str(PROJECT_ROOT),
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
         picat_output = stdout.decode("utf-8", errors="replace")
 
         if proc.returncode != 0:
@@ -521,7 +532,7 @@ async def generate(req: GenerateRequest):
         }
 
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Generation timed out (120s)")
+        raise HTTPException(status_code=504, detail=f"Generation timed out ({timeout_sec}s)")
     except HTTPException:
         raise
     except Exception as e:

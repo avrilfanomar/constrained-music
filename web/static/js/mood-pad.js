@@ -1,5 +1,6 @@
 /**
  * mood-pad.js - 2D Valence-Arousal canvas with draggable start/end handles
+ * Dark theme with rich gradients and glowing handles
  */
 
 export class MoodPad {
@@ -9,12 +10,13 @@ export class MoodPad {
         this.width = this.canvas.width;
         this.height = this.canvas.height;
 
-        // Start (gold) and End (burgundy) handles in VA space (-1 to 1)
+        // Start (gold) and End (teal) handles in VA space (-1 to 1)
         this.start = { v: -0.5, a: -0.3 };
         this.end = { v: 0.5, a: 0.6 };
         this.presets = {};
         this.dragging = null; // 'start' | 'end' | null
-        this.handleRadius = 11;
+        this.handleRadius = 12;
+        this.hoverHandle = null;
 
         this.onchange = null; // callback
 
@@ -47,6 +49,16 @@ export class MoodPad {
         };
     }
 
+    _hitTest(pos) {
+        const sp = this._vaToPixel(this.start.v, this.start.a);
+        const ep = this._vaToPixel(this.end.v, this.end.a);
+        const ds = Math.hypot(pos.x - sp.x, pos.y - sp.y);
+        const de = Math.hypot(pos.x - ep.x, pos.y - ep.y);
+        if (ds < this.handleRadius + 6) return 'start';
+        if (de < this.handleRadius + 6) return 'end';
+        return null;
+    }
+
     _bindEvents() {
         const getPos = (e) => {
             const rect = this.canvas.getBoundingClientRect();
@@ -58,19 +70,9 @@ export class MoodPad {
             };
         };
 
-        const hitTest = (pos) => {
-            const sp = this._vaToPixel(this.start.v, this.start.a);
-            const ep = this._vaToPixel(this.end.v, this.end.a);
-            const ds = Math.hypot(pos.x - sp.x, pos.y - sp.y);
-            const de = Math.hypot(pos.x - ep.x, pos.y - ep.y);
-            if (ds < this.handleRadius + 4) return 'start';
-            if (de < this.handleRadius + 4) return 'end';
-            return null;
-        };
-
         const startDrag = (e) => {
             const pos = getPos(e);
-            this.dragging = hitTest(pos);
+            this.dragging = this._hitTest(pos);
             if (!this.dragging) {
                 // Click on empty area: move the nearest handle
                 const sp = this._vaToPixel(this.start.v, this.start.a);
@@ -83,12 +85,24 @@ export class MoodPad {
         };
 
         const moveDrag = (e) => {
+            const pos = getPos(e);
+            // Update hover state
+            const newHover = this._hitTest(pos);
+            if (newHover !== this.hoverHandle) {
+                this.hoverHandle = newHover;
+                this.canvas.style.cursor = newHover ? 'grab' : 'crosshair';
+                if (!this.dragging) this.draw();
+            }
             if (!this.dragging) return;
             e.preventDefault();
-            this._updateHandle(getPos(e));
+            this.canvas.style.cursor = 'grabbing';
+            this._updateHandle(pos);
         };
 
-        const endDrag = () => { this.dragging = null; };
+        const endDrag = () => {
+            this.dragging = null;
+            this.canvas.style.cursor = this.hoverHandle ? 'grab' : 'crosshair';
+        };
 
         this.canvas.addEventListener('mousedown', startDrag);
         this.canvas.addEventListener('mousemove', moveDrag);
@@ -119,142 +133,207 @@ export class MoodPad {
         const hw = w / 2;
         const hh = h / 2;
 
-        // Quadrant color fills (soft, muted tones)
-        // Top-left: Stressed (negative valence, high arousal) — muted red/warm
-        ctx.fillStyle = 'rgba(140, 70, 80, 0.12)';
-        ctx.fillRect(0, 0, hw, hh);
-        // Top-right: Excited (positive valence, high arousal) — warm gold
-        ctx.fillStyle = 'rgba(190, 160, 60, 0.1)';
-        ctx.fillRect(hw, 0, hw, hh);
-        // Bottom-left: Sad (negative valence, low arousal) — cool blue
-        ctx.fillStyle = 'rgba(50, 70, 110, 0.12)';
-        ctx.fillRect(0, hh, hw, hh);
-        // Bottom-right: Calm (positive valence, low arousal) — soft green-blue
-        ctx.fillStyle = 'rgba(60, 120, 100, 0.08)';
-        ctx.fillRect(hw, hh, hw, hh);
-
-        // Soft radial overlay to blend quadrants
-        const blend = ctx.createRadialGradient(hw, hh, 0, hw, hh, w * 0.55);
-        blend.addColorStop(0, 'rgba(30, 45, 66, 0.2)');
-        blend.addColorStop(1, 'rgba(22, 34, 50, 0.85)');
-        ctx.fillStyle = blend;
+        // Deep dark background
+        ctx.fillStyle = '#0a0e15';
         ctx.fillRect(0, 0, w, h);
 
-        // Grid lines (very subtle)
-        ctx.strokeStyle = 'rgba(180, 195, 215, 0.06)';
-        ctx.lineWidth = 0.5;
-        for (let i = 1; i < 10; i++) {
-            const p = (i / 10) * w;
-            ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, h); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(w, p); ctx.stroke();
+        // Quadrant color fills — rich, saturated tints
+        // Top-left: Stressed (negative valence, high arousal) — warm red
+        const tlGrad = ctx.createRadialGradient(hw * 0.5, hh * 0.5, 0, hw * 0.5, hh * 0.5, hw * 0.8);
+        tlGrad.addColorStop(0, 'rgba(180, 50, 60, 0.18)');
+        tlGrad.addColorStop(1, 'rgba(180, 50, 60, 0)');
+        ctx.fillStyle = tlGrad;
+        ctx.fillRect(0, 0, hw, hh);
+
+        // Top-right: Excited (positive valence, high arousal) — warm amber/gold
+        const trGrad = ctx.createRadialGradient(hw * 1.5, hh * 0.5, 0, hw * 1.5, hh * 0.5, hw * 0.8);
+        trGrad.addColorStop(0, 'rgba(220, 170, 40, 0.15)');
+        trGrad.addColorStop(1, 'rgba(220, 170, 40, 0)');
+        ctx.fillStyle = trGrad;
+        ctx.fillRect(hw, 0, hw, hh);
+
+        // Bottom-left: Sad (negative valence, low arousal) — deep blue
+        const blGrad = ctx.createRadialGradient(hw * 0.5, hh * 1.5, 0, hw * 0.5, hh * 1.5, hw * 0.8);
+        blGrad.addColorStop(0, 'rgba(40, 70, 160, 0.18)');
+        blGrad.addColorStop(1, 'rgba(40, 70, 160, 0)');
+        ctx.fillStyle = blGrad;
+        ctx.fillRect(0, hh, hw, hh);
+
+        // Bottom-right: Calm (positive valence, low arousal) — teal/green
+        const brGrad = ctx.createRadialGradient(hw * 1.5, hh * 1.5, 0, hw * 1.5, hh * 1.5, hw * 0.8);
+        brGrad.addColorStop(0, 'rgba(40, 150, 130, 0.14)');
+        brGrad.addColorStop(1, 'rgba(40, 150, 130, 0)');
+        ctx.fillStyle = brGrad;
+        ctx.fillRect(hw, hh, hw, hh);
+
+        // Center vignette — subtle dark gradient
+        const vignette = ctx.createRadialGradient(hw, hh, hw * 0.15, hw, hh, w * 0.75);
+        vignette.addColorStop(0, 'rgba(15, 20, 30, 0)');
+        vignette.addColorStop(1, 'rgba(8, 10, 16, 0.4)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, w, h);
+
+        // Fine dot grid
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+        for (let gx = 0; gx <= 10; gx++) {
+            for (let gy = 0; gy <= 10; gy++) {
+                const px = (gx / 10) * w;
+                const py = (gy / 10) * h;
+                ctx.beginPath();
+                ctx.arc(px, py, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
 
-        // Axis lines
-        ctx.strokeStyle = 'rgba(180, 195, 215, 0.15)';
+        // Axis lines — subtle glow
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(hw, 0); ctx.lineTo(hw, h); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, hh); ctx.lineTo(w, hh); ctx.stroke();
 
         // Axis labels
-        ctx.fillStyle = 'rgba(180, 195, 215, 0.4)';
-        ctx.font = '10px "Source Sans 3", sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.font = '10px "Source Sans 3", system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Positive', w * 0.75, h - 5);
-        ctx.fillText('Negative', w * 0.25, h - 5);
+        ctx.fillText('Positive \u2192', w * 0.78, h - 6);
+        ctx.fillText('\u2190 Negative', w * 0.22, h - 6);
         ctx.save();
-        ctx.translate(11, hh);
+        ctx.translate(12, hh);
         ctx.rotate(-Math.PI / 2);
-        ctx.fillText('High Energy', 0, 0);
+        ctx.fillText('High Energy \u2191', h * 0.22, 0);
         ctx.restore();
         ctx.save();
-        ctx.translate(11, hh);
+        ctx.translate(12, hh);
         ctx.rotate(-Math.PI / 2);
-        ctx.fillText('Low Energy', -h * 0.4, 0);
+        ctx.fillText('\u2193 Low Energy', -h * 0.22, 0);
         ctx.restore();
 
-        // Quadrant labels (softer)
-        ctx.fillStyle = 'rgba(180, 195, 215, 0.18)';
-        ctx.font = '600 10px "Source Sans 3", sans-serif';
-        ctx.fillText('Stressed', w * 0.25, 16);
-        ctx.fillText('Excited', w * 0.75, 16);
-        ctx.fillText('Sad', w * 0.25, h - 16);
-        ctx.fillText('Calm', w * 0.75, h - 16);
+        // Quadrant mood labels
+        ctx.font = '600 10px "Source Sans 3", system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(180, 50, 60, 0.35)';
+        ctx.fillText('Stressed', w * 0.25, 18);
+        ctx.fillStyle = 'rgba(220, 170, 40, 0.35)';
+        ctx.fillText('Excited', w * 0.75, 18);
+        ctx.fillStyle = 'rgba(60, 90, 180, 0.35)';
+        ctx.fillText('Sad', w * 0.25, h - 18);
+        ctx.fillStyle = 'rgba(40, 150, 130, 0.35)';
+        ctx.fillText('Calm', w * 0.75, h - 18);
 
-        // Preset dots
-        ctx.font = '8px "Source Sans 3", sans-serif';
+        // Preset dots with labels on hover
         for (const [name, { valence, arousal }] of Object.entries(this.presets)) {
             const pp = this._vaToPixel(valence, arousal);
+            // Outer glow
             ctx.beginPath();
-            ctx.arc(pp.x, pp.y, 2.5, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(180, 195, 215, 0.2)';
+            ctx.arc(pp.x, pp.y, 4, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+            ctx.fill();
+            // Core dot
+            ctx.beginPath();
+            ctx.arc(pp.x, pp.y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
             ctx.fill();
         }
 
-        // Transition line
+        // Transition path — curved dashed line with gradient
         const sp = this._vaToPixel(this.start.v, this.start.a);
         const ep = this._vaToPixel(this.end.v, this.end.a);
-        ctx.setLineDash([5, 4]);
-        ctx.strokeStyle = 'rgba(200, 185, 140, 0.45)';
+
+        // Glow behind the line
+        ctx.save();
+        ctx.shadowColor = 'rgba(212, 168, 67, 0.2)';
+        ctx.shadowBlur = 8;
+        ctx.setLineDash([6, 5]);
+        ctx.strokeStyle = 'rgba(212, 168, 67, 0.35)';
         ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(sp.x, sp.y); ctx.lineTo(ep.x, ep.y); ctx.stroke();
+        ctx.beginPath();
+        // Slight curve through midpoint
+        const mx = (sp.x + ep.x) / 2;
+        const my = (sp.y + ep.y) / 2 - 15;
+        ctx.moveTo(sp.x, sp.y);
+        ctx.quadraticCurveTo(mx, my, ep.x, ep.y);
+        ctx.stroke();
         ctx.setLineDash([]);
+        ctx.restore();
 
         // Arrow at end
-        const angle = Math.atan2(ep.y - sp.y, ep.x - sp.x);
-        const arrowLen = 9;
-        ctx.fillStyle = 'rgba(200, 185, 140, 0.5)';
+        const angle = Math.atan2(ep.y - my, ep.x - mx);
+        const arrowLen = 10;
+        ctx.fillStyle = 'rgba(212, 168, 67, 0.5)';
         ctx.beginPath();
         ctx.moveTo(ep.x, ep.y);
-        ctx.lineTo(ep.x - arrowLen * Math.cos(angle - 0.3), ep.y - arrowLen * Math.sin(angle - 0.3));
-        ctx.lineTo(ep.x - arrowLen * Math.cos(angle + 0.3), ep.y - arrowLen * Math.sin(angle + 0.3));
+        ctx.lineTo(ep.x - arrowLen * Math.cos(angle - 0.35), ep.y - arrowLen * Math.sin(angle - 0.35));
+        ctx.lineTo(ep.x - arrowLen * Math.cos(angle + 0.35), ep.y - arrowLen * Math.sin(angle + 0.35));
         ctx.closePath();
         ctx.fill();
 
         // Start handle (warm gold)
-        this._drawHandle(sp.x, sp.y, '#C9A24D', '#A6832E', 'S');
+        const startHover = this.hoverHandle === 'start' || this.dragging === 'start';
+        this._drawHandle(sp.x, sp.y, '#d4a843', '#a07820', 'S', startHover);
 
-        // End handle (burgundy)
-        this._drawHandle(ep.x, ep.y, '#7A3640', '#5C2830', 'E');
+        // End handle (teal)
+        const endHover = this.hoverHandle === 'end' || this.dragging === 'end';
+        this._drawHandle(ep.x, ep.y, '#3a9e8f', '#2a7a6d', 'E', endHover);
     }
 
-    _drawHandle(x, y, color, shadowColor, label) {
+    _hexToRgba(hex, alpha) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    _drawHandle(x, y, color, darkColor, label, isHover) {
         const ctx = this.ctx;
         const r = this.handleRadius;
+        const glowR = isHover ? r + 8 : r + 4;
 
-        // Glow
+        // Outer glow ring
         ctx.save();
-        ctx.shadowColor = shadowColor;
-        ctx.shadowBlur = 12;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
+        const glow = ctx.createRadialGradient(x, y, r * 0.5, x, y, glowR + 6);
+        glow.addColorStop(0, this._hexToRgba(color, 0.3));
+        glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = color;
+        ctx.arc(x, y, glowR + 6, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
-        // Outer ring
-        ctx.beginPath();
-        ctx.arc(x, y, r + 1.5, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        // Pulse ring on hover
+        if (isHover) {
+            ctx.strokeStyle = this._hexToRgba(color, 0.15);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(x, y, r + 6, 0, Math.PI * 2);
+            ctx.stroke();
+        }
 
-        // Inner fill gradient
-        const grad = ctx.createRadialGradient(x - 2, y - 2, 0, x, y, r);
+        // Main circle with gradient fill
+        const grad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
         grad.addColorStop(0, color);
-        grad.addColorStop(1, shadowColor);
+        grad.addColorStop(0.7, color);
+        grad.addColorStop(1, darkColor);
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fillStyle = grad;
         ctx.fill();
 
+        // Subtle border
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Top highlight (specular)
+        ctx.beginPath();
+        ctx.arc(x, y - r * 0.3, r * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.fill();
+
         // Label
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.font = 'bold 10px "Source Sans 3", sans-serif';
+        ctx.font = 'bold 10px "Source Sans 3", system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(label, x, y);
+        ctx.fillText(label, x, y + 0.5);
         ctx.textBaseline = 'alphabetic';
     }
 }

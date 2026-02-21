@@ -1,5 +1,5 @@
 /**
- * piano-roll.js - Canvas note visualization with playback cursor
+ * piano-roll.js - Canvas note visualization with velocity-based colors and playback cursor
  */
 
 export class PianoRoll {
@@ -36,6 +36,10 @@ export class PianoRoll {
 
     _roundRect(ctx, x, y, w, h, r) {
         r = Math.min(r, w / 2, h / 2);
+        if (r < 0.5) {
+            ctx.fillRect(x, y, w, h);
+            return;
+        }
         ctx.beginPath();
         ctx.moveTo(x + r, y);
         ctx.lineTo(x + w - r, y);
@@ -60,16 +64,17 @@ export class PianoRoll {
         const w = dispW;
         const h = dispH;
 
-        // Background gradient
+        // Background
         const bg = ctx.createLinearGradient(0, 0, 0, h);
-        bg.addColorStop(0, '#1E2D42');
-        bg.addColorStop(1, '#162232');
+        bg.addColorStop(0, '#0c1018');
+        bg.addColorStop(0.5, '#0a0e14');
+        bg.addColorStop(1, '#080b10');
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, w, h);
 
         if (this.notes.length === 0) {
-            ctx.fillStyle = 'rgba(180, 195, 215, 0.25)';
-            ctx.font = '13px "Source Sans 3", sans-serif';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+            ctx.font = '13px "Source Sans 3", system-ui, sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText('Generate music to see the piano roll', w / 2, h / 2);
             return;
@@ -81,36 +86,41 @@ export class PianoRoll {
             minPitch = Math.min(minPitch, n.pitch);
             maxPitch = Math.max(maxPitch, n.pitch);
         }
-        minPitch = Math.max(0, minPitch - 2);
-        maxPitch = Math.min(127, maxPitch + 2);
+        minPitch = Math.max(0, minPitch - 3);
+        maxPitch = Math.min(127, maxPitch + 3);
         const pitchRange = maxPitch - minPitch + 1;
 
-        const margin = { left: 32, right: 10, top: 8, bottom: 8 };
+        const margin = { left: 36, right: 12, top: 10, bottom: 10 };
         const plotW = w - margin.left - margin.right;
         const plotH = h - margin.top - margin.bottom;
         const beatW = plotW / Math.max(1, this.totalBeats);
         const noteH = Math.max(2, plotH / pitchRange);
 
-        // Horizontal grid — subtle alternating pitch rows
+        // Black key shading — highlight black keys with subtle background
         for (let p = minPitch; p <= maxPitch; p++) {
+            const pc = p % 12;
+            const isBlack = [1, 3, 6, 8, 10].includes(pc);
             const y = margin.top + plotH - (p - minPitch + 1) * noteH;
-            if (p % 2 === 0) {
-                ctx.fillStyle = 'rgba(200, 215, 235, 0.02)';
+            if (isBlack) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.012)';
                 ctx.fillRect(margin.left, y, plotW, noteH);
             }
         }
 
-        // Octave C lines
+        // Octave C lines and labels
         ctx.lineWidth = 0.5;
         for (let p = minPitch; p <= maxPitch; p++) {
             if (p % 12 === 0) {
                 const y = margin.top + plotH - (p - minPitch) * noteH;
-                ctx.strokeStyle = 'rgba(180, 195, 215, 0.1)';
+                // Glow line
+                ctx.strokeStyle = 'rgba(212, 168, 67, 0.08)';
+                ctx.lineWidth = 1;
                 ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(w - margin.right, y); ctx.stroke();
-                ctx.fillStyle = 'rgba(180, 195, 215, 0.2)';
-                ctx.font = '9px "Source Sans 3", sans-serif';
+                // Label
+                ctx.fillStyle = 'rgba(212, 168, 67, 0.3)';
+                ctx.font = '9px "Source Sans 3", system-ui, sans-serif';
                 ctx.textAlign = 'right';
-                ctx.fillText(`C${Math.floor(p / 12) - 1}`, margin.left - 4, y + 3);
+                ctx.fillText(`C${Math.floor(p / 12) - 1}`, margin.left - 5, y + 3);
             }
         }
 
@@ -118,30 +128,44 @@ export class PianoRoll {
         const totalBars = Math.ceil(this.totalBeats / 4);
         for (let bar = 0; bar <= totalBars; bar++) {
             const x = margin.left + bar * 4 * beatW;
-            ctx.strokeStyle = bar % 4 === 0 ? 'rgba(180, 195, 215, 0.1)' : 'rgba(180, 195, 215, 0.04)';
-            ctx.lineWidth = bar % 4 === 0 ? 0.8 : 0.4;
+            const isMajor = bar % 4 === 0;
+            ctx.strokeStyle = isMajor ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.02)';
+            ctx.lineWidth = isMajor ? 0.8 : 0.4;
             ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, h - margin.bottom); ctx.stroke();
+
+            // Beat subdivisions (quarter note lines)
+            if (bar < totalBars) {
+                for (let beat = 1; beat < 4; beat++) {
+                    const bx = x + beat * beatW;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.015)';
+                    ctx.lineWidth = 0.3;
+                    ctx.beginPath(); ctx.moveTo(bx, margin.top); ctx.lineTo(bx, h - margin.bottom); ctx.stroke();
+                }
+            }
         }
 
-        // Note glow layer (drawn first, behind notes)
+        // Draw notes — two passes: glow then body
         const ACCOMP_VOICE = 10;
+
+        // Pass 1: Glow layer
         ctx.save();
         for (const n of this.notes) {
             const startBeat = (n.bar - 1) * 4 + (n.beat - 1) + (n.sub || 0);
             const durBeats = (n.dur_num * 4) / n.dur_den;
             const voice = n.voice || 1;
+            const vel = (n.velocity || 80) / 127;
 
             const x = margin.left + startBeat * beatW;
-            const nw = Math.max(2, durBeats * beatW - 1);
+            const nw = Math.max(3, durBeats * beatW - 1);
             const y = margin.top + plotH - (n.pitch - minPitch + 1) * noteH;
             const nh = Math.max(2, noteH - 1);
 
-            if (voice >= ACCOMP_VOICE) {
-                ctx.shadowColor = 'rgba(148, 68, 81, 0.35)';
-            } else {
-                ctx.shadowColor = 'rgba(201, 162, 77, 0.4)';
-            }
-            ctx.shadowBlur = 6;
+            const isAccomp = voice >= ACCOMP_VOICE;
+            const glowAlpha = isAccomp ? vel * 0.15 : vel * 0.3;
+            ctx.shadowColor = isAccomp
+                ? `rgba(168, 68, 85, ${glowAlpha})`
+                : `rgba(212, 168, 67, ${glowAlpha})`;
+            ctx.shadowBlur = isAccomp ? 4 : 8;
             ctx.shadowOffsetX = 0;
             ctx.shadowOffsetY = 1;
             ctx.fillStyle = 'transparent';
@@ -150,54 +174,83 @@ export class PianoRoll {
         }
         ctx.restore();
 
-        // Draw notes
+        // Pass 2: Note bodies
         for (const n of this.notes) {
             const startBeat = (n.bar - 1) * 4 + (n.beat - 1) + (n.sub || 0);
             const durBeats = (n.dur_num * 4) / n.dur_den;
             const voice = n.voice || 1;
+            const vel = (n.velocity || 80) / 127;
 
             const x = margin.left + startBeat * beatW;
-            const nw = Math.max(2, durBeats * beatW - 1);
+            const nw = Math.max(3, durBeats * beatW - 1);
             const y = margin.top + plotH - (n.pitch - minPitch + 1) * noteH;
             const nh = Math.max(2, noteH - 1);
+            const isAccomp = voice >= ACCOMP_VOICE;
 
-            // Note body with gradient
-            if (voice >= ACCOMP_VOICE) {
-                const ng = ctx.createLinearGradient(x, y, x, y + nh);
-                ng.addColorStop(0, 'rgba(148, 68, 81, 0.65)');
-                ng.addColorStop(1, 'rgba(122, 54, 64, 0.55)');
-                ctx.fillStyle = ng;
+            // Note gradient — velocity affects brightness
+            const ng = ctx.createLinearGradient(x, y, x, y + nh);
+            if (isAccomp) {
+                const a1 = 0.35 + vel * 0.25;
+                const a2 = 0.25 + vel * 0.2;
+                ng.addColorStop(0, `rgba(180, 80, 100, ${a1})`);
+                ng.addColorStop(1, `rgba(140, 55, 75, ${a2})`);
             } else {
-                const ng = ctx.createLinearGradient(x, y, x, y + nh);
-                ng.addColorStop(0, 'rgba(223, 192, 122, 0.9)');
-                ng.addColorStop(1, 'rgba(201, 162, 77, 0.8)');
-                ctx.fillStyle = ng;
+                const a1 = 0.6 + vel * 0.35;
+                const a2 = 0.5 + vel * 0.3;
+                ng.addColorStop(0, `rgba(235, 200, 100, ${a1})`);
+                ng.addColorStop(1, `rgba(200, 155, 60, ${a2})`);
             }
+            ctx.fillStyle = ng;
             this._roundRect(ctx, x, y, nw, nh, 2.5);
             ctx.fill();
 
-            // Top highlight
-            ctx.fillStyle = voice >= ACCOMP_VOICE
-                ? 'rgba(170, 100, 115, 0.6)'
-                : 'rgba(240, 220, 160, 0.7)';
-            this._roundRect(ctx, x, y, nw, Math.min(1.5, nh * 0.3), 1);
-            ctx.fill();
+            // Top specular highlight
+            if (nh > 3) {
+                const hlAlpha = isAccomp ? 0.12 : 0.2;
+                ctx.fillStyle = `rgba(255, 255, 255, ${hlAlpha})`;
+                this._roundRect(ctx, x + 0.5, y, nw - 1, Math.min(1.5, nh * 0.25), 1);
+                ctx.fill();
+            }
+
+            // Left edge accent for melody notes
+            if (!isAccomp && nw > 6) {
+                ctx.fillStyle = `rgba(255, 230, 150, ${vel * 0.4})`;
+                this._roundRect(ctx, x, y, 2, nh, 1);
+                ctx.fill();
+            }
         }
 
         // Playback cursor
         if (this.cursorBeat >= 0 && this.cursorBeat <= this.totalBeats) {
             const cx = margin.left + this.cursorBeat * beatW;
-            // Cursor glow
-            const cGrad = ctx.createLinearGradient(cx - 6, 0, cx + 6, 0);
-            cGrad.addColorStop(0, 'rgba(201, 162, 77, 0)');
-            cGrad.addColorStop(0.5, 'rgba(201, 162, 77, 0.15)');
-            cGrad.addColorStop(1, 'rgba(201, 162, 77, 0)');
+
+            // Wide glow
+            const cGrad = ctx.createLinearGradient(cx - 12, 0, cx + 12, 0);
+            cGrad.addColorStop(0, 'rgba(212, 168, 67, 0)');
+            cGrad.addColorStop(0.3, 'rgba(212, 168, 67, 0.06)');
+            cGrad.addColorStop(0.5, 'rgba(212, 168, 67, 0.12)');
+            cGrad.addColorStop(0.7, 'rgba(212, 168, 67, 0.06)');
+            cGrad.addColorStop(1, 'rgba(212, 168, 67, 0)');
             ctx.fillStyle = cGrad;
-            ctx.fillRect(cx - 6, margin.top, 12, plotH);
-            // Cursor line
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fillRect(cx - 12, margin.top, 24, plotH);
+
+            // Cursor line with glow
+            ctx.save();
+            ctx.shadowColor = 'rgba(240, 200, 100, 0.5)';
+            ctx.shadowBlur = 6;
+            ctx.strokeStyle = 'rgba(255, 240, 200, 0.7)';
             ctx.lineWidth = 1.5;
             ctx.beginPath(); ctx.moveTo(cx, margin.top); ctx.lineTo(cx, h - margin.bottom); ctx.stroke();
+            ctx.restore();
+
+            // Top marker
+            ctx.fillStyle = 'rgba(240, 200, 100, 0.8)';
+            ctx.beginPath();
+            ctx.moveTo(cx - 4, margin.top);
+            ctx.lineTo(cx + 4, margin.top);
+            ctx.lineTo(cx, margin.top + 6);
+            ctx.closePath();
+            ctx.fill();
         }
     }
 }
