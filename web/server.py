@@ -374,6 +374,55 @@ ACCOMP_PATTERNS = [
     {"id": "none", "name": "No accompaniment"},
 ]
 
+PIECES = {
+    "folk": {
+        "name": "Folk & Traditional",
+        "pieces": [
+            {"id": "twinkle_twinkle", "name": "Twinkle Twinkle", "notes": 14, "key": "C major"},
+            {"id": "twinkle_twinkle_full", "name": "Twinkle Twinkle (Full)", "notes": 42, "key": "C major"},
+            {"id": "amazing_grace", "name": "Amazing Grace", "notes": 25, "key": "C major"},
+            {"id": "greensleeves", "name": "Greensleeves", "notes": 19, "key": "A minor"},
+            {"id": "scarborough_fair", "name": "Scarborough Fair", "notes": 29, "key": "D dorian"},
+            {"id": "mary_had_a_little_lamb", "name": "Mary Had a Little Lamb", "notes": 26, "key": "C major"},
+            {"id": "auld_lang_syne", "name": "Auld Lang Syne", "notes": 28, "key": "F major"},
+            {"id": "frere_jacques", "name": "Frère Jacques", "notes": 32, "key": "C major"},
+        ],
+    },
+    "bach": {
+        "name": "J.S. Bach",
+        "pieces": [
+            {"id": "bach_invention1_subject", "name": "Invention No. 1 (Subject)", "notes": 17, "key": "C major"},
+            {"id": "bach_invention1_bars1_4", "name": "Invention No. 1 (Bars 1–4)", "notes": 32, "key": "C major"},
+            {"id": "bach_invention4_subject", "name": "Invention No. 4 (Subject)", "notes": 16, "key": "D minor"},
+            {"id": "bach_invention8_subject", "name": "Invention No. 8 (Subject)", "notes": 16, "key": "F major"},
+            {"id": "bach_wtc1_prelude_c", "name": "WTC I: Prelude in C", "notes": 32, "key": "C major"},
+        ],
+    },
+    "mozart": {
+        "name": "W.A. Mozart",
+        "pieces": [
+            {"id": "mozart_k545_theme", "name": "Sonata K.545 Theme", "notes": 26, "key": "C major"},
+            {"id": "mozart_k545_first_phrase", "name": "K.545 First Phrase", "notes": 13, "key": "C major"},
+            {"id": "mozart_k331_theme", "name": "Sonata K.331 (Alla Turca)", "notes": 30, "key": "A major"},
+            {"id": "mozart_k333_theme", "name": "Sonata K.333 Theme", "notes": 27, "key": "Bb major"},
+            {"id": "mozart_eine_kleine_theme", "name": "Eine Kleine Nachtmusik", "notes": 18, "key": "G major"},
+            {"id": "mozart_symphony40_theme", "name": "Symphony No. 40 Theme", "notes": 21, "key": "G minor"},
+        ],
+    },
+    "beethoven": {
+        "name": "L. van Beethoven",
+        "pieces": [
+            {"id": "beethoven_ode_to_joy", "name": "Ode to Joy (C major)", "notes": 30, "key": "C major"},
+            {"id": "beethoven_ode_to_joy_d", "name": "Ode to Joy (D major)", "notes": 30, "key": "D major"},
+            {"id": "beethoven_fur_elise", "name": "Für Elise Theme", "notes": 27, "key": "A minor"},
+            {"id": "beethoven_symphony5_motif", "name": "Symphony No. 5 Motif", "notes": 20, "key": "C minor"},
+            {"id": "beethoven_pathetique_adagio", "name": "Pathétique Adagio", "notes": 23, "key": "Ab major"},
+            {"id": "beethoven_moonlight", "name": "Moonlight Sonata", "notes": 28, "key": "C# minor"},
+            {"id": "beethoven_pastoral", "name": "Pastoral Symphony Theme", "notes": 24, "key": "F major"},
+        ],
+    },
+}
+
 CONSTRAINT_CATEGORIES = [
     {"id": "melodic", "name": "Melodic Motion"},
     {"id": "harmonic", "name": "Tonal & Harmonic"},
@@ -389,6 +438,15 @@ CONSTRAINT_CATEGORIES = [
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
+
+class VariationRequest(BaseModel):
+    mode: str = Field("continue")          # "continue" or "transform"
+    piece: str = Field("mozart_k545_theme")
+    split: str = Field("50")              # percentage "50" or note count "8n"
+    technique: str = Field("")            # "inversion" | "retrograde" | "augmentation" | "diminution" | ""
+    genre: str = Field("")               # target genre (optional override)
+    randomness: float = Field(0.3, ge=0.0, le=1.0)
+
 
 class GenerateRequest(BaseModel):
     from_valence: float = Field(-0.7, ge=-1.0, le=1.0)
@@ -427,6 +485,7 @@ async def get_config():
         "constraint_categories": CONSTRAINT_CATEGORIES,
         "forms": FORMS,
         "accompaniment_patterns": ACCOMP_PATTERNS,
+        "pieces": PIECES,
     }
 
 
@@ -533,6 +592,88 @@ async def generate(req: GenerateRequest):
 
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail=f"Generation timed out ({timeout_sec}s)")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/variation")
+async def variation_generate(req: VariationRequest):
+    # Build CLI args for variation.pi
+    args = [req.mode, f"piece={req.piece}"]
+
+    if req.mode == "continue":
+        args.append(f"split={req.split}")
+        if req.genre:
+            args.append(f"genre={req.genre}")
+    elif req.mode == "transform":
+        if req.technique:
+            args.append(f"technique={req.technique}")
+        if req.genre:
+            args.append(f"genre={req.genre}")
+        if not req.technique and not req.genre:
+            raise HTTPException(status_code=400, detail="transform requires technique= or genre=")
+
+    args.append(f"randomness={req.randomness}")
+
+    tmp_id = uuid.uuid4().hex[:12]
+    tmp_json = os.path.join(tempfile.gettempdir(), f"web_var_{tmp_id}.json")
+    args.append(f"output={tmp_json}")
+
+    script_path = str(PROJECT_ROOT / "scripts" / "run_picat.sh")
+    cmd = [script_path, "picat/variation.pi"] + args
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=str(PROJECT_ROOT),
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
+        picat_output = stdout.decode("utf-8", errors="replace")
+
+        if proc.returncode != 0:
+            raise HTTPException(status_code=500, detail={
+                "error": "Variation generation failed",
+                "output": picat_output,
+            })
+
+        if not os.path.exists(tmp_json):
+            raise HTTPException(status_code=500, detail={
+                "error": "No output JSON produced",
+                "output": picat_output,
+            })
+
+        with open(tmp_json, "r") as f:
+            data = json.load(f)
+
+        tmp_midi = tmp_json.replace(".json", ".mid")
+        try:
+            json_to_midi(tmp_json, tmp_midi)
+            with open(tmp_midi, "rb") as f:
+                midi_base64 = base64.b64encode(f.read()).decode("ascii")
+        except Exception as e:
+            midi_base64 = None
+            picat_output += f"\nMIDI conversion error: {e}"
+
+        for p in [tmp_json, tmp_midi]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+        return {
+            "notes": data.get("notes", []),
+            "tempo_changes": data.get("tempo_changes", []),
+            "metadata": data.get("metadata", {}),
+            "midi_base64": midi_base64,
+            "picat_output": picat_output,
+        }
+
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Variation timed out (90s)")
     except HTTPException:
         raise
     except Exception as e:

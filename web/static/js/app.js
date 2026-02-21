@@ -7,6 +7,7 @@ import { GenreSelector } from './genre-selector.js';
 import { ConstraintPanel } from './constraint-panel.js';
 import { PianoRoll } from './piano-roll.js';
 import { Playback } from './playback.js';
+import { VarySection } from './variation.js';
 
 // --- Components ---
 const moodPad = new MoodPad('mood-pad');
@@ -14,6 +15,7 @@ const genreSelector = new GenreSelector('genre-cards');
 const constraintPanel = new ConstraintPanel('constraint-panel');
 const pianoRoll = new PianoRoll('piano-roll');
 const playback = new Playback();
+const varySection = new VarySection();
 
 // --- DOM refs ---
 const durationSlider = document.getElementById('duration-slider');
@@ -27,6 +29,7 @@ const rhythmToggle = document.getElementById('rhythm-toggle');
 const refineSelect = document.getElementById('refine-select');
 const refinePieceSelect = document.getElementById('refine-piece-select');
 const generateBtn = document.getElementById('generate-btn');
+const varyBtn = document.getElementById('vary-btn');
 const outputSection = document.getElementById('output-section');
 const loadingOverlay = document.getElementById('loading-overlay');
 const startCoords = document.getElementById('start-coords');
@@ -58,12 +61,18 @@ const LOADING_MESSAGES = [
     'Almost there...',
 ];
 
+const VARY_LOADING_MESSAGES = [
+    'Analysing the original...',
+    'Applying variation...',
+    'Reshaping the melody...',
+    'Fitting constraints...',
+    'Almost there...',
+];
+
 // --- Init ---
 async function init() {
-    // Start loading sampler early
     playback.init();
 
-    // Load config
     const resp = await fetch('/api/config');
     config = await resp.json();
 
@@ -95,17 +104,30 @@ async function init() {
     constraintPanel.init(config.constraints, config.constraint_categories, config.genre_weights);
     constraintPanel.setGenre('classical_period');
 
+    // Vary section
+    varySection.init(config.pieces, config.genres);
+
     // Wire events
     wireEvents();
 }
 
 function wireEvents() {
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tab-compose').style.display = tab === 'compose' ? '' : 'none';
+            document.getElementById('tab-vary').style.display = tab === 'vary' ? '' : 'none';
+        });
+    });
+
     // Mood pad changes
     moodPad.onchange = (s, e) => {
         startCoords.textContent = `Start: V=${s.v.toFixed(2)}, A=${s.a.toFixed(2)}`;
         endCoords.textContent = `End: V=${e.v.toFixed(2)}, A=${e.a.toFixed(2)}`;
     };
-    // Trigger initial display
     const s0 = moodPad.getStart(), e0 = moodPad.getEnd();
     startCoords.textContent = `Start: V=${s0.v.toFixed(2)}, A=${s0.a.toFixed(2)}`;
     endCoords.textContent = `End: V=${e0.v.toFixed(2)}, A=${e0.a.toFixed(2)}`;
@@ -132,9 +154,7 @@ function wireEvents() {
     // Genre change -> update constraint panel + accomp
     genreSelector.onchange = (genreId) => {
         constraintPanel.setGenre(genreId);
-        // Update default accompaniment
-        const genre = config.genres[genreId];
-        if (genre?.accomp_pattern) {
+        if (config.genres[genreId]?.accomp_pattern) {
             accompSelect.value = 'auto';
         }
     };
@@ -152,6 +172,9 @@ function wireEvents() {
 
     // Generate
     generateBtn.addEventListener('click', doGenerate);
+
+    // Vary
+    varyBtn.addEventListener('click', doVary);
 
     // Transport
     playBtn.addEventListener('click', () => playback.play());
@@ -177,6 +200,18 @@ function wireEvents() {
         pauseBtn.disabled = !playing;
         stopBtn.disabled = false;
     };
+
+    // Vary mode description updates
+    document.querySelectorAll('#vary-mode-control button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const desc = document.getElementById('vary-mode-desc');
+            if (btn.dataset.value === 'continue') {
+                desc.textContent = 'Keep the opening and generate a new continuation from that point.';
+            } else {
+                desc.textContent = 'Apply classical techniques or genre transfer to the whole piece.';
+            }
+        });
+    });
 }
 
 function fmtTime(sec) {
@@ -185,8 +220,11 @@ function fmtTime(sec) {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// -------------------------------------------------------------------------
+// Generate (compose tab)
+// -------------------------------------------------------------------------
+
 async function doGenerate() {
-    // Stop any current playback
     playback.stop();
 
     const start = moodPad.getStart();
@@ -211,19 +249,42 @@ async function doGenerate() {
         weight_overrides: overrides.weight_overrides,
     };
 
-    loadingOverlay.style.display = 'flex';
-    generateBtn.disabled = true;
+    await runRequest('/api/generate', body, LOADING_MESSAGES, generateBtn);
+}
 
-    // Rotate loading messages
+// -------------------------------------------------------------------------
+// Vary (variation tab)
+// -------------------------------------------------------------------------
+
+async function doVary() {
+    playback.stop();
+
+    const err = varySection.validate();
+    if (err) {
+        alert(err);
+        return;
+    }
+
+    await runRequest('/api/variation', varySection.getRequest(), VARY_LOADING_MESSAGES, varyBtn);
+}
+
+// -------------------------------------------------------------------------
+// Shared request runner
+// -------------------------------------------------------------------------
+
+async function runRequest(endpoint, body, messages, triggerBtn) {
+    triggerBtn.disabled = true;
+    loadingOverlay.style.display = 'flex';
+
     let msgIdx = 0;
-    loadingText.textContent = LOADING_MESSAGES[0];
+    loadingText.textContent = messages[0];
     loadingInterval = setInterval(() => {
-        msgIdx = (msgIdx + 1) % LOADING_MESSAGES.length;
-        loadingText.textContent = LOADING_MESSAGES[msgIdx];
+        msgIdx = (msgIdx + 1) % messages.length;
+        loadingText.textContent = messages[msgIdx];
     }, 3000);
 
     try {
-        const resp = await fetch('/api/generate', {
+        const resp = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -238,7 +299,6 @@ async function doGenerate() {
 
         const data = await resp.json();
 
-        // Show output
         outputSection.style.display = 'block';
         pianoRoll.setNotes(data.notes, data.tempo_changes);
         playback.setNotes(data.notes, data.tempo_changes, data.midi_base64);
@@ -246,13 +306,11 @@ async function doGenerate() {
         timeDisplay.textContent = `0:00 / ${fmtTime(playback.totalDurationSec)}`;
         progressBar.style.width = '0%';
 
-        // Enable transport
         playBtn.disabled = false;
         pauseBtn.disabled = true;
         stopBtn.disabled = true;
         downloadMidi.style.display = data.midi_base64 ? '' : 'none';
 
-        // Scroll to output
         outputSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     } catch (e) {
@@ -260,7 +318,7 @@ async function doGenerate() {
     } finally {
         clearInterval(loadingInterval);
         loadingOverlay.style.display = 'none';
-        generateBtn.disabled = false;
+        triggerBtn.disabled = false;
     }
 }
 

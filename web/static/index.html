@@ -16,111 +16,205 @@
     </header>
 
     <main class="app-main">
-        <div class="controls-row">
-            <!-- Left Column: Mood + Sliders -->
-            <section class="panel mood-section">
-                <h2 class="panel-title">Mood Transition</h2>
-                <div class="mood-pad-container">
-                    <canvas id="mood-pad" width="300" height="300"></canvas>
-                    <div class="mood-coordinates">
-                        <span id="start-coords">Start: V=0.00, A=0.00</span>
-                        <span id="end-coords">End: V=0.00, A=0.00</span>
-                    </div>
-                </div>
-                <div class="ornament">&#x2767;</div>
-                <div class="slider-group">
-                    <label class="slider-label">
-                        <span>Duration</span>
-                        <span id="duration-value" class="slider-value">60s</span>
-                    </label>
-                    <input type="range" id="duration-slider" min="10" max="300" value="60" class="styled-slider">
-                </div>
-                <div class="slider-group">
-                    <label class="slider-label">
-                        <span>Randomness</span>
-                        <span id="randomness-value" class="slider-value">0.30</span>
-                    </label>
-                    <input type="range" id="randomness-slider" min="0" max="100" value="30" class="styled-slider">
-                </div>
-                <div class="slider-group">
-                    <label class="slider-label"><span>Intensity</span></label>
-                    <div class="segmented-control" id="intensity-control">
-                        <button data-value="light">Light</button>
-                        <button data-value="standard" class="active">Standard</button>
-                        <button data-value="strict">Strict</button>
-                    </div>
-                </div>
-            </section>
 
-            <!-- Right Column: Genre & Advanced -->
-            <section class="panel genre-section">
-                <h2 class="panel-title">Genre & Style</h2>
-                <div id="genre-cards" class="genre-cards"></div>
+        <!-- Tab Bar -->
+        <div class="tab-bar">
+            <button class="tab-btn active" data-tab="compose">Compose</button>
+            <button class="tab-btn" data-tab="vary">Vary a Piece</button>
+        </div>
 
-                <!-- Advanced Settings (hidden by default) -->
-                <div class="advanced-toggle-row">
-                    <button id="advanced-toggle" class="advanced-toggle" aria-expanded="false">
-                        <span class="advanced-toggle-icon">&#9662;</span>
-                        Advanced Settings
-                    </button>
-                </div>
-                <div id="advanced-section" class="advanced-section collapsed">
-                    <div class="form-accomp-row">
-                        <div class="select-group">
-                            <label class="select-label">Form</label>
-                            <select id="form-select" class="styled-select"></select>
-                        </div>
-                        <div class="select-group">
-                            <label class="select-label">Accompaniment</label>
-                            <select id="accomp-select" class="styled-select"></select>
-                        </div>
-                        <div class="select-group">
-                            <label class="checkbox-label">
-                                <input type="checkbox" id="rhythm-toggle">
-                                <span>Variable rhythm</span>
-                            </label>
+        <!-- ================================================================
+             COMPOSE TAB
+             ================================================================ -->
+        <div id="tab-compose" class="tab-content">
+            <div class="controls-row">
+                <!-- Left Column: Mood + Sliders -->
+                <section class="panel mood-section">
+                    <h2 class="panel-title">Mood Transition</h2>
+                    <div class="mood-pad-container">
+                        <canvas id="mood-pad" width="300" height="300"></canvas>
+                        <div class="mood-coordinates">
+                            <span id="start-coords">Start: V=0.00, A=0.00</span>
+                            <span id="end-coords">End: V=0.00, A=0.00</span>
                         </div>
                     </div>
-                    <div class="form-accomp-row">
-                        <div class="select-group">
-                            <label class="select-label">Segment Refinement</label>
-                            <select id="refine-select" class="styled-select">
-                                <option value="1">Off</option>
-                                <option value="3">3 rounds</option>
-                                <option value="5">5 rounds</option>
-                                <option value="7">7 rounds</option>
-                            </select>
+                    <div class="ornament">&#x2767;</div>
+                    <div class="slider-group">
+                        <label class="slider-label">
+                            <span>Duration</span>
+                            <span id="duration-value" class="slider-value">60s</span>
+                        </label>
+                        <input type="range" id="duration-slider" min="10" max="300" value="60" class="styled-slider">
+                    </div>
+                    <div class="slider-group">
+                        <label class="slider-label">
+                            <span>Randomness</span>
+                            <span id="randomness-value" class="slider-value">0.30</span>
+                        </label>
+                        <input type="range" id="randomness-slider" min="0" max="100" value="30" class="styled-slider">
+                    </div>
+                    <div class="slider-group">
+                        <label class="slider-label"><span>Intensity</span></label>
+                        <div class="segmented-control" id="intensity-control">
+                            <button data-value="light">Light</button>
+                            <button data-value="standard" class="active">Standard</button>
+                            <button data-value="strict">Strict</button>
                         </div>
-                        <div class="select-group">
-                            <label class="select-label">Piece Refinement</label>
-                            <select id="refine-piece-select" class="styled-select">
-                                <option value="1">Off</option>
-                                <option value="2">2 rounds</option>
-                                <option value="3">3 rounds</option>
-                            </select>
+                    </div>
+                </section>
+
+                <!-- Right Column: Genre & Advanced -->
+                <section class="panel genre-section">
+                    <h2 class="panel-title">Genre & Style</h2>
+                    <div id="genre-cards" class="genre-cards"></div>
+
+                    <!-- Advanced Settings (hidden by default) -->
+                    <div class="advanced-toggle-row">
+                        <button id="advanced-toggle" class="advanced-toggle" aria-expanded="false">
+                            <span class="advanced-toggle-icon">&#9662;</span>
+                            Advanced Settings
+                        </button>
+                    </div>
+                    <div id="advanced-section" class="advanced-section collapsed">
+                        <div class="form-accomp-row">
+                            <div class="select-group">
+                                <label class="select-label">Form</label>
+                                <select id="form-select" class="styled-select"></select>
+                            </div>
+                            <div class="select-group">
+                                <label class="select-label">Accompaniment</label>
+                                <select id="accomp-select" class="styled-select"></select>
+                            </div>
+                            <div class="select-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rhythm-toggle">
+                                    <span>Variable rhythm</span>
+                                </label>
+                            </div>
                         </div>
+                        <div class="form-accomp-row">
+                            <div class="select-group">
+                                <label class="select-label">Segment Refinement</label>
+                                <select id="refine-select" class="styled-select">
+                                    <option value="1">Off</option>
+                                    <option value="3">3 rounds</option>
+                                    <option value="5">5 rounds</option>
+                                    <option value="7">7 rounds</option>
+                                </select>
+                            </div>
+                            <div class="select-group">
+                                <label class="select-label">Piece Refinement</label>
+                                <select id="refine-piece-select" class="styled-select">
+                                    <option value="1">Off</option>
+                                    <option value="2">2 rounds</option>
+                                    <option value="3">3 rounds</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="ornament">&#x2767;</div>
+
+                        <h2 class="panel-title constraints-title">Constraints</h2>
+                        <div class="constraint-toolbar">
+                            <button id="reset-constraints" class="btn-small" title="Reset to genre defaults">Reset to Genre Defaults</button>
+                        </div>
+                        <div id="constraint-panel" class="constraint-panel"></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Generate Button -->
+            <div class="generate-row">
+                <button id="generate-btn" class="btn-generate">
+                    <span class="btn-generate-icon">&#9835;</span>
+                    <span class="btn-generate-text">Generate</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ================================================================
+             VARY TAB
+             ================================================================ -->
+        <div id="tab-vary" class="tab-content" style="display:none;">
+            <div class="controls-row">
+
+                <!-- Left: Piece Browser -->
+                <section class="panel piece-browser-section">
+                    <h2 class="panel-title">Select a Piece</h2>
+                    <div id="piece-browser" class="piece-browser"></div>
+                </section>
+
+                <!-- Right: Variation Options -->
+                <section class="panel vary-options-section">
+                    <h2 class="panel-title">Variation Mode</h2>
+
+                    <div class="segmented-control" id="vary-mode-control">
+                        <button data-value="continue" class="active">Extend</button>
+                        <button data-value="transform">Rework</button>
+                    </div>
+                    <div class="vary-mode-desc" id="vary-mode-desc">
+                        Keep the opening and generate a new continuation from that point.
                     </div>
 
                     <div class="ornament">&#x2767;</div>
 
-                    <h2 class="panel-title constraints-title">Constraints</h2>
-                    <div class="constraint-toolbar">
-                        <button id="reset-constraints" class="btn-small" title="Reset to genre defaults">Reset to Genre Defaults</button>
+                    <!-- Extend options -->
+                    <div id="continue-options">
+                        <div class="slider-group">
+                            <label class="slider-label">
+                                <span>Split point</span>
+                                <span id="split-value" class="slider-value">50%</span>
+                            </label>
+                            <input type="range" id="split-slider" min="10" max="90" value="50" class="styled-slider">
+                            <div class="vary-hint">Notes before this point are kept; the rest is generated.</div>
+                        </div>
+                        <div class="select-group">
+                            <label class="select-label">Genre override</label>
+                            <select id="vary-genre-select" class="styled-select"></select>
+                        </div>
                     </div>
-                    <div id="constraint-panel" class="constraint-panel"></div>
-                </div>
-            </section>
+
+                    <!-- Rework options -->
+                    <div id="transform-options" style="display:none;">
+                        <div class="select-group" style="margin-bottom:12px;">
+                            <label class="select-label">Technique</label>
+                            <select id="technique-select" class="styled-select">
+                                <option value="">None (genre transfer only)</option>
+                                <option value="inversion">Inversion — mirror intervals</option>
+                                <option value="retrograde">Retrograde — play backwards</option>
+                                <option value="augmentation">Augmentation — halve note density</option>
+                                <option value="diminution">Diminution — double note density</option>
+                            </select>
+                        </div>
+                        <div class="select-group">
+                            <label class="select-label">Target genre</label>
+                            <select id="transform-genre-select" class="styled-select"></select>
+                        </div>
+                    </div>
+
+                    <!-- Shared: Randomness -->
+                    <div class="slider-group vary-randomness-group">
+                        <label class="slider-label">
+                            <span>Randomness</span>
+                            <span id="vary-randomness-value" class="slider-value">0.30</span>
+                        </label>
+                        <input type="range" id="vary-randomness-slider" min="0" max="100" value="30" class="styled-slider">
+                    </div>
+                </section>
+            </div>
+
+            <!-- Vary Button -->
+            <div class="generate-row">
+                <button id="vary-btn" class="btn-generate">
+                    <span class="btn-generate-icon">&#9835;</span>
+                    <span class="btn-generate-text">Create Variation</span>
+                </button>
+            </div>
         </div>
 
-        <!-- Generate Button -->
-        <div class="generate-row">
-            <button id="generate-btn" class="btn-generate">
-                <span class="btn-generate-icon">&#9835;</span>
-                <span class="btn-generate-text">Generate</span>
-            </button>
-        </div>
-
-        <!-- Piano Roll -->
+        <!-- ================================================================
+             OUTPUT (shared between both tabs)
+             ================================================================ -->
         <section class="panel piano-roll-section" id="output-section" style="display:none;">
             <h2 class="panel-title">Output</h2>
             <div class="piano-roll-container">
@@ -158,6 +252,7 @@
     <script type="module" src="/static/js/constraint-panel.js"></script>
     <script type="module" src="/static/js/piano-roll.js"></script>
     <script type="module" src="/static/js/playback.js"></script>
+    <script type="module" src="/static/js/variation.js"></script>
     <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>
