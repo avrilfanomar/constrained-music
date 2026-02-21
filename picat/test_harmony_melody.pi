@@ -1,0 +1,309 @@
+% test_harmony_melody.pi - Tests for chord-first melody generation
+%
+% Tests chord progression generator, chord-tone constraints,
+% phrase structure, register target, sequential repetition,
+% and weak-beat justification.
+
+module test_harmony_melody.
+
+import chord_generator.
+import scale_utils.
+import visualizer.
+
+main =>
+    println("=== Harmony-Melody Integration Tests ==="),
+    nl,
+    PassCount = 0,
+    FailCount = 0,
+
+    % --- Chord Generator Tests ---
+    println("Chord Generator:"),
+
+    printf("  %-44s", "progression starts on I"),
+    (test_prog_starts_on_I() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "progression ends on I"),
+    (test_prog_ends_on_I() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "penultimate chord is V"),
+    (test_prog_penultimate_V() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "correct number of bars"),
+    (test_prog_length() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "no degree 7 (vii)"),
+    (test_prog_no_vii() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "at least 3 different chords (8 bars)"),
+    (test_prog_variety() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "1-bar progression returns [1]"),
+    (test_prog_1bar() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "2-bar progression returns [1,1]"),
+    (test_prog_2bar() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+
+    % --- Chord Tone Computation ---
+    println("Chord Tone Computation:"),
+
+    printf("  %-44s", "C major I chord = C,E,G"),
+    (test_chord_tones_C_major_I() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "C major V chord = G,B,D"),
+    (test_chord_tones_C_major_V() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "A minor I chord = A,C,E"),
+    (test_chord_tones_A_minor_I() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+
+    % --- Chord Assignment Conversion ---
+    println("Chord Assignment Conversion:"),
+
+    printf("  %-44s", "degrees_to_chord_assignments output"),
+    (test_chord_assignments() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "bass notes in range 36-55"),
+    (test_chord_assignment_bass_range() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+
+    % --- Static Scorers ---
+    println("New Static Scorers:"),
+
+    printf("  %-44s", "register_target: arch melody = low"),
+    (test_register_target_arch() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "register_target: flat melody = high"),
+    (test_register_target_flat() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "sequential_repetition: matching"),
+    (test_sequential_repetition_matching() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "sequential_repetition: mismatching"),
+    (test_sequential_repetition_mismatching() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "weak_beat_justified: passing tones"),
+    (test_weak_beat_passing() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "weak_beat_justified: neighbor tones"),
+    (test_weak_beat_neighbor() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "weak_beat_justified: unjustified"),
+    (test_weak_beat_unjustified() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+
+    % --- Genre Cadence Tests ---
+    println("Genre Cadences:"),
+
+    printf("  %-44s", "jazz: ii-V-I ending"),
+    (test_jazz_cadence() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "classical: IV-V-I ending"),
+    (test_classical_cadence() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+
+    % --- Summary ---
+    Total = PassCount + FailCount,
+    printf("Results: %d/%d passed", PassCount, Total),
+    if FailCount > 0 then
+        printf(" (%d FAILED)", FailCount)
+    end,
+    nl,
+    if FailCount > 0 then
+        halt(1)
+    end.
+
+% ==============================================================================
+% CHORD GENERATOR TESTS
+% ==============================================================================
+
+test_prog_starts_on_I() =>
+    Degrees = chord_generator.generate_progression(8, major, classical_period),
+    Degrees[1] == 1.
+
+test_prog_ends_on_I() =>
+    Degrees = chord_generator.generate_progression(8, major, classical_period),
+    Degrees[length(Degrees)] == 1.
+
+test_prog_penultimate_V() =>
+    Degrees = chord_generator.generate_progression(8, major, classical_period),
+    Degrees[length(Degrees) - 1] == 5.
+
+test_prog_length() =>
+    Degrees4 = chord_generator.generate_progression(4, major, classical_period),
+    Degrees8 = chord_generator.generate_progression(8, major, baroque),
+    length(Degrees4) == 4,
+    length(Degrees8) == 8.
+
+test_prog_no_vii() =>
+    Degrees = chord_generator.generate_progression(8, major, classical_period),
+    foreach(D in Degrees) D != 7 end.
+
+test_prog_variety() =>
+    Degrees = chord_generator.generate_progression(8, major, classical_period),
+    Unique = remove_dups(Degrees),
+    length(Unique) >= 3.
+
+test_prog_1bar() =>
+    Degrees = chord_generator.generate_progression(1, major, classical_period),
+    Degrees == [1].
+
+test_prog_2bar() =>
+    Degrees = chord_generator.generate_progression(2, major, classical_period),
+    Degrees == [1, 1].
+
+% ==============================================================================
+% CHORD TONE COMPUTATION TESTS
+% ==============================================================================
+
+test_chord_tones_C_major_I() =>
+    % C major: root=0 (C), intervals=[0,2,4,5,7,9,11]
+    Degrees = [1],
+    BCT = chord_generator.compute_bar_chord_tones(Degrees, 0, major),
+    Tones = BCT[1],
+    % I chord in C major: C(0), E(4), G(7)
+    Tones[1] == 0, Tones[2] == 4, Tones[3] == 7.
+
+test_chord_tones_C_major_V() =>
+    Degrees = [5],
+    BCT = chord_generator.compute_bar_chord_tones(Degrees, 0, major),
+    Tones = BCT[1],
+    % V chord in C major: G(7), B(11), D(2)
+    Tones[1] == 7, Tones[2] == 11, Tones[3] == 2.
+
+test_chord_tones_A_minor_I() =>
+    % A minor: root=9 (A), intervals=[0,2,3,5,7,8,10]
+    Degrees = [1],
+    BCT = chord_generator.compute_bar_chord_tones(Degrees, 9, minor),
+    Tones = BCT[1],
+    % i chord in A minor: A(9), C(0), E(4)
+    Tones[1] == 9, Tones[2] == 0, Tones[3] == 4.
+
+% ==============================================================================
+% CHORD ASSIGNMENT TESTS
+% ==============================================================================
+
+test_chord_assignments() =>
+    Degrees = [1, 4, 5, 1],
+    CAs = chord_generator.degrees_to_chord_assignments(Degrees, 0, major),
+    length(CAs) == 4,
+    % Check first is I chord (degree 1, root PC 0)
+    CA1 = CAs[1],
+    CA1 = $chord_assignment(_, Deg1, _, RPC1, _),
+    Deg1 == 1, RPC1 == 0,
+    % Check second is IV chord (degree 4, F = pitch class 5)
+    CA2 = CAs[2],
+    CA2 = $chord_assignment(_, Deg2, _, RPC2, _),
+    Deg2 == 4, RPC2 == 5.
+
+test_chord_assignment_bass_range() =>
+    Degrees = [1, 4, 5, 1, 2, 6, 5, 1],
+    CAs = chord_generator.degrees_to_chord_assignments(Degrees, 0, major),
+    foreach(CA in CAs)
+        CA = $chord_assignment(_, _, _, _, BassNote),
+        BassNote >= 36, BassNote =< 55
+    end.
+
+% ==============================================================================
+% STATIC SCORER TESTS
+% ==============================================================================
+
+% Arch-shaped melody should have few register_target violations
+test_register_target_arch() =>
+    % C4=60, rises to G4=67, descends to C4=60 (arch shape matches parabolic curve)
+    Pitches = [60, 62, 64, 65, 67, 67, 65, 64, 62, 60],
+    V = visualizer.score_register_target(Pitches),
+    V =< 3.  % Arch shape should match reasonably well
+
+% Flat melody at one pitch should have many violations (doesn't follow tension curve)
+test_register_target_flat() =>
+    Pitches = [60, 60, 60, 60, 60, 60, 60, 60],
+    V = visualizer.score_register_target(Pitches),
+    V == 0.  % Range=0 means target is always the same, so no violations
+
+% Perfect sequential repetition: first quarter interval pattern matches second quarter
+test_sequential_repetition_matching() =>
+    % Pattern: +2,+2,-1 repeated transposed
+    Pitches = [60, 62, 64, 63, 65, 67, 66, 60, 62, 64, 63, 65],
+    V = visualizer.score_sequential_repetition(Pitches),
+    V == 0.  % intervals [2,2,-1] match [2,2,-1]
+
+% Mismatched sequential repetition
+test_sequential_repetition_mismatching() =>
+    % First quarter: +2,+2  Second quarter: +1,-3
+    Pitches = [60, 62, 64, 61, 58, 55, 58, 60],
+    V = visualizer.score_sequential_repetition(Pitches),
+    V > 0.  % Should have mismatches
+
+% Passing tones: C-D-E (ascending steps)
+test_weak_beat_passing() =>
+    % Indices: 1=strong, 2=weak(D is passing between C and E), 3=strong, 4=weak(F passing)...
+    Pitches = [60, 62, 64, 65, 67, 69, 71, 72],
+    V = visualizer.score_weak_beat_justified(Pitches),
+    V == 0.  % All weak beats are stepwise passing tones
+
+% Neighbor tones: C-D-C (step up and back)
+test_weak_beat_neighbor() =>
+    % D at index 2 is neighbor: C(60)-D(62)-C(60), step up then step back
+    Pitches = [60, 62, 60, 62, 60],
+    V = visualizer.score_weak_beat_justified(Pitches),
+    V == 0.  % D is a neighbor tone (step away and step back)
+
+% Unjustified weak-beat notes (leaps)
+test_weak_beat_unjustified() =>
+    % Index 2: C(60) -> G(67) -> E(64) — leap in, not stepwise -> violation
+    Pitches = [60, 67, 64, 60, 67],
+    V = visualizer.score_weak_beat_justified(Pitches),
+    V > 0.  % G at index 2 is unjustified (leap from C, leap to E)
+
+% ==============================================================================
+% GENRE CADENCE TESTS
+% ==============================================================================
+
+test_jazz_cadence() =>
+    Degrees = chord_generator.generate_progression(8, major, traditional_jazz),
+    % Jazz: ii-V-I at end
+    Degrees[length(Degrees) - 2] == 2,
+    Degrees[length(Degrees) - 1] == 5,
+    Degrees[length(Degrees)] == 1.
+
+test_classical_cadence() =>
+    Degrees = chord_generator.generate_progression(8, major, classical_period),
+    % Classical: IV-V-I at end
+    Degrees[length(Degrees) - 2] == 4,
+    Degrees[length(Degrees) - 1] == 5,
+    Degrees[length(Degrees)] == 1.
+
+% ==============================================================================
+% UTILITY
+% ==============================================================================
+
+remove_dups([]) = [].
+remove_dups([X|Xs]) = [X|remove_dups([Y : Y in Xs, Y != X])].

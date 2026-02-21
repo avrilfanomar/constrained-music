@@ -20,6 +20,7 @@ import genre_profiles.
 import diagnostics.
 import interval_profiles.
 import motif.
+import chord_generator.
 
 % ==============================================================================
 % MAIN MELODY GENERATION
@@ -1148,6 +1149,17 @@ generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Prefere
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
+    % CHORD-FIRST: Generate chord progression before melody
+    RootPC = KeyRoot mod 12,
+    ChordDegrees = chord_generator.generate_progression(NumBars, Mode, Genre),
+    BarChordTones = chord_generator.compute_bar_chord_tones(ChordDegrees, RootPC, Mode),
+
+    % Apply chord-tone constraints on strong beats
+    apply_chord_tone_constraints(Pitches, BarChordTones, NumBars, Density, ScaleNotes),
+
+    % Apply phrase structure (antecedent/consequent)
+    apply_phrase_structure(Pitches, KeyRoot, ScaleNotes, NumBars, Density),
+
     % Get constraints for genre
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
     GenreMaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
@@ -1195,6 +1207,13 @@ generate_segment_melody_with_motif(MusicParams, KeyRoot, NumBars, Genre, Prefere
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
+    % CHORD-FIRST: Generate chord progression before melody
+    RootPC2 = KeyRoot mod 12,
+    ChordDegrees2 = chord_generator.generate_progression(NumBars, Mode, Genre),
+    BarChordTones2 = chord_generator.compute_bar_chord_tones(ChordDegrees2, RootPC2, Mode),
+    apply_chord_tone_constraints(Pitches, BarChordTones2, NumBars, Density, ScaleNotes),
+    apply_phrase_structure(Pitches, KeyRoot, ScaleNotes, NumBars, Density),
+
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
     GenreMaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
     ProfileMaxInterval = interval_profiles.get_max_interval(Genre, Tempo),
@@ -1231,6 +1250,12 @@ generate_connected_segment_with_motif(MusicParams, KeyRoot, NumBars, PrevLastPit
 
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
+
+    % CHORD-FIRST
+    RootPC3 = KeyRoot mod 12,
+    ChordDegrees3 = chord_generator.generate_progression(NumBars, Mode, Genre),
+    BarChordTones3 = chord_generator.compute_bar_chord_tones(ChordDegrees3, RootPC3, Mode),
+    apply_chord_tone_constraints(Pitches, BarChordTones3, NumBars, Density, ScaleNotes),
 
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
     MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
@@ -1296,6 +1321,17 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     if TotalNotes >= 4 then
         rhythmic.no_rhythmic_monotony(Durations, Density)
     end,
+
+    % CHORD-FIRST: Generate chord progression before melody
+    RootPC = KeyRoot mod 12,
+    ChordDegrees = chord_generator.generate_progression(NumBars, Mode, Genre),
+    BarChordTones = chord_generator.compute_bar_chord_tones(ChordDegrees, RootPC, Mode),
+
+    % Apply chord-tone constraints on strong beats
+    apply_chord_tone_constraints(Pitches, BarChordTones, NumBars, Density, ScaleNotes),
+
+    % Apply phrase structure
+    apply_phrase_structure(Pitches, KeyRoot, ScaleNotes, NumBars, Density),
 
     % Get constraints for genre
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
@@ -1460,6 +1496,12 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
         rhythmic.no_rhythmic_monotony(Durations, Density)
     end,
 
+    % CHORD-FIRST
+    RootPC4 = KeyRoot mod 12,
+    ChordDegrees4 = chord_generator.generate_progression(NumBars, Mode, Genre),
+    BarChordTones4 = chord_generator.compute_bar_chord_tones(ChordDegrees4, RootPC4, Mode),
+    apply_chord_tone_constraints(Pitches, BarChordTones4, NumBars, Density, ScaleNotes),
+
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
     MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
 
@@ -1515,6 +1557,12 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
         rhythmic.no_rhythmic_monotony(Durations, Density)
     end,
 
+    % CHORD-FIRST
+    RootPC5 = KeyRoot mod 12,
+    ChordDegrees5 = chord_generator.generate_progression(NumBars, Mode, Genre),
+    BarChordTones5 = chord_generator.compute_bar_chord_tones(ChordDegrees5, RootPC5, Mode),
+    apply_chord_tone_constraints(Pitches, BarChordTones5, NumBars, Density, ScaleNotes),
+
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
     MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
 
@@ -1561,6 +1609,15 @@ generate_connected_segment_with_genre(MusicParams, KeyRoot, NumBars, PrevLastPit
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
+    % Chord-first: generate chord progression and constrain melody
+    RootPC6 = KeyRoot mod 12,
+    ChordDegrees6 = chord_generator.generate_progression(NumBars, Mode, Genre),
+    BarChordTones6 = chord_generator.compute_bar_chord_tones(ChordDegrees6, RootPC6, Mode),
+    apply_chord_tone_constraints(Pitches, BarChordTones6, NumBars, Density, ScaleNotes),
+
+    % Phrase structure
+    apply_phrase_structure(Pitches, KeyRoot, ScaleNotes, NumBars, Density),
+
     % Get constraints for genre
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
     MaxInterval = constraint_selector.get_param(ConstraintSet, max_interval, 5),
@@ -1580,6 +1637,65 @@ generate_connected_segment_with_genre(MusicParams, KeyRoot, NumBars, PrevLastPit
     solve_genre_melody(Pitches, TotalCost, Randomness),
 
     Melody = build_mood_melody_with_randomness(Pitches, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+
+% ==============================================================================
+% CHORD-FIRST MELODY CONSTRAINTS
+% ==============================================================================
+
+% Apply per-bar chord-tone constraints on strong beats
+% BarChordTones: array where BarChordTones[Bar] = [PC1, PC2, PC3]
+% Density: notes per bar (to determine beat positions)
+% Constrains odd-indexed notes within each bar to be chord tones of that bar's chord
+apply_chord_tone_constraints(Pitches, BarChordTones, NumBars, Density, ScaleNotes) =>
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * Density + 1,
+        ChordPCs = BarChordTones[Bar],
+        % Compute which scale notes are chord tones for this bar
+        ValidChordNotes = [N : N in ScaleNotes, pc_in_list(N mod 12, ChordPCs)],
+        if ValidChordNotes != [] then
+            % Beat 1 of each bar (first note) MUST be a chord tone
+            Pitches[BarStart] :: ValidChordNotes,
+            % Beat 3 (if density >= 4, third note in bar) should be chord tone
+            if Density >= 4 then
+                Beat3Idx = BarStart + 2,
+                if Beat3Idx =< length(Pitches) then
+                    Pitches[Beat3Idx] :: ValidChordNotes
+                end
+            end
+        end
+    end.
+
+% Check if a pitch class is in a list (deterministic)
+pc_in_list(_, []) => fail.
+pc_in_list(PC, [H|T]) =>
+    if PC == H then true
+    else pc_in_list(PC, T)
+    end.
+
+% Apply phrase structure: antecedent (first half) ends open, consequent (second half) ends closed
+% For 4+ bar segments with 16+ notes
+apply_phrase_structure(Pitches, Root, ScaleNotes, NumBars, Density) =>
+    Len = length(Pitches),
+    RootClass = Root mod 12,
+    if NumBars >= 4, Len >= 16 then
+        HalfPoint = Len // 2,
+        % Antecedent ending: scale degree 2, 5, or 7 (open/questioning)
+        SecondDeg = (RootClass + 2) mod 12,
+        DominantPC = (RootClass + 7) mod 12,
+        LeadingTone = (RootClass + 11) mod 12,
+        OpenEndNotes = [N : N in ScaleNotes, N mod 12 == SecondDeg]
+                    ++ [N : N in ScaleNotes, N mod 12 == DominantPC]
+                    ++ [N : N in ScaleNotes, N mod 12 == LeadingTone],
+        if OpenEndNotes != [] then
+            Pitches[HalfPoint] :: OpenEndNotes
+        end,
+        % Consequent ending: tonic (closed/answering) — already applied by base constraints
+        % But reinforce: the final note of the consequent = tonic
+        TonicNotes = [N : N in ScaleNotes, N mod 12 == RootClass],
+        if TonicNotes != [] then
+            Pitches[Len] :: TonicNotes
+        end
+    end.
 
 % ==============================================================================
 % GENRE UTILITIES

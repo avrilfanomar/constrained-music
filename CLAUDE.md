@@ -170,6 +170,7 @@ cd picat && PICATPATH="." picat /tmp/test_soft.pi
 ./scripts/run_picat.sh picat/test_emotional.pi              # Emotional constraint tests
 ./scripts/run_picat.sh picat/test_rhythm.pi                 # Variable rhythm tests
 ./scripts/run_picat.sh picat/test_refine.pi                # Refinement tests
+./scripts/run_picat.sh picat/test_harmony_melody.pi        # Chord-first melody integration tests
 ```
 
 The **constraint validation test suite** (`test_constraint_validation.pi`) validates that famous musical masterpieces satisfy the implemented constraints:
@@ -344,6 +345,31 @@ The mood system (Valence-Arousal model) now influences **which constraints are a
 **Architecture:** Mood is injected into the Preferences pipeline via `mood=Mood` key. `constraint_selector.pi` extracts it, applies multipliers via `emotional_constraints.mood_weight_multipliers()`, and appends new constraints via `emotional_constraints.mood_emotional_constraints()`. No melody.pi signature changes needed.
 
 **Module:** `emotional_constraints.pi` — contains `mood_emotional_constraints()`, `mood_weight_multipliers()`, and 5 `reify_*` implementations.
+
+### Chord-First Melody Generation
+
+The system generates chord progressions BEFORE melody solving, then constrains melody pitches to respect the active chord per bar. This replaces the previous "melody-blind" approach where chord tones were only checked against the tonic triad.
+
+**Architecture:**
+```
+chord_generator.pi → melody.pi (constrained to chords) → accompaniment.pi (same chord logic)
+```
+
+**How it works:**
+1. `chord_generator.generate_progression(NumBars, Mode, Genre)` creates a CP-optimized chord degree sequence [1..6]
+2. Hard constraints: starts on I, ends on I, penultimate = V (authentic cadence), no vii chords
+3. Genre-specific cadences: jazz = ii-V-I, classical = IV-V-I, folk = I-IV-...
+4. `compute_bar_chord_tones()` pre-computes pitch classes for each bar's triad
+5. `melody.pi` constrains beat 1 and beat 3 of each bar to be chord tones of that bar's chord
+6. Phrase structure: antecedent (first half) ends on scale degree 2/5/7 (open), consequent (second half) ends on tonic (closed)
+7. Accompaniment uses `chord_generator` directly instead of post-hoc harmonizer analysis
+
+**3 additional soft constraints:**
+- `register_target` — Parabolic tension curve; target pitch rises to midpoint then falls
+- `sequential_repetition` — First-quarter interval pattern should reappear transposed in second quarter
+- `weak_beat_justified` — Weak-beat notes must be passing tones (step through) or neighbor tones (step away and back)
+
+**Module:** `chord_generator.pi` — `generate_progression()`, `compute_bar_chord_tones()`, `degrees_to_chord_assignments()`
 
 ### Post-Generation Refinement
 

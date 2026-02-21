@@ -119,7 +119,10 @@ score_all_constraints(Pitches, KeyRoot) = Results =>
         (antecedent_consequent, score_antecedent_consequent(Pitches, KeyRoot)),
         (phrase_rhyme, score_phrase_rhyme(Pitches)),
         (motivic_repetition, score_motivic_repetition(Pitches)),
-        (motivic_fragmentation, score_motivic_fragmentation(Pitches))
+        (motivic_fragmentation, score_motivic_fragmentation(Pitches)),
+        (register_target, score_register_target(Pitches)),
+        (sequential_repetition, score_sequential_repetition(Pitches)),
+        (weak_beat_justified, score_weak_beat_justified(Pitches))
     ].
 
 % ==============================================================================
@@ -502,6 +505,77 @@ score_motivic_fragmentation(Pitches) = Violations =>
             end
         end,
         Violations = cond(HasMatch, 0, 1)
+    end.
+
+% ==============================================================================
+% HARMONY-MELODY CONSTRAINTS (static scorers)
+% ==============================================================================
+
+% Register target: parabolic tension curve, penalizes notes far from target register
+score_register_target(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 4 then Violations = 0
+    else
+        LowMidi = min(Pitches),
+        HighMidi = max(Pitches),
+        Range = HighMidi - LowMidi,
+        Count = 0,
+        foreach(I in 1..Len)
+            Pos = (I - 1) / max(1, Len - 1),
+            Tension = 4.0 * Pos * (1.0 - Pos),
+            TargetPitch = LowMidi + round(Range * (0.3 + 0.4 * Tension)),
+            Dev = abs(Pitches[I] - TargetPitch),
+            if Dev > 4 then Count := Count + 1 end
+        end,
+        Violations = Count
+    end.
+
+% Sequential repetition: first-quarter intervals should appear transposed in second quarter
+score_sequential_repetition(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 8 then Violations = 0
+    else
+        Intervals = [Pitches[I+1] - Pitches[I] : I in 1..Len-1],
+        QuarterLen = max(2, Len // 4),
+        Mismatches = 0,
+        foreach(I in 1..QuarterLen-1)
+            J = QuarterLen + I,
+            if J =< length(Intervals) then
+                if Intervals[I] != Intervals[J] then
+                    Mismatches := Mismatches + 1
+                end
+            end
+        end,
+        Violations = Mismatches
+    end.
+
+% Weak beat justified: even-indexed notes should be passing or neighbor tones
+score_weak_beat_justified(Pitches) = Violations =>
+    Len = length(Pitches),
+    if Len < 3 then Violations = 0
+    else
+        Count = 0,
+        foreach(I in 2..Len-1)
+            if I mod 2 == 0 then  % Weak beat (even index)
+                Prev1 = Pitches[I-1],
+                Curr1 = Pitches[I],
+                Next1 = Pitches[I+1],
+                InStep = abs(Curr1 - Prev1),
+                OutStep = abs(Next1 - Curr1),
+                DirIn1 = Curr1 - Prev1,
+                DirOut1 = Next1 - Curr1,
+                % Passing: step from both sides, same overall direction
+                if InStep =< 2, OutStep =< 2, DirIn1 * DirOut1 > 0 then
+                    true  % passing tone, OK
+                % Neighbor: step away and back (opposite direction)
+                elseif InStep =< 2, OutStep =< 2, DirIn1 * DirOut1 < 0 then
+                    true  % neighbor tone, OK
+                else
+                    Count := Count + 1
+                end
+            end
+        end,
+        Violations = Count
     end.
 
 % ==============================================================================

@@ -173,6 +173,26 @@ apply_soft(register_consistency, Notes, _Root, Weight, Cost) =>
     reify_register_consistency(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+% Harmony-aware chord tone constraint (uses per-bar chord tones from chord_generator)
+apply_soft(chord_tone_on_strong_beats_harmonic, Notes, _Root, Weight, Cost) =>
+    reify_chord_tone_on_strong_beats(Notes, 0, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Register target (tension curve via parabolic register targets)
+apply_soft(register_target, Notes, _Root, Weight, Cost) =>
+    reify_register_target(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Sequential repetition (transposed pattern repetition across bars)
+apply_soft(sequential_repetition, Notes, _Root, Weight, Cost) =>
+    reify_sequential_repetition(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Weak-beat justification (passing tones / neighbor tones)
+apply_soft(weak_beat_justified, Notes, _Root, Weight, Cost) =>
+    reify_weak_beat_justified(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Emotional Constraints
 apply_soft(descending_motion, Notes, _Root, Weight, Cost) =>
     emotional_constraints.reify_descending_motion(Notes, ViolationCount),
@@ -948,6 +968,134 @@ reify_cadential_descent(Notes, ViolationCount) =>
     end.
 
 % ==============================================================================
+% REGISTER TARGET (TENSION CURVE)
+% ==============================================================================
+
+% Parabolic tension curve: notes should follow a register arc
+% Target pitch rises in first half (building tension) and falls in second half
+% Returns count of notes that deviate significantly from target register
+reify_register_target(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 6 then
+        MaxPitch = max(Notes),
+        MinPitch = min(Notes),
+        Range #= MaxPitch - MinPitch,
+        % For each note position, compute deviation from target
+        Violations = new_list(Len),
+        Violations :: 0..1,
+        foreach(I in 1..Len)
+            % Parabolic tension: T = 4 * pos * (1 - pos), peaks at midpoint
+            % Target = Low + Range * (0.3 + 0.4 * Tension)
+            % At pos=0: target = Low + 0.3*Range (start above bottom)
+            % At pos=0.5: target = Low + 0.7*Range (near top)
+            % At pos=1: target = Low + 0.3*Range (end above bottom)
+            Pos100 = (I - 1) * 100 // (Len - 1),  % 0..100
+            Tension100 = 4 * Pos100 * (100 - Pos100) // 10000,  % 0..100 (peaks at 100)
+            % Target = MinPitch + Range * (30 + 40 * Tension100/100) / 100
+            TargetOffset = (30 + 40 * Tension100 // 100),
+            Target :: 0..127,
+            Target #= MinPitch + Range * TargetOffset // 100,
+            % Deviation penalty if > 4 semitones from target
+            Deviation = $abs(Notes[I] - Target),
+            Violations[I] #<=> (Deviation #> 4)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
+% SEQUENTIAL REPETITION
+% ==============================================================================
+
+% Transposed pattern repetition: bars 1-2 interval pattern should match bars 3-4
+% This is the most fundamental compositional technique: say it once, say it again transposed
+% Returns 0 if patterns match well, count of mismatched intervals otherwise
+reify_sequential_repetition(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 8 then
+        % Compare interval patterns of first quarter with second quarter
+        QuarterLen = Len // 4,
+        if QuarterLen >= 2 then
+            Mismatches = new_list(QuarterLen - 1),
+            Mismatches :: 0..1,
+            foreach(I in 1..QuarterLen-1)
+                % Interval in first segment
+                Int1 :: -24..24,
+                Int1 #= Notes[I+1] - Notes[I],
+                % Interval in second segment (offset by QuarterLen)
+                J = I + QuarterLen,
+                Int2 :: -24..24,
+                Int2 #= Notes[J+1] - Notes[J],
+                % Mismatch if intervals differ
+                Mismatches[I] #<=> (Int1 #!= Int2)
+            end,
+            ViolationCount #= sum(Mismatches)
+        else
+            ViolationCount = 0
+        end
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
+% WEAK-BEAT JUSTIFICATION
+% ==============================================================================
+
+% Weak-beat notes should be chord tones, passing tones, or neighbor tones
+% Passing tone: step from both sides in same direction
+% Neighbor tone: step away and back (from either direction)
+% Checks even-indexed notes (beats 2, 4 in 4/4 when density=4)
+% Returns count of unjustified weak-beat notes
+reify_weak_beat_justified(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        % Check notes at even positions (2, 4, 6...) as "weak beats"
+        Violations = new_list(Len),
+        Violations :: 0..1,
+        foreach(I in 1..Len)
+            if I mod 2 == 0, I > 1, I < Len then
+                % This is a weak beat with neighbors on both sides
+                IntervalBefore :: -24..24,
+                IntervalBefore #= Notes[I] - Notes[I-1],
+                IntervalAfter :: -24..24,
+                IntervalAfter #= Notes[I+1] - Notes[I],
+                AbsBefore = $abs(IntervalBefore),
+                AbsAfter = $abs(IntervalAfter),
+
+                % Passing tone: stepwise from both sides, same direction
+                % (before and after intervals have same sign, both <= 2)
+                IsPassing :: 0..1,
+                IsPassing #<=> (
+                    (AbsBefore #=< 2) #/\ (AbsBefore #> 0) #/\
+                    (AbsAfter #=< 2) #/\ (AbsAfter #> 0) #/\
+                    (IntervalBefore * IntervalAfter #< 0)  % opposite signed = same overall direction
+                ),
+
+                % Neighbor tone: step away and back (returns near start)
+                % Before: step of 1-2, After: step of 1-2, opposite direction
+                IsNeighbor :: 0..1,
+                IsNeighbor #<=> (
+                    (AbsBefore #=< 2) #/\ (AbsBefore #> 0) #/\
+                    (AbsAfter #=< 2) #/\ (AbsAfter #> 0) #/\
+                    (IntervalBefore * IntervalAfter #> 0)  % same signed = returns
+                ),
+
+                % Chord tone on weak beat also acceptable (handled by chord_tone constraint)
+                % Here we just check if it's a passing or neighbor tone
+                Justified :: 0..1,
+                Justified #<=> (IsPassing #\/ IsNeighbor),
+                Violations[I] #<=> (Justified #= 0)
+            else
+                Violations[I] = 0
+            end
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% ==============================================================================
 % RHYTHMIC CONSTRAINTS
 % ==============================================================================
 
@@ -1460,6 +1608,10 @@ supported_soft_constraints() = [
     motivic_fragmentation,
     antecedent_consequent,
     register_consistency,
+    chord_tone_on_strong_beats_harmonic,
+    register_target,
+    sequential_repetition,
+    weak_beat_justified,
     descending_motion,
     ascending_motion,
     narrow_range,

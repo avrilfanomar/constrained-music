@@ -31,7 +31,7 @@ genre_profile(
         (authentic_cadence_melody, 75),
         (large_leap_recovery, 75),
         (mostly_stepwise, 75),
-        (chord_tone_on_strong_beats, 70),
+        (chord_tone_on_strong_beats, 85),
         (cadential_descent, 70),
         (peak_approach_exit, 70),
         (max_octave_leaps, 70),
@@ -40,15 +40,18 @@ genre_profile(
         (phrase_arch_contour, 65),
         (balanced_motion, 65),
         (no_repetitive_intervals, 65),
+        (weak_beat_justified, 60),
         (phrase_rhyme, 60),
         (antecedent_consequent, 60),
         (opening_gesture, 60),
         (prefer_smaller_intervals, 60),
         (approach_climax_by_step, 60),
+        (sequential_repetition, 55),
         (leave_climax_contrary, 55),
         (salient_climax, 55),
         (motivic_repetition, 55),
         (register_consistency, 55),
+        (register_target, 50),
         (motivic_fragmentation, 50),
         (single_climax, 50),
         (registral_return, 50)
@@ -64,16 +67,20 @@ genre_profile(
     [no_augmented_seconds, max_consecutive_repeats],
     [
         (leading_tone_resolution, 85),
+        (chord_tone_on_strong_beats, 85),
         (consonant_leaps_only, 80),
         (sequence_encouraged, 75),
         (phrase_ends_stable, 75),
         (leap_recovery, 70),
         (large_leap_recovery, 70),
+        (sequential_repetition, 65),
         (no_consecutive_same_direction_leaps, 65),
+        (weak_beat_justified, 55),
         (prefer_smaller_intervals, 55),
         (peak_approach_exit, 55),
         (motivic_fragmentation, 45),
         (register_consistency, 45),
+        (register_target, 40),
         (no_repetitive_intervals, 40)
     ],
     [max_interval=6, tempo_range=(60,120), accomp_pattern=arpeggiated]
@@ -86,14 +93,18 @@ genre_profile(
     romantic,
     [min_range, max_consecutive_repeats],
     [
+        (chord_tone_on_strong_beats, 80),
         (phrase_ends_stable, 75),
         (min_unique_pitches, 70),
         (no_repetitive_intervals, 60),
         (leading_tone_resolution, 60),
         (single_climax, 55),
+        (sequential_repetition, 50),
         (consonant_leaps_only, 50),
         (peak_approach_exit, 50),
+        (register_target, 45),
         (large_leap_recovery, 45),
+        (weak_beat_justified, 40),
         (prefer_smaller_intervals, 35)
     ],
     [max_interval=7, tempo_range=(50,160), min_range=7, accomp_pattern=arpeggiated]
@@ -107,13 +118,17 @@ genre_profile(
     [min_range, max_consecutive_repeats],
     [
         (min_unique_pitches, 80),
+        (chord_tone_on_strong_beats, 80),
         (leading_tone_resolution, 75),
         (no_repetitive_intervals, 70),
         (phrase_ends_stable, 70),
         (no_immediate_repeat, 60),
         (consonant_leaps_only, 40),
         (peak_approach_exit, 40),
+        (weak_beat_justified, 35),
         (large_leap_recovery, 35),
+        (sequential_repetition, 30),
+        (register_target, 30),
         (prefer_smaller_intervals, 30)
     ],
     [max_interval=8, tempo_range=(100,240), min_range=10, accomp_pattern=stride]
@@ -126,6 +141,7 @@ genre_profile(
     folk,
     [no_augmented_seconds, no_tritone_outline, max_range, max_consecutive_repeats],
     [
+        (chord_tone_on_strong_beats, 85),
         (mostly_stepwise, 85),
         (consonant_leaps_only, 80),
         (phrase_ends_stable, 75),
@@ -135,9 +151,12 @@ genre_profile(
         (peak_approach_exit, 65),
         (register_consistency, 60),
         (antecedent_consequent, 55),
+        (register_target, 55),
         (arch_contour, 55),
         (no_repetitive_intervals, 50),
-        (tonic_anchoring, 50)
+        (tonic_anchoring, 50),
+        (weak_beat_justified, 50),
+        (sequential_repetition, 45)
     ],
     [max_interval=4, tempo_range=(70,130), max_range=12, accomp_pattern=block]
 ).
@@ -151,9 +170,11 @@ genre_profile(
     [
         (min_unique_pitches, 75),
         (no_repetitive_intervals, 65),
+        (chord_tone_on_strong_beats, 60),
         (no_immediate_repeat, 40),
         (peak_approach_exit, 30),
         (large_leap_recovery, 25),
+        (register_target, 25),
         (prefer_smaller_intervals, 20),
         (consonant_leaps_only, 20)
     ],
@@ -169,6 +190,7 @@ genre_profile(
     [
         (mostly_stepwise, 95),
         (consonant_leaps_only, 90),
+        (chord_tone_on_strong_beats, 85),
         (leap_recovery, 85),
         (large_leap_recovery, 85),
         (no_leading_tone_emphasis, 80),
@@ -176,6 +198,7 @@ genre_profile(
         (no_consecutive_same_direction_leaps, 75),
         (register_consistency, 70),
         (phrase_ends_stable, 70),
+        (weak_beat_justified, 60),
         (peak_approach_exit, 60),
         (no_repetitive_intervals, 35)
     ],
@@ -190,12 +213,14 @@ genre_profile(
     [ends_on_tonic, no_tritone_outline, max_range, max_consecutive_repeats],
     [
         (mostly_stepwise, 90),
+        (chord_tone_on_strong_beats, 85),
         (consonant_leaps_only, 85),
         (phrase_ends_stable, 80),
         (large_leap_recovery, 80),
         (leap_recovery, 75),
         (prefer_smaller_intervals, 75),
         (register_consistency, 70),
+        (weak_beat_justified, 65),
         (peak_approach_exit, 65),
         (arch_contour, 60),
         (tonic_anchoring, 55),
@@ -212,6 +237,7 @@ genre_profile(
     [max_range, max_consecutive_repeats],
     [
         (mostly_stepwise, 85),
+        (chord_tone_on_strong_beats, 80),
         (prefer_smaller_intervals, 75),
         (consonant_leaps_only, 75),
         (large_leap_recovery, 70),
@@ -231,6 +257,7 @@ genre_profile(
     [max_consecutive_repeats],
     [
         (no_leading_tone_emphasis, 85),
+        (chord_tone_on_strong_beats, 75),
         (phrase_ends_stable, 70),
         (min_unique_pitches, 65),
         (consonant_leaps_only, 60),
@@ -238,7 +265,8 @@ genre_profile(
         (large_leap_recovery, 55),
         (prefer_smaller_intervals, 50),
         (peak_approach_exit, 50),
-        (single_climax, 45)
+        (single_climax, 45),
+        (register_target, 40)
     ],
     [max_interval=6, tempo_range=(50,100), accomp_pattern=arpeggiated]
 ).
@@ -250,13 +278,15 @@ genre_profile(
     blues,
     [min_range, max_consecutive_repeats],
     [
+        (chord_tone_on_strong_beats, 80),
         (phrase_ends_stable, 75),
         (no_repetitive_intervals, 55),
         (leap_recovery, 55),
         (consonant_leaps_only, 55),
         (large_leap_recovery, 50),
         (peak_approach_exit, 45),
-        (prefer_smaller_intervals, 40)
+        (prefer_smaller_intervals, 40),
+        (weak_beat_justified, 35)
     ],
     [max_interval=7, tempo_range=(60,120), min_range=5, accomp_pattern=stride]
 ).
@@ -281,13 +311,15 @@ genre_profile(
         (register_consistency, 70),
         (large_leap_recovery, 70),
         (peak_approach_exit, 65),
-        (chord_tone_on_strong_beats, 65),
+        (chord_tone_on_strong_beats, 85),
         (cadential_descent, 60),
         (opening_gesture, 60),
+        (weak_beat_justified, 60),
         (balanced_motion, 55),
         (no_repetitive_intervals, 55),
         (motivic_repetition, 50),
-        (registral_return, 50)
+        (registral_return, 50),
+        (register_target, 45)
     ],
     [max_interval=4, tempo_range=(80,130), max_range=12, accomp_pattern=alberti]
 ).
@@ -300,6 +332,7 @@ genre_profile(
     [no_augmented_seconds, no_tritone_outline, max_consecutive_repeats],
     [
         (no_parallel_fifths_single, 90),
+        (chord_tone_on_strong_beats, 85),
         (consonant_leaps_only, 85),
         (leading_tone_resolution, 85),
         (octave_leap_recovery, 80),
@@ -311,7 +344,6 @@ genre_profile(
         (phrase_arch_contour, 75),
         (large_leap_recovery, 75),
         (mostly_stepwise, 75),
-        (chord_tone_on_strong_beats, 70),
         (cadential_descent, 70),
         (peak_approach_exit, 70),
         (max_octave_leaps, 70),
@@ -320,13 +352,16 @@ genre_profile(
         (balanced_motion, 65),
         (no_repetitive_intervals, 65),
         (opening_gesture, 65),
+        (weak_beat_justified, 60),
         (prefer_smaller_intervals, 60),
         (motivic_fragmentation, 60),
         (approach_climax_by_step, 60),
+        (sequential_repetition, 55),
         (register_consistency, 55),
         (leave_climax_contrary, 55),
         (salient_climax, 55),
         (motivic_repetition, 55),
+        (register_target, 50),
         (single_climax, 50),
         (registral_return, 50)
     ],
@@ -341,6 +376,7 @@ genre_profile(
     [no_tritone_outline, max_consecutive_repeats],
     [
         (leading_tone_resolution, 85),
+        (chord_tone_on_strong_beats, 80),
         (consonant_leaps_only, 75),
         (phrase_ends_stable, 75),
         (no_parallel_fifths_single, 70),
@@ -354,10 +390,11 @@ genre_profile(
         (phrase_arch_contour, 50),
         (no_repetitive_intervals, 50),
         (no_melodic_parallel_fifths, 50),
-        (chord_tone_on_strong_beats, 50),
         (prefer_smaller_intervals, 45),
         (register_consistency, 40),
         (motivic_repetition, 40),
+        (weak_beat_justified, 40),
+        (register_target, 35),
         (single_climax, 35),
         (registral_return, 35)
     ],

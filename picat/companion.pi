@@ -24,6 +24,7 @@ import visualizer.
 import harmonizer.
 import accompaniment.
 import refiner.
+import chord_generator.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -810,9 +811,12 @@ generate_accompaniment_for_melody(MelodyNotes, KeyRoot, Segments, Genre, Pattern
         % Total bars from melody notes
         MaxBar = max([Bar : $note(_, _, $time_pos(Bar, _, _), _, _) in MelodyNotes]),
 
-        % Harmonize
+        % Generate chord progression using chord-first approach
         println("Generating accompaniment..."),
-        ChordProg = harmonizer.harmonize_melody(MelodyNotes, KeyRoot, Mode, cond(Genre != none, Genre, classical_period), MaxBar),
+        GenreForChords = cond(Genre != none, Genre, classical_period),
+        ChordDegrees = chord_generator.generate_progression(MaxBar, Mode, GenreForChords),
+        RootPC = KeyRoot mod 12,
+        ChordProg = chord_generator.degrees_to_chord_assignments(ChordDegrees, RootPC, Mode),
 
         % Check if accompaniment is disabled
         if Pattern == none then

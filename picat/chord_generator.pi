@@ -1,0 +1,291 @@
+% chord_generator.pi - Generate chord progressions BEFORE melody
+%
+% Produces a chord degree sequence using CP constraints, so the melody
+% solver can constrain notes to actual chord tones per bar.
+% This is the "chord-first" approach: harmony drives melody.
+
+module chord_generator.
+
+import cp.
+import scale_utils.
+import harmonic.
+
+% ==============================================================================
+% MAIN INTERFACE
+% ==============================================================================
+
+% Generate a chord progression for NumBars bars
+% Mode: major, minor, dorian, etc.
+% Genre: genre atom for cadence style preferences
+% Returns: list of chord degrees [1..7], one per bar
+generate_progression(NumBars, Mode, Genre) = Degrees =>
+    if NumBars < 1 then
+        Degrees = []
+    elseif NumBars == 1 then
+        Degrees = [1]
+    elseif NumBars == 2 then
+        Degrees = [1, 1]  % I-I for very short
+    else
+        Degrees = generate_cp_progression(NumBars, Mode, Genre)
+    end.
+
+% CP-based chord progression generation
+generate_cp_progression(NumBars, Mode, Genre) = Degrees =>
+    Degrees = new_list(NumBars),
+    NumDegrees = diatonic_degree_count(Mode),
+    Degrees :: 1..NumDegrees,
+
+    % Hard constraint: start on I
+    Degrees[1] #= 1,
+
+    % Hard constraint: end on I
+    Degrees[NumBars] #= 1,
+
+    % Hard constraint: penultimate chord is V (authentic cadence)
+    if NumBars >= 3 then
+        Degrees[NumBars - 1] #= 5
+    end,
+
+    % Half cadence at midpoint for 4+ bar segments
+    if NumBars >= 8 then
+        MidBar = NumBars // 2,
+        Degrees[MidBar] #= 5
+    end,
+
+    % Genre-specific cadence patterns
+    apply_genre_cadence(Degrees, NumBars, Genre),
+
+    % Prefer common progressions: avoid vii (degree 7) as standalone chord
+    foreach(I in 1..NumBars)
+        Degrees[I] #!= 7  % vii dim is rarely used as a root-position chord
+    end,
+
+    % Valid progressions between consecutive chords
+    % Allow all common progressions; penalize odd ones via soft cost
+    ProgressionCosts = new_list(NumBars - 1),
+    ProgressionCosts :: 0..10,
+    foreach(I in 1..NumBars-1)
+        progression_cost(Degrees[I], Degrees[I+1], ProgressionCosts[I])
+    end,
+    TotalCost #= sum(ProgressionCosts),
+
+    % Variety: at least 3 different chords for 4+ bars
+    if NumBars >= 4 then
+        nvalue(N, Degrees),
+        N #>= min(3, NumBars // 2)
+    end,
+
+    % Solve: minimize progression cost
+    if time_out(solve($[min(TotalCost), ff], Degrees ++ ProgressionCosts ++ [TotalCost]), 1000, Status), Status == success then
+        true
+    else
+        % Fallback: use template
+        Degrees := template_progression(NumBars, Genre)
+    end.
+
+% Count of diatonic degrees for a mode
+diatonic_degree_count(Mode) = N =>
+    Ints = scale_utils.mode_intervals(Mode),
+    Len = length(Ints),
+    if Len >= 7 then N = 7
+    elseif Len >= 5 then N = Len
+    else N = 7
+    end.
+
+% ==============================================================================
+% PROGRESSION COST (SOFT)
+% ==============================================================================
+
+% Cost of moving from chord degree From to To
+% Lower cost = more common/natural progression
+% 0 = very common, 1-3 = common, 4-6 = less common, 7+ = unusual
+progression_cost(From, To, Cost) =>
+    % I can go to anything (cost 0-1)
+    (From #= 1 #/\ To #= 4) #=> (Cost #= 0),  % I-IV
+    (From #= 1 #/\ To #= 5) #=> (Cost #= 0),  % I-V
+    (From #= 1 #/\ To #= 6) #=> (Cost #= 1),  % I-vi
+    (From #= 1 #/\ To #= 2) #=> (Cost #= 1),  % I-ii
+    (From #= 1 #/\ To #= 3) #=> (Cost #= 2),  % I-iii
+    (From #= 1 #/\ To #= 1) #=> (Cost #= 1),  % I-I (repetition)
+
+    % ii is pre-dominant
+    (From #= 2 #/\ To #= 5) #=> (Cost #= 0),  % ii-V
+    (From #= 2 #/\ To #= 1) #=> (Cost #= 2),  % ii-I
+    (From #= 2 #/\ To #= 4) #=> (Cost #= 2),  % ii-IV
+    (From #= 2 #/\ To #= 6) #=> (Cost #= 2),  % ii-vi
+    (From #= 2 #/\ To #= 3) #=> (Cost #= 3),  % ii-iii
+    (From #= 2 #/\ To #= 2) #=> (Cost #= 2),  % ii-ii
+
+    % iii
+    (From #= 3 #/\ To #= 6) #=> (Cost #= 1),  % iii-vi
+    (From #= 3 #/\ To #= 4) #=> (Cost #= 1),  % iii-IV
+    (From #= 3 #/\ To #= 2) #=> (Cost #= 2),  % iii-ii
+    (From #= 3 #/\ To #= 1) #=> (Cost #= 3),  % iii-I
+    (From #= 3 #/\ To #= 5) #=> (Cost #= 2),  % iii-V
+    (From #= 3 #/\ To #= 3) #=> (Cost #= 3),  % iii-iii
+
+    % IV is pre-dominant or plagal
+    (From #= 4 #/\ To #= 5) #=> (Cost #= 0),  % IV-V
+    (From #= 4 #/\ To #= 1) #=> (Cost #= 1),  % IV-I (plagal)
+    (From #= 4 #/\ To #= 2) #=> (Cost #= 1),  % IV-ii
+    (From #= 4 #/\ To #= 6) #=> (Cost #= 2),  % IV-vi
+    (From #= 4 #/\ To #= 3) #=> (Cost #= 3),  % IV-iii
+    (From #= 4 #/\ To #= 4) #=> (Cost #= 2),  % IV-IV
+
+    % V resolves to I
+    (From #= 5 #/\ To #= 1) #=> (Cost #= 0),  % V-I
+    (From #= 5 #/\ To #= 6) #=> (Cost #= 1),  % V-vi (deceptive)
+    (From #= 5 #/\ To #= 4) #=> (Cost #= 2),  % V-IV (retrogression)
+    (From #= 5 #/\ To #= 2) #=> (Cost #= 3),  % V-ii
+    (From #= 5 #/\ To #= 3) #=> (Cost #= 3),  % V-iii
+    (From #= 5 #/\ To #= 5) #=> (Cost #= 1),  % V-V
+
+    % vi
+    (From #= 6 #/\ To #= 2) #=> (Cost #= 0),  % vi-ii
+    (From #= 6 #/\ To #= 4) #=> (Cost #= 0),  % vi-IV
+    (From #= 6 #/\ To #= 5) #=> (Cost #= 1),  % vi-V
+    (From #= 6 #/\ To #= 1) #=> (Cost #= 2),  % vi-I
+    (From #= 6 #/\ To #= 3) #=> (Cost #= 2),  % vi-iii
+    (From #= 6 #/\ To #= 6) #=> (Cost #= 2).  % vi-vi
+
+% ==============================================================================
+% GENRE-SPECIFIC CADENCES
+% ==============================================================================
+
+apply_genre_cadence(Degrees, NumBars, Genre) =>
+    % Jazz/blues: ii-V-I in last 3 bars
+    if (Genre == traditional_jazz ; Genre == blues), NumBars >= 4 then
+        Degrees[NumBars - 2] #= 2
+    end,
+    % Folk: often I-IV-V-I
+    if Genre == folk_traditional, NumBars >= 4 then
+        Degrees[2] #= 4  % Second bar = IV
+    end,
+    % Classical: IV before V-I at end
+    if (Genre == classical_period ; Genre == high_classical ; Genre == galant), NumBars >= 4 then
+        Degrees[NumBars - 2] #= 4  % IV-V-I cadence
+    end.
+
+% ==============================================================================
+% TEMPLATE PROGRESSIONS (FALLBACK)
+% ==============================================================================
+
+% Common progressions as fallback when CP solver fails
+template_progression(NumBars, _Genre) = Degrees =>
+    % Base pattern: I-IV-V-I repeated
+    BasePattern = [1, 4, 5, 1, 1, 6, 4, 5],
+    PatternLen = length(BasePattern),
+    Degrees = new_list(NumBars),
+    foreach(I in 1..NumBars)
+        Idx = ((I - 1) mod PatternLen) + 1,
+        Degrees[I] = BasePattern[Idx]
+    end,
+    % Ensure endings
+    Degrees[NumBars] := 1,
+    if NumBars >= 3 then
+        Degrees[NumBars - 1] := 5
+    end.
+
+% ==============================================================================
+% CHORD TONE COMPUTATION
+% ==============================================================================
+
+% Compute chord tones (pitch classes) for each bar given chord degrees
+% Returns an array where BarChordTones[Bar] = list of pitch classes in that bar's chord
+compute_bar_chord_tones(Degrees, RootPC, Mode) = BarChordTones =>
+    NumBars = length(Degrees),
+    Intervals = mode_intervals_safe(Mode),
+    NumDegrees = length(Intervals),
+    BarChordTones = new_array(NumBars),
+    foreach(B in 1..NumBars)
+        Deg = Degrees[B],
+        if Deg >= 1, Deg =< NumDegrees then
+            ChordRootPC = (RootPC + Intervals[Deg]) mod 12,
+            % Get 3rd and 5th above the chord root (diatonic)
+            ThirdDegIdx = ((Deg - 1 + 2) mod NumDegrees) + 1,
+            FifthDegIdx = ((Deg - 1 + 4) mod NumDegrees) + 1,
+            ThirdPC = (RootPC + Intervals[ThirdDegIdx]) mod 12,
+            FifthPC = (RootPC + Intervals[FifthDegIdx]) mod 12,
+            BarChordTones[B] = [ChordRootPC, ThirdPC, FifthPC]
+        else
+            % Fallback: tonic triad
+            BarChordTones[B] = [RootPC, (RootPC + 4) mod 12, (RootPC + 7) mod 12]
+        end
+    end.
+
+% Safe mode intervals
+mode_intervals_safe(Mode) = Intervals =>
+    Ints = scale_utils.mode_intervals(Mode),
+    if length(Ints) >= 7 then
+        Intervals = Ints
+    else
+        Intervals = scale_utils.mode_intervals(major)
+    end.
+
+% ==============================================================================
+% CHORD ASSIGNMENT CONVERSION
+% ==============================================================================
+
+% Convert chord degrees to chord_assignment structures (for accompaniment.pi)
+% Compatible with harmonizer.pi output format
+degrees_to_chord_assignments(Degrees, RootPC, Mode) = ChordProg =>
+    Intervals = mode_intervals_safe(Mode),
+    NumDegrees = length(Intervals),
+    NumBars = length(Degrees),
+    % Compute bass notes with smooth voice leading
+    BassNotes = compute_bass_notes(Degrees, RootPC, Intervals, NumBars),
+    QualityMode = mode_for_quality(Mode),
+    ChordProg = [build_chord_assignment(B, Degrees[B], RootPC, Intervals, QualityMode, NumDegrees, BassNotes[B])
+                 : B in 1..NumBars].
+
+% Build a single chord_assignment
+build_chord_assignment(Bar, Degree, RootPC, Intervals, QualityMode, NumDegrees, BassNote) = CA =>
+    if Degree >= 1, Degree =< NumDegrees then SafeDeg = Degree else SafeDeg = 1 end,
+    ChordRootPC = (RootPC + Intervals[SafeDeg]) mod 12,
+    Quality = scale_utils.diatonic_quality(QualityMode, SafeDeg),
+    CA = $chord_assignment(Bar, SafeDeg, Quality, ChordRootPC, BassNote).
+
+% Compute bass notes with smooth voice leading
+compute_bass_notes(Degrees, RootPC, Intervals, NumBars) = BassNotes =>
+    BassNotes = new_list(NumBars),
+    NumDegrees = length(Intervals),
+    % First bass near middle of bass register (MIDI 43 = G2)
+    FirstPC = (RootPC + Intervals[Degrees[1]]) mod 12,
+    BassNotes[1] = nearest_pitch_to(FirstPC, 36, 55, 43),
+    foreach(B in 2..NumBars)
+        DegIdx = Degrees[B],
+        if DegIdx >= 1, DegIdx =< NumDegrees then
+            PC = (RootPC + Intervals[DegIdx]) mod 12
+        else
+            PC = RootPC
+        end,
+        BassNotes[B] = nearest_pitch_to(PC, 36, 55, BassNotes[B-1])
+    end.
+
+% Find MIDI pitch with given pitch class closest to Target within range
+nearest_pitch_to(PC, Lo, Hi, Target) = Best =>
+    Candidates = [N : N in Lo..Hi, N mod 12 == PC],
+    if Candidates == [] then
+        Best = Target
+    else
+        Best0 = Candidates[1],
+        BestDist = abs(Best0 - Target),
+        foreach(C in Candidates)
+            D = abs(C - Target),
+            if D < BestDist then
+                Best0 := C,
+                BestDist := D
+            end
+        end,
+        Best = Best0
+    end.
+
+% Map mode to major/minor for quality lookups
+mode_for_quality(minor) = minor.
+mode_for_quality(natural_minor) = minor.
+mode_for_quality(harmonic_minor) = minor.
+mode_for_quality(melodic_minor) = minor.
+mode_for_quality(aeolian) = minor.
+mode_for_quality(dorian) = minor.
+mode_for_quality(phrygian) = minor.
+mode_for_quality(_) = major.
