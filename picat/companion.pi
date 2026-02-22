@@ -25,6 +25,7 @@ import harmonizer.
 import accompaniment.
 import refiner.
 import chord_generator.
+import ornaments.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -96,9 +97,13 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
     % Collect tempo changes for MIDI export
     TempoChanges = collect_tempo_changes(Segments),
 
+    % Generate pedal events (sustain pedal for piano)
+    TotalBarsBasic = sum([get_segment_num_bars(S) : S in Segments]),
+    PedalEventsBasic = midi_export.generate_pedal_events(TotalBarsBasic),
+
     % Export to JSON (for Python MIDI writer)
     println("Exporting to JSON..."),
-    export_session_json(FinalNotes, TempoChanges, OutputPath),
+    export_session_json_with_pedal(FinalNotes, TempoChanges, $meter(4, 4), PedalEventsBasic, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     println("Done! Run midi_writer.py to convert to MIDI."),
@@ -265,10 +270,25 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     println("Applying expression..."),
     ExpressiveNotes = apply_segment_expression(AllNotes, Segments),
 
+    % Apply phrase-level dynamic arcs
+    TotalBarsForPlan = sum([get_segment_num_bars(S) : S in Segments]),
+    DynamicsPlan = humanize.make_standard_plan(TotalBarsForPlan, 80),
+    PlannedNotes = humanize.apply_dynamics_plan(ExpressiveNotes, DynamicsPlan),
+
     % Apply humanization
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
-    FinalMelody = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    HumanizedNotes = humanize.humanize_notes(PlannedNotes, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
+
+    % Add ornaments (genre-appropriate grace notes)
+    OrnamentDensity = get_ornament_density(Preferences),
+    FinalMelody = ornaments.add_ornaments(HumanizedNotes, Genre, OrnamentDensity),
+    if OrnamentDensity > 0.0 then
+        OrnCount = length(FinalMelody) - length(HumanizedNotes),
+        if OrnCount > 0 then
+            printf("  Ornaments: %d grace notes added%n", OrnCount)
+        end
+    end,
 
     % Generate accompaniment
     AccompPattern = get_accomp_preference(Preferences),
@@ -276,11 +296,18 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     FinalNotes = FinalMelody ++ AccompNotes,
 
     % Collect tempo changes
-    TempoChanges = collect_tempo_changes(Segments),
+    TempoChanges = collect_tempo_changes(Segments, Preferences),
+
+    % Extract meter for export (default 4/4)
+    ExportMeter = get_meter_from_preferences(Preferences),
+
+    % Generate pedal events (sustain pedal for piano)
+    TotalBarsGenre = sum([get_segment_num_bars(S) : S in Segments]),
+    PedalEvents = midi_export.generate_pedal_events(TotalBarsGenre),
 
     % Export to JSON
     println("Exporting to JSON..."),
-    export_session_json(FinalNotes, TempoChanges, OutputPath),
+    export_session_json_with_pedal(FinalNotes, TempoChanges, ExportMeter, PedalEvents, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     % Print constraint violation report
@@ -451,7 +478,17 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
     printf("  Form: %s%n", form.form_description(FormType)),
     printf("  Randomness: %.2f%n", Randomness),
     if Genre != none then
-        printf("  Genre: %w%n", Genre)
+        printf("  Genre: %w%n", Genre),
+        StyleOverridesInfo = get_style_overrides(Preferences, Genre),
+        if StyleOverridesInfo != [] then
+            printf("  Section contrast: "),
+            foreach(I in 1..length(StyleOverridesInfo))
+                StyleOverridesInfo[I] = (SL=SG),
+                printf("%w=%w", SL, SG),
+                if I < length(StyleOverridesInfo) then printf(", ") end
+            end,
+            nl
+        end
     end,
     nl,
 
@@ -498,11 +535,18 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
     FinalNotes = FinalMelody ++ AccompNotes,
 
     % Collect tempo changes
-    TempoChanges = collect_tempo_changes(Segments),
+    TempoChanges = collect_tempo_changes(Segments, Preferences),
+
+    % Extract meter for export (default 4/4)
+    ExportMeter2 = get_meter_from_preferences(Preferences),
+
+    % Generate pedal events (sustain pedal for piano)
+    TotalBarsForm = sum([get_segment_num_bars(S) : S in Segments]),
+    PedalEventsForm = midi_export.generate_pedal_events(TotalBarsForm),
 
     % Export to JSON
     println("Exporting to JSON..."),
-    export_session_json(FinalNotes, TempoChanges, OutputPath),
+    export_session_json_with_pedal(FinalNotes, TempoChanges, ExportMeter2, PedalEventsForm, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     println("Done! Run midi_writer.py to convert to MIDI."),
@@ -632,12 +676,27 @@ get_segment_params(segment(_, _, _, _, P, _)) = P.
 get_segment_num_bars(form_segment(_, _, _, _, _, N, _, _, _, _)) = N.
 get_segment_num_bars(segment(_, _, _, _, _, N)) = N.
 
-% Generate all segments with form awareness (with motif memory)
-generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = AllNotes =>
-    AllNotes = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, 1, 0, [], []).
+% Get style overrides from preferences or use defaults
+get_style_overrides(Preferences, BaseGenre) = Overrides =>
+    if find_first_key(Preferences, contrast, ContrastVal) then
+        if ContrastVal == off then
+            Overrides = []
+        else
+            Overrides = form.default_contrast_styles(BaseGenre)
+        end
+    else
+        % Default: auto contrast for form-based generation
+        Overrides = form.default_contrast_styles(BaseGenre)
+    end.
 
-generate_form_segments_helper([], _, _, _, _, _, _, Acc, _MotifIntervals) = flatten(reverse(Acc)).
-generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc, MotifIntervals) = Result =>
+% Generate all segments with form awareness (with motif memory and thematic recall)
+generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = AllNotes =>
+    % Determine style overrides for section contrast
+    StyleOverrides = cond(Genre != none, get_style_overrides(Preferences, Genre), []),
+    AllNotes = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, StyleOverrides, 1, 0, [], [], new_map()).
+
+generate_form_segments_helper([], _, _, _, _, _, _, _, Acc, _MotifIntervals, _SectionPitchMap) = flatten(reverse(Acc)).
+generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, StyleOverrides, SegIndex, CurrentBar, Acc, MotifIntervals, SectionPitchMap) = Result =>
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
     MotifWeight = 50,
@@ -648,14 +707,31 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     SectionLabel = get_form_segment_label(Seg),
     _IsFinal = get_form_segment_is_final(Seg),
 
+    % Determine section-specific genre (style override for contrast)
+    if Genre != none then
+        SectionGenre = form.section_style(SectionLabel, Genre, StyleOverrides)
+    else
+        SectionGenre = none
+    end,
+
     % Transpose key root by section key (relative to C)
     TransposedKeyRoot = KeyRoot + SectionKey,
 
     % Inject segment mood into preferences for emotional constraints
     SegmentMood = get_segment_mood(Seg),
 
+    % Check if this section label has been seen before (thematic recall for ABA form)
+    % If so, inject recall_pitches into preferences to constrain the return section
+    if SectionPitchMap.has_key(SectionLabel) then
+        RecallPitchesF = SectionPitchMap.get(SectionLabel),
+        printf("  Thematic recall: section '%c' returning (%d pitches, 80%% match)%n", SectionLabel, length(RecallPitchesF)),
+        SectionPrefsF = [recall_pitches=RecallPitchesF | Preferences]
+    else
+        SectionPrefsF = Preferences
+    end,
+
     % Check if rhythm mode is active
-    if find_first_key(Preferences, rhythm, RhythmValF), RhythmValF == on then
+    if find_first_key(SectionPrefsF, rhythm, RhythmValF), RhythmValF == on then
         UseRhythmF = true
     else
         UseRhythmF = false
@@ -669,32 +745,32 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     end,
 
     % Determine refinement rounds (only for genre-based generation)
-    NumRoundsF = cond(Genre != none, refiner.get_refine_rounds(Preferences), 1),
+    NumRoundsF = cond(SectionGenre != none, refiner.get_refine_rounds(SectionPrefsF), 1),
 
     % Generate melody (genre-based path uses try_genre_segment; non-genre uses direct calls)
-    if Genre != none then
+    if SectionGenre != none then
         % Genre-based: use try_genre_segment with refinement
-        MoodPrefsF1 = [mood=SegmentMood | Preferences],
-        SegMelodyF1 = try_genre_segment(Params, TransposedKeyRoot, NumBars, Genre, MoodPrefsF1, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
+        MoodPrefsF1 = [mood=SegmentMood | SectionPrefsF],
+        SegMelodyF1 = try_genre_segment(Params, TransposedKeyRoot, NumBars, SectionGenre, MoodPrefsF1, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
 
         if NumRoundsF > 1, SegMelodyF1 != [] then
             PitchesF1 = refiner.extract_pitches(SegMelodyF1),
-            ScoreF1 = refiner.score_for_refinement(PitchesF1, TransposedKeyRoot, Genre, Preferences),
+            ScoreF1 = refiner.score_for_refinement(PitchesF1, TransposedKeyRoot, SectionGenre, SectionPrefsF),
             printf("    Refining (%d rounds)...%n", NumRoundsF),
             printf("    Round 1: score=%d%n", ScoreF1),
             BestScoreF = ScoreF1,
             BestMelodyF = SegMelodyF1,
             foreach(RoundF in 2..NumRoundsF)
                 advance_random_state(RoundF * 73),
-                BoostedPrefsF = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelodyF), TransposedKeyRoot, Genre, Preferences, RoundF),
+                BoostedPrefsF = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelodyF), TransposedKeyRoot, SectionGenre, SectionPrefsF, RoundF),
                 BoostedMoodPrefsF = [mood=SegmentMood | BoostedPrefsF],
                 % Ensure randomness for solver diversity in refinement rounds
                 RefinedParamsF = refiner.ensure_min_randomness(Params, 0.4),
-                CandidateMelodyF = try_genre_segment(RefinedParamsF, TransposedKeyRoot, NumBars, Genre, BoostedMoodPrefsF, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
+                CandidateMelodyF = try_genre_segment(RefinedParamsF, TransposedKeyRoot, NumBars, SectionGenre, BoostedMoodPrefsF, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
                 if CandidateMelodyF != [] then
                     CandidatePitchesF = refiner.extract_pitches(CandidateMelodyF),
                     % Score with base preferences (not boosted) for fair comparison
-                    CandidateScoreF = refiner.score_for_refinement(CandidatePitchesF, TransposedKeyRoot, Genre, Preferences),
+                    CandidateScoreF = refiner.score_for_refinement(CandidatePitchesF, TransposedKeyRoot, SectionGenre, SectionPrefsF),
                     BoostedInfoF = refiner.format_boosted(BoostedPrefsF),
                     printf("    Round %d: score=%d%s%n", RoundF, CandidateScoreF, BoostedInfoF),
                     if CandidateScoreF < BestScoreF then
@@ -724,20 +800,33 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
         end
     end,
 
+    % Store section pitches for thematic recall (only first occurrence of each label)
+    if not SectionPitchMap.has_key(SectionLabel) then
+        SectionPitchesF = motif.extract_pitches_from_melody(SegmentMelody),
+        SectionPitchMap.put(SectionLabel, SectionPitchesF)
+    end,
+
     % Extract motif from first segment
     NewMotifIntervals = cond(MotifIntervals == [],
         motif.extract_motif(SegmentMelody, motif.default_motif_length()),
         MotifIntervals),
 
-    printf("  Segment %2d [%c]: bars %3d-%3d, tempo=%3d, key=%s %w%n",
-           SegIndex, SectionLabel, CurrentBar + 1, CurrentBar + NumBars,
-           get_tempo(Params), pitch_class_name(SectionKey), SectionMode),
+    % Print segment info with section genre if different from base
+    if SectionGenre != none, SectionGenre != Genre then
+        printf("  Segment %2d [%c]: bars %3d-%3d, tempo=%3d, key=%s %w, genre=%w%n",
+               SegIndex, SectionLabel, CurrentBar + 1, CurrentBar + NumBars,
+               get_tempo(Params), pitch_class_name(SectionKey), SectionMode, SectionGenre)
+    else
+        printf("  Segment %2d [%c]: bars %3d-%3d, tempo=%3d, key=%s %w%n",
+               SegIndex, SectionLabel, CurrentBar + 1, CurrentBar + NumBars,
+               get_tempo(Params), pitch_class_name(SectionKey), SectionMode)
+    end,
 
     % Adjust timing
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
-    Result = generate_form_segments_helper(Rest, FormSections, KeyRoot, Genre, Preferences,
-                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals).
+    Result = generate_form_segments_helper(Rest, FormSections, KeyRoot, Genre, Preferences, StyleOverrides,
+                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, SectionPitchMap).
 
 % Pitch class to note name (copied from form.pi for local use)
 pitch_class_name(0) = "C".
@@ -854,6 +943,20 @@ get_accomp_preference(Preferences) = Pattern =>
         Pattern = auto  % Default: auto-select from genre
     end.
 
+% Get ornament density from preferences (0.0 = no ornaments, 1.0 = maximum)
+get_ornament_density(Preferences) = Density =>
+    if find_first_key(Preferences, ornaments, OrnVal) then
+        if OrnVal == off then
+            Density = 0.0
+        elseif number(OrnVal) then
+            Density = OrnVal
+        else
+            Density = 0.5  % Default density when ornaments=on
+        end
+    else
+        Density = 0.3  % Default: light ornamentation
+    end.
+
 % ==============================================================================
 % EXPRESSION AND HUMANIZATION
 % ==============================================================================
@@ -928,17 +1031,41 @@ adjust_note_bar(Note, BarOffset) = AdjustedNote =>
     NewBar = Bar + BarOffset,
     AdjustedNote = $note(Pitch, Duration, $time_pos(NewBar, Beat, Sub), VoiceId, Vel).
 
-% Collect tempo changes for each segment
-collect_tempo_changes(Segments) = Changes =>
-    Changes = collect_tempo_helper(Segments, 1, []).
+% Collect tempo changes for each segment (default: ritardando on)
+collect_tempo_changes(Segments) = collect_tempo_changes(Segments, []).
 
-collect_tempo_helper([], _, Acc) = reverse(Acc).
-collect_tempo_helper([Seg | Rest], CurrentBar, Acc) = Result =>
+% Collect tempo changes with preferences (rit=off disables ritardando)
+collect_tempo_changes(Segments, Preferences) = Changes =>
+    if find_first_key(Preferences, rit, RitVal), RitVal == off then
+        Changes = collect_tempo_simple(Segments, 1, [])
+    else
+        Changes = collect_tempo_with_rit(Segments, 1, [])
+    end.
+
+% Simple: one tempo per segment (original behavior)
+collect_tempo_simple([], _, Acc) = reverse(Acc).
+collect_tempo_simple([Seg | Rest], CurrentBar, Acc) = Result =>
     Params = get_segment_params(Seg),
     Tempo = get_tempo(Params),
     NumBars = get_segment_num_bars(Seg),
     Change = $tempo_change(CurrentBar, Tempo),
-    Result = collect_tempo_helper(Rest, CurrentBar + NumBars, [Change | Acc]).
+    Result = collect_tempo_simple(Rest, CurrentBar + NumBars, [Change | Acc]).
+
+% With ritardando: adds cadential slowdown in last 2 bars of segments >= 4 bars
+collect_tempo_with_rit([], _, Acc) = reverse(Acc).
+collect_tempo_with_rit([Seg | Rest], CurrentBar, Acc) = Result =>
+    Params = get_segment_params(Seg),
+    Tempo = get_tempo(Params),
+    NumBars = get_segment_num_bars(Seg),
+    BaseChange = $tempo_change(CurrentBar, Tempo),
+    if NumBars >= 4 then
+        SectionEndBar = CurrentBar + NumBars - 1,
+        RitChanges = temporal.cadential_ritardando(Tempo, SectionEndBar, 2, 0.8),
+        AllChanges = [BaseChange | RitChanges]
+    else
+        AllChanges = [BaseChange]
+    end,
+    Result = collect_tempo_with_rit(Rest, CurrentBar + NumBars, reverse(AllChanges) ++ Acc).
 
 % ==============================================================================
 % COMMAND LINE INTERFACE
@@ -977,7 +1104,9 @@ main(Args) =>
         Rhythm = get_arg(ParsedOpts, rhythm, off),
         Refine = get_arg(ParsedOpts, refine, 1),
         RefinePiece = get_arg(ParsedOpts, refine_piece, 1),
-        demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece),
+        MeterOpt = get_arg(ParsedOpts, meter, none),
+        RitOpt = get_arg(ParsedOpts, rit, on),
+        demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece, MeterOpt, RitOpt),
         halt
     elseif FirstArg == "path" then
         demo_path(),
@@ -1046,6 +1175,18 @@ main(Args) =>
         run_companion(StartMood, EndMood, Duration, Output, Randomness)
     end.
 
+% Parse meter string like "3/4", "6/8", "3/8", "2/2"
+parse_meter(MeterStr) = Meter =>
+    Parts = split(MeterStr, "/"),
+    if length(Parts) == 2 then
+        Beats = to_integer(Parts[1]),
+        Unit = to_integer(Parts[2]),
+        Meter = $meter(Beats, Unit)
+    else
+        printf("Warning: Invalid meter '%s', using 4/4%n", MeterStr),
+        Meter = $meter(4, 4)
+    end.
+
 % Parse VA coordinate string like "-0.7,-0.3"
 parse_va(VAString) = Mood =>
     Parts = split(VAString, ","),
@@ -1112,6 +1253,8 @@ set_arg(Map, "intensity", Value) = Map =>
     Map.put(intensity, to_atom(Value)).
 set_arg(Map, "accomp", Value) = Map =>
     Map.put(accomp, to_atom(Value)).
+set_arg(Map, "contrast", Value) = Map =>
+    Map.put(contrast, to_atom(Value)).
 set_arg(Map, "rhythm", Value) = Map =>
     Map.put(rhythm, to_atom(Value)).
 set_arg(Map, "count", Value) = Map =>
@@ -1127,6 +1270,18 @@ set_arg(Map, "refine_piece", Value) = Map =>
         Map.put(refine_piece, 3)
     else
         Map.put(refine_piece, to_integer(Value))
+    end.
+set_arg(Map, "meter", Value) = Map =>
+    Map.put(meter, parse_meter(Value)).
+set_arg(Map, "rit", Value) = Map =>
+    Map.put(rit, to_atom(Value)).
+set_arg(Map, "ornaments", Value) = Map =>
+    if Value == "off" then
+        Map.put(ornaments, off)
+    elseif Value == "on" then
+        Map.put(ornaments, on)
+    else
+        Map.put(ornaments, to_float(Value))
     end.
 set_arg(Map, Key, Value) = Map =>
     % Check for weight:constraint=value pattern
@@ -1161,6 +1316,14 @@ join([X|Rest], Sep) = X ++ Sep ++ join(Rest, Sep).
 find_first_key([], _Key, _Value) => fail.
 find_first_key([K=V|_Rest], Key, Value) ?=> K == Key, Value = V.
 find_first_key([_|Rest], Key, Value) => find_first_key(Rest, Key, Value).
+
+% Extract meter from preferences list, defaulting to 4/4
+get_meter_from_preferences(Preferences) = Meter =>
+    if find_first_key(Preferences, meter, M) then
+        Meter = M
+    else
+        Meter = $meter(4, 4)
+    end.
 
 % Print usage information
 print_usage() =>
@@ -1197,6 +1360,9 @@ print_usage() =>
     println("                   ternary: ABA - statement, contrast, return"),
     println("                   rondo:   ABACA - recurring refrain with episodes"),
     println("                   through: no repetition (free form)"),
+    println("  contrast=MODE    Section contrast mode: auto (default), off"),
+    println("                   auto: B/C sections use contrasting genre"),
+    println("                   off: all sections use the same genre"),
     nl,
     println("Refinement Options:"),
     println("  refine=N         Per-segment refinement: generate each segment N times,"),
@@ -1204,10 +1370,14 @@ print_usage() =>
     println("  refine_piece=N   Per-piece refinement: generate entire piece N times,"),
     println("                   keep best (default: 1 = no refinement, 'on' = 3)"),
     nl,
-    println("Rhythm Options:"),
+    println("Rhythm & Tempo Options:"),
     println("  rhythm=on        Enable variable rhythm (default: off/uniform durations)"),
     println("                   Generates melodies with mixed note durations"),
     println("                   Requires genre= to be set"),
+    println("  meter=N/M        Time signature (default: 4/4)"),
+    println("                   Supported: 3/4, 6/8, 3/8, 2/2, 2/4"),
+    println("  rit=off          Disable cadential ritardando (default: on)"),
+    println("                   When on, last 2 bars of segments >= 4 bars slow to 80% tempo"),
     nl,
     println("Genre Options (for weighted constraint optimization):"),
     println("  genre=GENRE      Use genre-based constraint selection"),
@@ -1245,6 +1415,8 @@ print_usage() =>
     println("Rhythm examples:"),
     println("  picat companion.pi demo genre=classical_period rhythm=on"),
     println("  picat companion.pi from=calm_peaceful to=energized genre=baroque rhythm=on"),
+    println("  picat companion.pi demo genre=classical_period rhythm=on meter=3/4"),
+    println("  picat companion.pi demo genre=baroque rhythm=on meter=6/8"),
     nl,
     println("After generating the JSON file, run:"),
     println("  python scripts/midi_writer.py session.json session.mid").
@@ -1284,6 +1456,26 @@ build_preferences(ParsedArgs) = Preferences =>
     if RefinePiece > 1 then
         Prefs := Prefs ++ [refine_piece=RefinePiece]
     end,
+    % Add meter (time signature)
+    MeterVal = get_arg(ParsedArgs, meter, none),
+    if MeterVal != none then
+        Prefs := Prefs ++ [meter=MeterVal]
+    end,
+    % Add ritardando preference
+    RitVal = get_arg(ParsedArgs, rit, on),
+    if RitVal == off then
+        Prefs := Prefs ++ [rit=off]
+    end,
+    % Add contrast preference for form sections
+    Contrast = get_arg(ParsedArgs, contrast, auto),
+    if Contrast != auto then
+        Prefs := Prefs ++ [contrast=Contrast]
+    end,
+    % Add ornaments preference
+    OrnVal = get_arg(ParsedArgs, ornaments, none),
+    if OrnVal != none then
+        Prefs := Prefs ++ [ornaments=OrnVal]
+    end,
     Preferences = Prefs.
 
 % Print all available genres
@@ -1312,8 +1504,8 @@ demo() =>
 demo_with_randomness(Randomness) =>
     run_companion_presets(sad_depressed, energized, 60, "session.json", Randomness).
 
-% Quick demo with genre, accompaniment, rhythm, and refinement options
-demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece) =>
+% Quick demo with genre, accompaniment, rhythm, refinement, meter, and rit options
+demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece, MeterOpt, RitOpt) =>
     % Build preferences list
     Prefs = cond(Accomp != auto, [accomp=Accomp], []),
     if Rhythm == on then
@@ -1324,6 +1516,12 @@ demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece) =>
     end,
     if RefinePiece > 1 then
         Prefs := Prefs ++ [refine_piece=RefinePiece]
+    end,
+    if MeterOpt != none then
+        Prefs := Prefs ++ [meter=MeterOpt]
+    end,
+    if RitOpt == off then
+        Prefs := Prefs ++ [rit=off]
     end,
     % If genre specified, use run_companion_with_genre; otherwise use run_companion_presets
     if Genre != none then

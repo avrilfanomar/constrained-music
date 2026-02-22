@@ -32,8 +32,8 @@ generate_progression(NumBars, Mode, Genre) = Degrees =>
 % CP-based chord progression generation
 generate_cp_progression(NumBars, Mode, Genre) = Degrees =>
     Degrees = new_list(NumBars),
-    NumDegrees = diatonic_degree_count(Mode),
-    Degrees :: 1..NumDegrees,
+    MaxDeg = max_chord_degree(Genre),
+    Degrees :: 1..MaxDeg,
 
     % Hard constraint: start on I
     Degrees[1] #= 1,
@@ -55,9 +55,39 @@ generate_cp_progression(NumBars, Mode, Genre) = Degrees =>
     % Genre-specific cadence patterns
     apply_genre_cadence(Degrees, NumBars, Genre),
 
-    % Prefer common progressions: avoid vii (degree 7) as standalone chord
+    % Prefer common progressions: avoid vii (degree 7 in diatonic) as standalone chord
     foreach(I in 1..NumBars)
         Degrees[I] #!= 7  % vii dim is rarely used as a root-position chord
+    end,
+
+    % --- Chromatic chord resolution constraints ---
+    if MaxDeg >= 8 then
+        foreach(I in 1..NumBars-1)
+            % V/V (degree 7 is blocked above, so 8+ are chromatic)
+            % bVI (degree 8) resolves to IV (4) or V (5)
+            (Degrees[I] #= 8) #=> (Degrees[I+1] #= 4 #\/ Degrees[I+1] #= 5)
+        end
+    end,
+    if MaxDeg >= 9 then
+        foreach(I in 1..NumBars-1)
+            % bII Neapolitan (degree 9) resolves to V (5)
+            (Degrees[I] #= 9) #=> (Degrees[I+1] #= 5)
+        end
+    end,
+
+    % Chromatic chords cannot appear in first or last position
+    if MaxDeg >= 8 then
+        Degrees[1] #=< 6,
+        Degrees[NumBars] #=< 6,
+        if NumBars >= 3 then
+            Degrees[NumBars - 1] #=< 6  % penultimate is V, but enforce diatonic
+        end
+    end,
+
+    % Limit chromatic chord usage: at most 2 per progression
+    if MaxDeg >= 8 then
+        ChromCount :: 0..2,
+        ChromCount #= sum([(Degrees[I] #> 6) : I in 1..NumBars])
     end,
 
     % Valid progressions between consecutive chords
@@ -91,6 +121,34 @@ diatonic_degree_count(Mode) = N =>
     elseif Len >= 5 then N = Len
     else N = 7
     end.
+
+% ==============================================================================
+% GENRE-DEPENDENT CHROMATIC CHORD ACCESS
+% ==============================================================================
+% Degrees 1-6 = diatonic (no vii), 8 = bVI, 9 = bII (Neapolitan)
+% Degree 7 is blocked (vii dim) — chromatic chords start at 8.
+%
+% MaxDeg=6: diatonic only (folk, sacred, children, minimalist, contemporary)
+% MaxDeg=8: diatonic + bVI (jazz)
+% MaxDeg=9: diatonic + bVI + bII (romantic, sturm_und_drang)
+%
+% Note: V/V (secondary dominant) is NOT a separate degree — it uses the
+% existing diatonic degree infrastructure. Instead, V/V pitch classes are
+% handled in compute_bar_chord_tones via a special check when degree 5
+% is preceded by a chord whose root is a whole step above tonic.
+% We keep it simple: extended degrees are borrowed chords only.
+
+max_chord_degree(classical_period) = 6.
+max_chord_degree(high_classical) = 6.
+max_chord_degree(baroque) = 6.
+max_chord_degree(galant) = 6.
+max_chord_degree(romantic) = 9.
+max_chord_degree(romantic_piano) = 9.
+max_chord_degree(sturm_und_drang) = 9.
+max_chord_degree(traditional_jazz) = 8.
+max_chord_degree(blues) = 8.
+max_chord_degree(modal) = 8.
+max_chord_degree(_) = 6.  % Default: diatonic only
 
 % ==============================================================================
 % PROGRESSION COST (SOFT)
@@ -146,7 +204,42 @@ progression_cost(From, To, Cost) =>
     (From #= 6 #/\ To #= 5) #=> (Cost #= 1),  % vi-V
     (From #= 6 #/\ To #= 1) #=> (Cost #= 2),  % vi-I
     (From #= 6 #/\ To #= 3) #=> (Cost #= 2),  % vi-iii
-    (From #= 6 #/\ To #= 6) #=> (Cost #= 2).  % vi-vi
+    (From #= 6 #/\ To #= 6) #=> (Cost #= 2),  % vi-vi
+
+    % --- Chromatic chord progression costs ---
+
+    % bVI (degree 8) - borrowed from parallel minor
+    % Good approach: from IV or I; resolves to IV or V
+    (From #= 1 #/\ To #= 8) #=> (Cost #= 2),  % I-bVI (chromatic color)
+    (From #= 4 #/\ To #= 8) #=> (Cost #= 2),  % IV-bVI (smooth)
+    (From #= 6 #/\ To #= 8) #=> (Cost #= 2),  % vi-bVI (chromatic mediant)
+    (From #= 3 #/\ To #= 8) #=> (Cost #= 3),  % iii-bVI
+    (From #= 2 #/\ To #= 8) #=> (Cost #= 3),  % ii-bVI
+    (From #= 5 #/\ To #= 8) #=> (Cost #= 3),  % V-bVI (deceptive to bVI)
+    (From #= 8 #/\ To #= 5) #=> (Cost #= 0),  % bVI-V (standard resolution)
+    (From #= 8 #/\ To #= 4) #=> (Cost #= 1),  % bVI-IV (also common)
+    (From #= 8 #/\ To #= 1) #=> (Cost #= 3),  % bVI-I (less common)
+    (From #= 8 #/\ To #= 2) #=> (Cost #= 3),  % bVI-ii
+    (From #= 8 #/\ To #= 3) #=> (Cost #= 4),  % bVI-iii
+    (From #= 8 #/\ To #= 6) #=> (Cost #= 3),  % bVI-vi
+    (From #= 8 #/\ To #= 8) #=> (Cost #= 5),  % bVI-bVI (avoid repetition)
+    (From #= 8 #/\ To #= 9) #=> (Cost #= 4),  % bVI-bII
+
+    % bII Neapolitan (degree 9) - typically resolves to V
+    (From #= 4 #/\ To #= 9) #=> (Cost #= 1),  % IV-bII (common approach)
+    (From #= 2 #/\ To #= 9) #=> (Cost #= 2),  % ii-bII (chromatic slide)
+    (From #= 1 #/\ To #= 9) #=> (Cost #= 2),  % I-bII
+    (From #= 6 #/\ To #= 9) #=> (Cost #= 2),  % vi-bII
+    (From #= 3 #/\ To #= 9) #=> (Cost #= 3),  % iii-bII
+    (From #= 5 #/\ To #= 9) #=> (Cost #= 4),  % V-bII (unusual)
+    (From #= 9 #/\ To #= 5) #=> (Cost #= 0),  % bII-V (standard resolution)
+    (From #= 9 #/\ To #= 1) #=> (Cost #= 3),  % bII-I (less common)
+    (From #= 9 #/\ To #= 4) #=> (Cost #= 3),  % bII-IV
+    (From #= 9 #/\ To #= 2) #=> (Cost #= 3),  % bII-ii
+    (From #= 9 #/\ To #= 3) #=> (Cost #= 4),  % bII-iii
+    (From #= 9 #/\ To #= 6) #=> (Cost #= 4),  % bII-vi
+    (From #= 9 #/\ To #= 8) #=> (Cost #= 3),  % bII-bVI
+    (From #= 9 #/\ To #= 9) #=> (Cost #= 5).  % bII-bII (avoid repetition)
 
 % ==============================================================================
 % GENRE-SPECIFIC CADENCES
@@ -208,10 +301,23 @@ compute_bar_chord_tones(Degrees, RootPC, Mode) = BarChordTones =>
             FifthPC = (RootPC + Intervals[FifthDegIdx]) mod 12,
             BarChordTones[B] = [ChordRootPC, ThirdPC, FifthPC]
         else
-            % Fallback: tonic triad
-            BarChordTones[B] = [RootPC, (RootPC + 4) mod 12, (RootPC + 7) mod 12]
+            % Chromatic chord pitch classes
+            BarChordTones[B] = chromatic_chord_pcs(Deg, RootPC)
         end
     end.
+
+% Pitch classes for chromatic (borrowed) chords — always major triads
+% Degree 8 = bVI: major chord a minor 6th above tonic
+% Degree 9 = bII (Neapolitan): major chord a half step above tonic
+chromatic_chord_pcs(8, RootPC) = PCs =>
+    ChordRoot = (RootPC + 8) mod 12,
+    PCs = [ChordRoot, (ChordRoot + 4) mod 12, (ChordRoot + 7) mod 12].
+chromatic_chord_pcs(9, RootPC) = PCs =>
+    ChordRoot = (RootPC + 1) mod 12,
+    PCs = [ChordRoot, (ChordRoot + 4) mod 12, (ChordRoot + 7) mod 12].
+chromatic_chord_pcs(_, RootPC) = PCs =>
+    % Fallback: tonic triad
+    PCs = [RootPC, (RootPC + 4) mod 12, (RootPC + 7) mod 12].
 
 % Safe mode intervals
 mode_intervals_safe(Mode) = Intervals =>
@@ -240,10 +346,25 @@ degrees_to_chord_assignments(Degrees, RootPC, Mode) = ChordProg =>
 
 % Build a single chord_assignment
 build_chord_assignment(Bar, Degree, RootPC, Intervals, QualityMode, NumDegrees, BassNote) = CA =>
-    if Degree >= 1, Degree =< NumDegrees then SafeDeg = Degree else SafeDeg = 1 end,
-    ChordRootPC = (RootPC + Intervals[SafeDeg]) mod 12,
-    Quality = scale_utils.diatonic_quality(QualityMode, SafeDeg),
-    CA = $chord_assignment(Bar, SafeDeg, Quality, ChordRootPC, BassNote).
+    if Degree >= 1, Degree =< NumDegrees then
+        % Diatonic chord
+        ChordRootPC = (RootPC + Intervals[Degree]) mod 12,
+        Quality = scale_utils.diatonic_quality(QualityMode, Degree),
+        CA = $chord_assignment(Bar, Degree, Quality, ChordRootPC, BassNote)
+    elseif Degree == 8 then
+        % bVI — borrowed from parallel minor, always major quality
+        ChordRootPC = (RootPC + 8) mod 12,
+        CA = $chord_assignment(Bar, 8, major, ChordRootPC, BassNote)
+    elseif Degree == 9 then
+        % bII Neapolitan — always major quality
+        ChordRootPC = (RootPC + 1) mod 12,
+        CA = $chord_assignment(Bar, 9, major, ChordRootPC, BassNote)
+    else
+        % Fallback: tonic
+        ChordRootPC = (RootPC + Intervals[1]) mod 12,
+        Quality = scale_utils.diatonic_quality(QualityMode, 1),
+        CA = $chord_assignment(Bar, 1, Quality, ChordRootPC, BassNote)
+    end.
 
 % Compute bass notes with smooth voice leading
 compute_bass_notes(Degrees, RootPC, Intervals, NumBars) = BassNotes =>

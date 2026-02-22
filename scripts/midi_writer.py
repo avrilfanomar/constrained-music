@@ -14,6 +14,7 @@ Requirements:
 """
 
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -87,8 +88,25 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
     current_tempo = initial_tempo
     added_tempos = {0}  # Track which beat positions have tempo changes
 
+    # Read time signature from metadata (default 4/4)
+    time_sig = metadata.get('time_signature', {'beats': 4, 'beat_unit': 4})
+    beats_per_bar = time_sig['beats']
+    beat_unit = time_sig['beat_unit']
+
+    # Add time signature to MIDI
+    # MIDIFile.addTimeSignature(track, time, numerator, denominator_power, clocks_per_tick, notes_per_quarter)
+    denom_power = int(math.log2(beat_unit))
+    midi.addTimeSignature(0, 0, beats_per_bar, denom_power, 24, 8)
+
+    print(f"  Time signature: {beats_per_bar}/{beat_unit}")
+
     # Convert notes to MIDI events
-    beats_per_bar = 4  # Assuming 4/4 time
+
+    # Pre-compute timing constants from time signature
+    # quarter_beats_per_bar = how many quarter notes fit in one bar
+    quarter_beats_per_bar = beats_per_bar * (4 / beat_unit)
+    # Each beat in the time signature = 4/beat_unit quarter notes
+    quarter_beats_per_beat = 4 / beat_unit
 
     for note in notes:
         pitch = note['pitch']
@@ -103,12 +121,12 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
         track_idx = voice_to_track(voice)
         channel = min(track_idx, 15)
 
-        # Calculate start time in beats (0-indexed)
-        start_beat = (bar - 1) * beats_per_bar + (beat - 1) + sub
+        # Calculate start time in quarter-note beats (0-indexed)
+        start_beat = (bar - 1) * quarter_beats_per_bar + (beat - 1) * quarter_beats_per_beat + sub * quarter_beats_per_beat
 
-        # Calculate duration in beats
-        # duration is a fraction of a whole note (4 beats in 4/4)
-        duration_beats = (dur_num * beats_per_bar) / dur_den
+        # Calculate duration in beats (quarter notes, the MIDI standard beat unit)
+        # duration is a fraction of a whole note; 1 whole note = 4 quarter-note beats
+        duration_beats = (dur_num * 4) / dur_den
 
         # Check for tempo change at this bar (on track 0 only)
         if bar in tempo_map and start_beat not in added_tempos:
@@ -120,6 +138,22 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
 
         # Add note to its track
         midi.addNote(track_idx, channel, pitch, start_beat, duration_beats, velocity)
+
+    # Add sustain pedal events (CC64)
+    pedal_events = data.get('pedal_events', [])
+    if pedal_events:
+        print(f"  Pedal events: {len(pedal_events)}")
+        for pe in pedal_events:
+            bar = pe['bar']
+            beat = pe['beat']
+            on = pe['on']
+            # Calculate time in quarter-note beats
+            time = (bar - 1) * quarter_beats_per_bar + (beat - 1) * quarter_beats_per_beat
+            # CC64 = sustain pedal, value 127 = on, 0 = off
+            value = 127 if on else 0
+            # Add to accompaniment track if exists, otherwise track 0
+            pedal_track = 1 if has_accomp else 0
+            midi.addControllerEvent(pedal_track, min(pedal_track, 15), time, 64, value)
 
     # Write MIDI file
     with open(midi_path, 'wb') as f:

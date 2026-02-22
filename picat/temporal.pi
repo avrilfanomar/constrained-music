@@ -350,3 +350,48 @@ is_downbeat(_) => fail.
 % Calculate total time for a piece
 piece_duration(NumBars, Meter, Tempo) = DurationSecs =>
     DurationSecs = seconds_per_bar(Tempo, Meter) * NumBars.
+
+% ==============================================================================
+% INTRA-SEGMENT TEMPO CHANGES
+% ==============================================================================
+
+% Generate cadential ritardando tempo events
+% Slows down over the last N bars of a section, ending at TargetRatio of original tempo
+% Returns list of tempo_change(Bar, BPM) structures
+cadential_ritardando(BaseTempo, SectionEndBar, NumSlowBars, TargetRatio) = Changes =>
+    if NumSlowBars =< 0 then
+        Changes = []
+    else
+        StartBar = max(1, SectionEndBar - NumSlowBars + 1),
+        TargetTempo = round(BaseTempo * TargetRatio),
+        Changes = rit_helper(BaseTempo, TargetTempo, StartBar, SectionEndBar, NumSlowBars)
+    end.
+
+rit_helper(BaseTempo, TargetTempo, StartBar, EndBar, NumBars) = Changes =>
+    TempoDiff = TargetTempo - BaseTempo,
+    Changes = [],
+    foreach(Bar in StartBar..EndBar)
+        Frac = (Bar - StartBar + 1) / NumBars,
+        BarTempo = round(BaseTempo + TempoDiff * Frac),
+        Changes := Changes ++ [$tempo_change(Bar, BarTempo)]
+    end.
+
+% Generate accelerando tempo events
+% Speeds up over N bars from StartBar
+accelerando(BaseTempo, StartBar, NumBars, TargetRatio) = Changes =>
+    if NumBars =< 0 then
+        Changes = []
+    else
+        TargetTempo = round(BaseTempo * TargetRatio),
+        EndBar = StartBar + NumBars - 1,
+        Changes = accel_helper(BaseTempo, TargetTempo, StartBar, EndBar, NumBars)
+    end.
+
+accel_helper(BaseTempo, TargetTempo, StartBar, EndBar, NumBars) = Changes =>
+    TempoDiff = TargetTempo - BaseTempo,
+    Changes = [],
+    foreach(Bar in StartBar..EndBar)
+        Frac = (Bar - StartBar + 1) / NumBars,
+        BarTempo = round(BaseTempo + TempoDiff * Frac),
+        Changes := Changes ++ [$tempo_change(Bar, BarTempo)]
+    end.

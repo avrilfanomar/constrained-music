@@ -415,13 +415,40 @@ genre_profile(
     [max_interval=7, tempo_range=(70,160), accomp_pattern=arpeggiated]
 ).
 
+% ROMANTIC PIANO (Chopin, Liszt, Fur Elise-era Beethoven)
+% Very wide range, compound intervals, expressive leaps, demanding technique
+genre_profile(
+    romantic_piano,
+    romantic,
+    [min_range, max_consecutive_repeats],
+    [
+        (chord_tone_on_strong_beats, 80),
+        (phrase_ends_stable, 75),
+        (min_unique_pitches, 70),
+        (no_repetitive_intervals, 55),
+        (leading_tone_resolution, 55),
+        (single_climax, 50),
+        (consonant_leaps_only, 40),
+        (compound_interval_recovery, 65),
+        (peak_approach_exit, 45),
+        (large_leap_recovery, 40),
+        (register_consistency, 30),
+        (prefer_smaller_intervals, 25),
+        (weak_beat_justified, 35),
+        (sequential_repetition, 45),
+        (register_target, 40),
+        (consonant_outline, 40)
+    ],
+    [max_interval=14, tempo_range=(40,180), min_range=10, accomp_pattern=arpeggiated]
+).
+
 % ==============================================================================
 % GENRE QUERY FUNCTIONS
 % ==============================================================================
 
 % Get all available genres
 all_genres() = [
-    classical_period, baroque, romantic, traditional_jazz,
+    classical_period, baroque, romantic, romantic_piano, traditional_jazz,
     folk_traditional, contemporary, sacred_chant, children_songs,
     minimalist, modal, blues, galant, high_classical, sturm_und_drang
 ].
@@ -509,6 +536,8 @@ genre_description(high_classical) =
     "High Classical (Mozart/Haydn mature): Maximum structural constraints, balanced phrases".
 genre_description(sturm_und_drang) =
     "Sturm und Drang: Dramatic, wider intervals, expressive intensity".
+genre_description(romantic_piano) =
+    "Romantic Piano (Chopin, Liszt, Beethoven): Wide range, compound intervals, virtuosic".
 genre_description(_) = "Unknown genre".
 
 % Print all genre summaries
@@ -664,6 +693,14 @@ rhythm_profile(sturm_und_drang) = [
     (strong_phrase_start, 55),
     (rhythmic_cadence, 50),
     (no_short_note_isolation, 40)
+].
+
+% Romantic Piano - expressive timing, dramatic
+rhythm_profile(romantic_piano) = [
+    (opening_note_duration, 50),
+    (strong_phrase_start, 45),
+    (rhythmic_cadence, 50),
+    (no_short_note_isolation, 35)
 ].
 
 % Catch-all for unknown genres (must be contiguous with other rhythm_profile clauses)

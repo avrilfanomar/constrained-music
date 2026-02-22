@@ -275,3 +275,49 @@ print_form_structure(FormType, Sections) =>
     foreach(S in Sections)
         println("  " ++ section_description(S))
     end.
+
+% ==============================================================================
+% SECTION STYLE OVERRIDES
+% ==============================================================================
+% Map section labels to genre overrides for contrast between sections.
+% In ABA form, A sections can be lyrical (galant) while B is dramatic (sturm_und_drang).
+
+% Get style override for a section label given a base genre
+% Returns the genre to use for generation, or the base genre if no override
+section_style(Label, BaseGenre, Overrides) = Style =>
+    if find_override(Label, Overrides, S) then
+        Style = S
+    else
+        Style = BaseGenre
+    end.
+
+% Find override for a label in a list of label=genre pairs
+find_override(_Label, [], _Genre) => fail.
+find_override(Label, [L=G | _Rest], Genre) ?=>
+    Label == L, Genre = G.
+find_override(Label, [_ | Rest], Genre) =>
+    find_override(Label, Rest, Genre).
+
+% Default contrast styles for common forms
+% Returns a list of label=genre pairs
+default_contrast_styles(BaseGenre) = Overrides =>
+    ContrastGenre = contrast_genre(BaseGenre),
+    Overrides = [b=ContrastGenre, c=ContrastGenre].
+
+% Get a contrasting genre for B sections
+contrast_genre(classical_period) = sturm_und_drang.
+contrast_genre(galant) = sturm_und_drang.
+contrast_genre(high_classical) = sturm_und_drang.
+contrast_genre(baroque) = romantic.
+contrast_genre(romantic) = baroque.
+contrast_genre(romantic_piano) = sturm_und_drang.
+contrast_genre(folk_traditional) = modal.
+contrast_genre(sacred_chant) = modal.
+contrast_genre(children_songs) = folk_traditional.
+contrast_genre(minimalist) = modal.
+contrast_genre(modal) = romantic.
+contrast_genre(blues) = traditional_jazz.
+contrast_genre(traditional_jazz) = blues.
+contrast_genre(contemporary) = minimalist.
+contrast_genre(sturm_und_drang) = galant.
+contrast_genre(_Genre) = _Genre.  % Default: no contrast

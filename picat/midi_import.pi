@@ -1,0 +1,178 @@
+% midi_import.pi - Import MIDI data from .dat format
+%
+% Reads .dat files produced by scripts/midi_reader.py and converts to
+% internal $note() structures for use with variation/continuation/analysis.
+%
+% Usage workflow:
+%   1. python scripts/midi_reader.py input.mid output.json
+%      (also produces output.dat)
+%   2. In Picat: import midi_import.
+%      Notes = midi_import.import_dat("output.dat")
+%
+% DAT format (one record per line):
+%   HEADER num_notes num_tempo_changes beats beat_unit
+%   TEMPO bar bpm
+%   NOTE pitch dur_num dur_den bar beat sub voice velocity
+
+module midi_import.
+
+import music_types.
+import util.
+
+% ==============================================================================
+% MAIN IMPORT FUNCTION
+% ==============================================================================
+
+% Import notes from a .dat file produced by midi_reader.py
+% Returns: (Notes, TempoChanges, TimeSig)
+%   Notes: list of $note() structures
+%   TempoChanges: list of $tempo_change(Bar, BPM)
+%   TimeSig: $meter(Beats, BeatUnit)
+import_dat(FilePath) = Notes =>
+    (Notes, _, _) = import_dat_full(FilePath).
+
+% Full import returning all data
+import_dat_full(FilePath) = (Notes, TempoChanges, TimeSig) =>
+    FD = open(FilePath, read),
+    % Read header
+    HeaderTag = read_atom(FD),
+    if HeaderTag != 'HEADER' then
+        close(FD),
+        throw($import_error(bad_header, FilePath))
+    end,
+    NumNotes = read_int(FD),
+    NumTempos = read_int(FD),
+    TSBeats = read_int(FD),
+    TSUnit = read_int(FD),
+    TimeSig = $meter(TSBeats, TSUnit),
+
+    % Read tempo changes
+    TempoChanges = new_list(NumTempos),
+    foreach(I in 1..NumTempos)
+        Tag = read_atom(FD),
+        if Tag != 'TEMPO' then
+            close(FD),
+            throw($import_error(expected_tempo, I))
+        end,
+        TBar = read_int(FD),
+        TBPM = read_int(FD),
+        TempoChanges[I] = $tempo_change(TBar, TBPM)
+    end,
+
+    % Read notes
+    Notes = new_list(NumNotes),
+    foreach(I in 1..NumNotes)
+        Tag = read_atom(FD),
+        if Tag != 'NOTE' then
+            close(FD),
+            throw($import_error(expected_note, I))
+        end,
+        Pitch = read_int(FD),
+        DurNum = read_int(FD),
+        DurDen = read_int(FD),
+        NBar = read_int(FD),
+        NBeat = read_int(FD),
+        NSub = read_real(FD),
+        Voice = read_int(FD),
+        Velocity = read_int(FD),
+        Octave = Pitch // 12 - 1,
+        Notes[I] = $note(
+            $pitch(midi, Pitch, Octave),
+            $duration(DurNum, DurDen),
+            $time_pos(NBar, NBeat, NSub),
+            Voice,
+            Velocity
+        )
+    end,
+
+    close(FD).
+
+% ==============================================================================
+% COMMAND-LINE IMPORT (calls Python midi_reader.py)
+% ==============================================================================
+
+% Import directly from a .mid file by invoking midi_reader.py
+% Returns: (Notes, TempoChanges, TimeSig)
+import_midi(MidiPath) = Notes =>
+    (Notes, _, _) = import_midi_full(MidiPath).
+
+import_midi_full(MidiPath) = (Notes, TempoChanges, TimeSig) =>
+    % Derive .dat path from .mid path
+    BasePath = replace_suffix(MidiPath, ".dat"),
+    JsonPath = replace_suffix(MidiPath, ".json"),
+    % Run Python converter
+    Cmd = "python3 scripts/midi_reader.py " ++ MidiPath ++ " " ++ JsonPath,
+    ExitCode = command(Cmd),
+    if ExitCode != 0 then
+        throw($import_error(midi_reader_failed, MidiPath, ExitCode))
+    end,
+    % Read the .dat file
+    (Notes, TempoChanges, TimeSig) = import_dat_full(BasePath).
+
+% Replace file extension suffix
+replace_suffix(Path, NewSuffix) = NewPath =>
+    % Find last dot
+    Chars = to_array(Path),
+    LastDot = 0,
+    foreach(I in 1..len(Chars))
+        if Chars[I] == '.' then
+            LastDot := I
+        end
+    end,
+    if LastDot > 0 then
+        NewPath = slice(Path, 1, LastDot - 1) ++ NewSuffix
+    else
+        NewPath = Path ++ NewSuffix
+    end.
+
+% ==============================================================================
+% ANALYSIS UTILITIES
+% ==============================================================================
+
+% Extract just MIDI pitch values from imported notes
+extract_pitches(Notes) = [P : $note($pitch(midi, P, _), _, _, _, _) in Notes].
+
+% Get pitch range (max - min) in semitones
+pitch_range(Notes) = Range =>
+    Pitches = extract_pitches(Notes),
+    Range = max(Pitches) - min(Pitches).
+
+% Count total bars
+num_bars(Notes) = MaxBar =>
+    MaxBar = max([Bar : $note(_, _, $time_pos(Bar, _, _), _, _) in Notes]).
+
+% Get melody notes only (voice < 10)
+melody_notes(Notes) = [N : N in Notes, N = $note(_, _, _, V, _), V < 10].
+
+% Get accompaniment notes only (voice >= 10)
+accomp_notes(Notes) = [N : N in Notes, N = $note(_, _, _, V, _), V >= 10].
+
+% Get notes in a specific bar
+notes_in_bar(Notes, Bar) = [N : N in Notes, N = $note(_, _, $time_pos(B, _, _), _, _), B == Bar].
+
+% Print import summary
+print_summary(Notes) =>
+    Pitches = extract_pitches(Notes),
+    printf("Imported notes: %d%n", length(Notes)),
+    printf("  Bars: %d%n", num_bars(Notes)),
+    printf("  Pitch range: %d-%d (%d semitones)%n",
+           min(Pitches), max(Pitches), max(Pitches) - min(Pitches)),
+    MelodyCount = length(melody_notes(Notes)),
+    AccompCount = length(accomp_notes(Notes)),
+    printf("  Melody notes: %d%n", MelodyCount),
+    if AccompCount > 0 then
+        printf("  Accompaniment notes: %d%n", AccompCount)
+    end.
+
+% Print detailed note list (first N notes)
+print_notes(Notes, MaxCount) =>
+    NoteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
+    Count = min(MaxCount, length(Notes)),
+    foreach(I in 1..Count)
+        Notes[I] = $note($pitch(midi, Midi, _), $duration(DN, DD),
+                         $time_pos(Bar, Beat, _Sub), Voice, Vel),
+        NoteName = NoteNames[(Midi mod 12) + 1],
+        Octave = Midi // 12 - 1,
+        printf("  %3d: %s%d (bar %d, beat %d, dur=%d/%d, vel=%d, voice=%d)%n",
+               I, NoteName, Octave, Bar, Beat, DN, DD, Vel, Voice)
+    end.

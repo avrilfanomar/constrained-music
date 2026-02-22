@@ -15,6 +15,7 @@
 #   --all           Generate all outputs (MIDI, LilyPond, sampler)
 #   --output <name> Output file base name (default: derived from args)
 #   --player <p>    Specify MIDI player: timidity, fluidsynth, vlc, mpv
+#   --import <file> Import a MIDI file to JSON + DAT format (no Picat run)
 
 set -euo pipefail
 
@@ -30,6 +31,7 @@ CONVERT_SAMPLER=false
 SAMPLER_LIBRARY="spitfire"
 OUTPUT_NAME=""
 MIDI_PLAYER=""
+IMPORT_MIDI=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --library)   SAMPLER_LIBRARY="$2"; shift 2 ;;
         --output)    OUTPUT_NAME="$2"; shift 2 ;;
         --player)    MIDI_PLAYER="$2"; shift 2 ;;
+        --import)    IMPORT_MIDI="$2"; shift 2 ;;
         --all)       CONVERT_MIDI=true; CONVERT_LILYPOND=true; CONVERT_SAMPLER=true; shift ;;
         *)           break ;;
     esac
@@ -115,6 +118,24 @@ play_midi() {
     esac
 }
 
+# Handle --import mode (no Picat needed)
+if [ -n "$IMPORT_MIDI" ]; then
+    if [ ! -f "$IMPORT_MIDI" ]; then
+        echo "Error: MIDI file not found: $IMPORT_MIDI"
+        exit 1
+    fi
+    # Determine output path
+    if [ -n "$OUTPUT_NAME" ]; then
+        OUT_JSON="${OUTPUT_NAME}.json"
+    else
+        OUT_JSON="${IMPORT_MIDI%.mid}.json"
+        OUT_JSON="${OUT_JSON%.midi}.json"
+    fi
+    echo "Importing MIDI: $IMPORT_MIDI -> $OUT_JSON"
+    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_reader.py" "$IMPORT_MIDI" "$OUT_JSON"
+    exit $?
+fi
+
 # Check if Picat is installed
 if ! command -v picat &>/dev/null; then
     echo "Error: Picat is not installed or not in PATH"
@@ -142,6 +163,7 @@ if [ $# -eq 0 ]; then
     echo "  --sampler          Generate sampler-ready MIDI with CC automation"
     echo "  --library <lib>    Sampler library style: spitfire, eastwest, generic"
     echo "  --all              Generate all outputs (MIDI, LilyPond, sampler)"
+    echo "  --import <file>    Import MIDI file to JSON + DAT (no Picat run)"
     echo "  --output <name>    Output file base name (default: derived from args)"
     echo ""
     echo "Examples:"
@@ -151,6 +173,10 @@ if [ $# -eq 0 ]; then
     echo "  $0 picat/companion.pi violin from=calm_peaceful to=energized"
     echo "  $0 --all picat/companion.pi violin"
     echo "  $0 --lilypond picat/companion.pi violin"
+    echo ""
+    echo "MIDI import:"
+    echo "  $0 --import song.mid                   Import MIDI to JSON + DAT"
+    echo "  $0 --import song.mid --output imported  Custom output name"
     echo ""
     echo "Available modes:"
     echo "  picat/companion.pi           - Standard MIDI generation"

@@ -1,0 +1,131 @@
+% test_section_styles.pi - Tests for section-aware constraint switching
+%
+% Tests the style override mechanism that allows different form sections
+% to use different genre constraint profiles.
+
+import form.
+import genre_profiles.
+
+main =>
+    println("=== Testing Section Style Overrides ==="),
+    nl,
+    Pass = 0, Fail = 0,
+
+    % Test 1: contrast_genre returns expected contrasts
+    println("Test 1: contrast_genre mappings"),
+    (form.contrast_genre(classical_period) == sturm_und_drang ->
+        println("  classical_period -> sturm_und_drang: PASS"), Pass := Pass + 1
+    ; println("  classical_period -> sturm_und_drang: FAIL"), Fail := Fail + 1),
+    (form.contrast_genre(galant) == sturm_und_drang ->
+        println("  galant -> sturm_und_drang: PASS"), Pass := Pass + 1
+    ; println("  galant -> sturm_und_drang: FAIL"), Fail := Fail + 1),
+    (form.contrast_genre(baroque) == romantic ->
+        println("  baroque -> romantic: PASS"), Pass := Pass + 1
+    ; println("  baroque -> romantic: FAIL"), Fail := Fail + 1),
+    (form.contrast_genre(romantic) == baroque ->
+        println("  romantic -> baroque: PASS"), Pass := Pass + 1
+    ; println("  romantic -> baroque: FAIL"), Fail := Fail + 1),
+    (form.contrast_genre(folk_traditional) == modal ->
+        println("  folk_traditional -> modal: PASS"), Pass := Pass + 1
+    ; println("  folk_traditional -> modal: FAIL"), Fail := Fail + 1),
+    (form.contrast_genre(sturm_und_drang) == galant ->
+        println("  sturm_und_drang -> galant: PASS"), Pass := Pass + 1
+    ; println("  sturm_und_drang -> galant: FAIL"), Fail := Fail + 1),
+    nl,
+
+    % Test 2: contrast_genre fallback for unknown genre
+    println("Test 2: contrast_genre fallback"),
+    (form.contrast_genre(some_unknown_genre) == some_unknown_genre ->
+        println("  unknown genre returns itself: PASS"), Pass := Pass + 1
+    ; println("  unknown genre returns itself: FAIL"), Fail := Fail + 1),
+    nl,
+
+    % Test 3: default_contrast_styles
+    println("Test 3: default_contrast_styles"),
+    Styles1 = form.default_contrast_styles(classical_period),
+    (Styles1 == [b=sturm_und_drang, c=sturm_und_drang] ->
+        println("  classical_period defaults: PASS"), Pass := Pass + 1
+    ; printf("  classical_period defaults: FAIL (got %w)%n", Styles1), Fail := Fail + 1),
+    Styles2 = form.default_contrast_styles(baroque),
+    (Styles2 == [b=romantic, c=romantic] ->
+        println("  baroque defaults: PASS"), Pass := Pass + 1
+    ; printf("  baroque defaults: FAIL (got %w)%n", Styles2), Fail := Fail + 1),
+    nl,
+
+    % Test 4: section_style with overrides
+    println("Test 4: section_style lookup"),
+    Overrides = [b=sturm_und_drang, c=romantic],
+    (form.section_style(a, classical_period, Overrides) == classical_period ->
+        println("  section 'a' uses base genre: PASS"), Pass := Pass + 1
+    ; println("  section 'a' uses base genre: FAIL"), Fail := Fail + 1),
+    (form.section_style(b, classical_period, Overrides) == sturm_und_drang ->
+        println("  section 'b' uses override: PASS"), Pass := Pass + 1
+    ; println("  section 'b' uses override: FAIL"), Fail := Fail + 1),
+    (form.section_style(c, classical_period, Overrides) == romantic ->
+        println("  section 'c' uses override: PASS"), Pass := Pass + 1
+    ; println("  section 'c' uses override: FAIL"), Fail := Fail + 1),
+    nl,
+
+    % Test 5: section_style with empty overrides (contrast=off)
+    println("Test 5: section_style with no overrides"),
+    (form.section_style(b, classical_period, []) == classical_period ->
+        println("  section 'b' uses base genre when no overrides: PASS"), Pass := Pass + 1
+    ; println("  section 'b' uses base genre when no overrides: FAIL"), Fail := Fail + 1),
+    nl,
+
+    % Test 6: contrast genres are valid genre profiles
+    println("Test 6: contrast genres exist in genre_profiles"),
+    TestGenres = [classical_period, galant, high_classical, baroque, romantic,
+                  folk_traditional, sacred_chant, children_songs, minimalist,
+                  modal, blues, traditional_jazz, contemporary, sturm_und_drang],
+    foreach(G in TestGenres)
+        CG = form.contrast_genre(G),
+        if genre_profiles.genre_exists(CG) then
+            printf("  %w -> %w exists: PASS%n", G, CG), Pass := Pass + 1
+        else
+            printf("  %w -> %w NOT FOUND: FAIL%n", G, CG), Fail := Fail + 1
+        end
+    end,
+    nl,
+
+    % Test 7: find_override with multiple overrides
+    println("Test 7: find_override picks first match"),
+    Overrides2 = [b=romantic, b=blues],  % Duplicate key
+    (form.section_style(b, classical_period, Overrides2) == romantic ->
+        println("  first override wins: PASS"), Pass := Pass + 1
+    ; println("  first override wins: FAIL"), Fail := Fail + 1),
+    nl,
+
+    % Test 8: Integration with form sections
+    println("Test 8: integration with ternary form sections"),
+    Sections = form.ternary_form(24, 0, major),
+    BaseGenre = classical_period,
+    IntOverrides = form.default_contrast_styles(BaseGenre),
+    Labels = [form.section_label(S) : S in Sections],
+    Genres = [form.section_style(L, BaseGenre, IntOverrides) : L in Labels],
+    ExpectedGenres = [classical_period, sturm_und_drang, classical_period],
+    (Genres == ExpectedGenres ->
+        printf("  ABA genres = %w: PASS%n", Genres), Pass := Pass + 1
+    ; printf("  ABA genres: FAIL (expected %w, got %w)%n", ExpectedGenres, Genres), Fail := Fail + 1),
+    nl,
+
+    % Test 9: Integration with rondo form sections
+    println("Test 9: integration with rondo form sections"),
+    RondoSections = form.rondo_form(25, 0, major),
+    RondoOverrides = form.default_contrast_styles(baroque),
+    RondoLabels = [form.section_label(S) : S in RondoSections],
+    RondoGenres = [form.section_style(L, baroque, RondoOverrides) : L in RondoLabels],
+    ExpectedRondo = [baroque, romantic, baroque, romantic, baroque],
+    (RondoGenres == ExpectedRondo ->
+        printf("  ABACA genres = %w: PASS%n", RondoGenres), Pass := Pass + 1
+    ; printf("  ABACA genres: FAIL (expected %w, got %w)%n", ExpectedRondo, RondoGenres), Fail := Fail + 1),
+    nl,
+
+    % Summary
+    Total = Pass + Fail,
+    printf("=== Results: %d/%d passed ===%n", Pass, Total),
+    if Fail > 0 then
+        printf("FAILURES: %d%n", Fail)
+    else
+        println("All tests passed!")
+    end.

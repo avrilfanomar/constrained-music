@@ -173,6 +173,10 @@ apply_soft(register_consistency, Notes, _Root, Weight, Cost) =>
     reify_register_consistency(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+apply_soft(compound_interval_recovery, Notes, _Root, Weight, Cost) =>
+    reify_compound_interval_recovery(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Harmony-aware chord tone constraint (uses per-bar chord tones from chord_generator)
 apply_soft(chord_tone_on_strong_beats_harmonic, Notes, _Root, Weight, Cost) =>
     reify_chord_tone_on_strong_beats(Notes, 0, ViolationCount),
@@ -1570,6 +1574,30 @@ reify_register_consistency(Notes, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% Compound interval recovery: after leaps > 12 semitones (compound intervals),
+% the next step must be stepwise (<=2 semitones) in the opposite direction
+reify_compound_interval_recovery(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 1..Len-2)
+            Interval1 = Notes[I+1] - Notes[I],
+            Interval2 = Notes[I+2] - Notes[I+1],
+            AbsInterval1 = $abs(Interval1),
+            AbsInterval2 = $abs(Interval2),
+            % Violation if: interval > 12 AND (next interval > 2 OR same direction)
+            IsCompound :: 0..1,
+            IsCompound #<=> (AbsInterval1 #> 12),
+            NotStepwise :: 0..1,
+            NotStepwise #<=> (AbsInterval2 #> 2),
+            Violations[I] #<=> (IsCompound #/\ NotStepwise)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
 % Consonant outline: penalizes 3-note groups where the outer interval is dissonant
 % Catches patterns like C->E->B (both leaps consonant, but outline = M7 = dissonant)
 % Dissonant outlines (mod 12): 1 (m2/M7), 6 (tritone), 10 (m7), 11 (M7)
@@ -1647,7 +1675,8 @@ supported_soft_constraints() = [
     narrow_range,
     contour_smoothness,
     expressive_leaps,
-    consonant_outline
+    consonant_outline,
+    compound_interval_recovery
 ].
 
 % Check if a constraint ID is supported for soft application

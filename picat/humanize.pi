@@ -103,6 +103,107 @@ apply_curve_to_note(Note, Index, TotalNotes, ClimaxPos, _ClimaxFrac, _VelBase, V
     CurvedNote = $note(Pitch, Duration, TimePos, VoiceId, NewVelocity).
 
 % ==============================================================================
+% PHRASE-LEVEL DYNAMIC ARCS
+% ==============================================================================
+
+% dynamics_plan: list of (bar, target_velocity, transition_type) tuples
+% transition_type: crescendo, diminuendo, subito, sforzando
+%
+% Example:
+%   Plan = [(1, 60, crescendo), (4, 90, subito), (8, 45, diminuendo)]
+%   means: crescendo from bar 1 to reach 60, then suddenly 90 at bar 4,
+%   then diminuendo to reach 45 by bar 8.
+
+% Apply a dynamics plan to a list of notes
+apply_dynamics_plan(Notes, Plan) = Result =>
+    if Plan == [] then
+        Result = Notes
+    else
+        Result = [apply_plan_to_note(Note, Plan) : Note in Notes]
+    end.
+
+% Apply the plan to a single note based on its bar position
+apply_plan_to_note(Note, Plan) = NewNote =>
+    Note = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, Velocity),
+    TargetVelocity = plan_velocity_at_bar(Bar, Plan),
+    % Blend: 70% from plan, 30% from original (preserves phrase accents)
+    BlendedVelocity = max(30, min(127, round(TargetVelocity * 0.7 + Velocity * 0.3))),
+    NewNote = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, BlendedVelocity).
+
+% Compute target velocity at a given bar from the plan
+plan_velocity_at_bar(Bar, Plan) = Velocity =>
+    Velocity = plan_velocity_helper(Bar, Plan, 80).  % Default 80
+
+plan_velocity_helper(_Bar, [], DefaultVel) = DefaultVel.
+plan_velocity_helper(Bar, [(PlanBar, TargetVel, _Type)], _DefaultVel) = Velocity =>
+    % Last event: target velocity is the value at or past this bar
+    if Bar >= PlanBar then
+        Velocity = TargetVel
+    else
+        Velocity = 80  % Before first event
+    end.
+plan_velocity_helper(Bar, [(PlanBar1, TargetVel1, Type1), (PlanBar2, TargetVel2, _) | Rest], DefaultVel) = Velocity =>
+    if Bar < PlanBar1 then
+        % Before this event
+        Velocity = DefaultVel
+    elseif Bar >= PlanBar1, Bar < PlanBar2 then
+        % Between this event and next
+        if Type1 == subito then
+            Velocity = TargetVel1
+        elseif Type1 == sforzando then
+            % Sforzando: sudden accent then return
+            if Bar == PlanBar1 then
+                Velocity = min(127, TargetVel1 + 30)
+            else
+                Velocity = TargetVel1
+            end
+        else
+            % Crescendo or diminuendo: interpolate
+            Progress = (Bar - PlanBar1) / max(1, PlanBar2 - PlanBar1),
+            Velocity = round(TargetVel1 + (TargetVel2 - TargetVel1) * Progress)
+        end
+    else
+        Velocity = plan_velocity_helper(Bar, [(PlanBar2, TargetVel2, _) | Rest], TargetVel2)
+    end.
+
+% Create a standard dynamics plan for a given number of bars
+% Produces a typical musical arch: soft start → build → climax → taper
+make_standard_plan(NumBars, VelBase) = Plan =>
+    MidBar = max(1, NumBars // 2),
+    ClimaxBar = max(1, NumBars * 2 // 3),
+    EndBar = NumBars,
+    Plan = [
+        (1, max(30, VelBase - 20), crescendo),      % Start soft
+        (MidBar, VelBase, crescendo),                % Build to middle
+        (ClimaxBar, min(127, VelBase + 20), diminuendo),  % Peak at climax
+        (EndBar, max(30, VelBase - 15), subito)      % Taper at end
+    ].
+
+% Create a sectional dynamics plan from a list of (genre_section, mood) pairs
+% For use with form-based generation
+make_sectional_plan(Sections, BaseVel) = Plan =>
+    Plan = make_sectional_plan_helper(Sections, BaseVel, 1, []).
+
+make_sectional_plan_helper([], _BaseVel, _Bar, Acc) = reverse(Acc).
+make_sectional_plan_helper([(Label, Bars) | Rest], BaseVel, StartBar, Acc) = Result =>
+    SectionVel = section_velocity(Label, BaseVel),
+    TransType = section_transition(Label),
+    Result = make_sectional_plan_helper(Rest, BaseVel, StartBar + Bars,
+                [(StartBar, SectionVel, TransType) | Acc]).
+
+% Velocity target per section label
+section_velocity(a, BaseVel) = min(127, BaseVel + 5).
+section_velocity(b, BaseVel) = min(127, BaseVel + 15).  % B sections louder
+section_velocity(c, BaseVel) = min(127, BaseVel + 10).
+section_velocity(_, BaseVel) = BaseVel.
+
+% Transition type per section label
+section_transition(a) = crescendo.
+section_transition(b) = subito.       % Sudden contrast for B sections
+section_transition(a_prime) = diminuendo.  % Return section tapers
+section_transition(_) = crescendo.
+
+% ==============================================================================
 % COMBINED HUMANIZATION + DYNAMICS
 % ==============================================================================
 
@@ -112,6 +213,15 @@ humanize_with_dynamics(Notes, VelBase, VelVar, HumanizeIntensity) = Result =>
     % First apply velocity curves (phrase-level shaping)
     CurvedNotes = apply_velocity_curves(Notes, VelBase, VelVar),
     % Then apply micro-humanization (note-level jitter)
+    Result = humanize_notes(CurvedNotes, HumanizeIntensity).
+
+% Apply dynamics plan + humanization (full pipeline)
+humanize_with_plan(Notes, DynamicsPlan, VelBase, VelVar, HumanizeIntensity) = Result =>
+    % Step 1: Apply phrase-level dynamics plan
+    PlannedNotes = apply_dynamics_plan(Notes, DynamicsPlan),
+    % Step 2: Apply per-phrase curve (climax boost)
+    CurvedNotes = apply_velocity_curves(PlannedNotes, VelBase, VelVar),
+    % Step 3: Micro-humanization
     Result = humanize_notes(CurvedNotes, HumanizeIntensity).
 
 % ==============================================================================

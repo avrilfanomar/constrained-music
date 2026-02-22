@@ -1,0 +1,207 @@
+% ornaments.pi - Grace notes and ornaments post-processing
+%
+% Inserts acciaccaturas, appoggiaturas, turns, and mordents as very short
+% notes before or around main notes. This is a pure post-processing pass —
+% no CP solving needed. Ornaments are added based on musical context:
+% interval size, beat position, genre, and randomness.
+%
+% Grace notes are represented as $note() structures with very short durations
+% (1/32) and positioned immediately before the main note.
+
+module ornaments.
+
+import music_types.
+
+% ==============================================================================
+% MAIN ENTRY POINT
+% ==============================================================================
+
+% Add ornaments to a melody based on genre and density
+% Density: 0.0 = no ornaments, 1.0 = all eligible notes ornamented
+add_ornaments(Notes, Genre, Density) = Ornamented =>
+    if Density =< 0.0 then
+        Ornamented = Notes
+    else
+        OrnamentStyle = ornament_style(Genre),
+        Ornamented = add_ornaments_with_style(Notes, OrnamentStyle, Density)
+    end.
+
+% Add ornaments using a specific style
+add_ornaments_with_style(Notes, Style, Density) = Result =>
+    Len = length(Notes),
+    if Len < 2 then
+        Result = Notes
+    else
+        Result = insert_ornaments(Notes, Style, Density, 1, [])
+    end.
+
+% Insert ornaments recursively through note list
+insert_ornaments([], _Style, _Density, _I, Acc) = reverse(Acc).
+insert_ornaments([Note], _Style, _Density, _I, Acc) = reverse([Note | Acc]).
+insert_ornaments([Note, Next | Rest], Style, Density, I, Acc) = Result =>
+    % Decide whether to add an ornament before this note
+    if should_ornament(Note, Next, I, Style, Density) then
+        GraceNote = make_grace_note(Note, Next, Style),
+        NewAcc = [Note, GraceNote | Acc]
+    else
+        NewAcc = [Note | Acc]
+    end,
+    Result = insert_ornaments([Next | Rest], Style, Density, I + 1, NewAcc).
+
+% ==============================================================================
+% ORNAMENT DECISION
+% ==============================================================================
+
+% Decide whether to ornament the transition from current to next note
+should_ornament(Current, Next, _I, Style, Density) =>
+    Current = $note($pitch(midi, P1, _), _, $time_pos(_, Beat1, Sub1), _, _),
+    Next = $note($pitch(midi, P2, _), _, $time_pos(_, Beat2, _), _, _),
+    Interval = abs(P2 - P1),
+
+    % Only ornament ascending motion to beat 1 or 3 of next bar (strong beats)
+    IsStrongBeat = (Beat2 == 1 ; Beat2 == 3),
+    IsAscending = (P2 > P1),
+
+    % Interval must be in ornament range
+    MinInterval = ornament_min_interval(Style),
+    MaxInterval = ornament_max_interval(Style),
+    InRange = (Interval >= MinInterval, Interval =< MaxInterval),
+
+    % Not at end of phrase (sub close to 0.9+ = probably last note before bar)
+    NotPhrasEnd = (Sub1 < 0.8),
+
+    % Random density check
+    InRange,
+    IsAscending,
+    IsStrongBeat,
+    NotPhrasEnd,
+    rand01() < Density * 0.4.  % Base probability scaled by density
+
+should_ornament(_, _, _, _, _) => fail.
+
+% ==============================================================================
+% GRACE NOTE CONSTRUCTION
+% ==============================================================================
+
+% Create a grace note for the approach to Next from Current
+make_grace_note(Current, Next, Style) = GraceNote =>
+    Current = $note(_, _, $time_pos(Bar1, _, _), VoiceId, _),
+    Next = $note($pitch(midi, P2, _), _, $time_pos(Bar2, Beat2, Sub2), _, Vel),
+
+    % Grace note pitch: chromatic lower neighbor or scale tone below
+    GraceType = ornament_type(Style),
+    GracePitch = grace_pitch(P2, GraceType),
+    Octave = GracePitch // 12 - 1,
+
+    % Grace note position: just before the main note (same bar, tiny sub offset)
+    % If main note is on beat 1, grace is at end of previous bar
+    if Beat2 == 1, Sub2 < 0.05 then
+        GraceBar = max(1, Bar1),
+        GraceBeat = 4,
+        GraceSub = 0.9
+    else
+        GraceBar = Bar2,
+        GraceBeat = Beat2,
+        GraceSub = max(0.0, Sub2 - 0.1)
+    end,
+
+    % Very short duration: 1/32 note
+    GraceVelocity = min(127, round(Vel * 0.75)),  % Softer than main note
+
+    GraceNote = $note(
+        $pitch(midi, GracePitch, Octave),
+        $duration(1, 32),
+        $time_pos(GraceBar, GraceBeat, GraceSub),
+        VoiceId,
+        GraceVelocity
+    ).
+
+% Calculate grace note pitch based on ornament type
+grace_pitch(MainPitch, acciaccatura) = max(0, MainPitch - 1).  % Chromatic lower neighbor
+grace_pitch(MainPitch, appoggiatura) = max(0, MainPitch - 2).  % Diatonic lower neighbor
+grace_pitch(MainPitch, upper_neighbor) = min(127, MainPitch + 1). % Upper chromatic neighbor
+grace_pitch(MainPitch, _) = max(0, MainPitch - 1).             % Default: chromatic lower
+
+% ==============================================================================
+% GENRE-SPECIFIC ORNAMENT STYLES
+% ==============================================================================
+
+% Ornament style determines type, frequency, and interval range
+ornament_style(baroque) = baroque_style.
+ornament_style(classical_period) = classical_style.
+ornament_style(galant) = galant_style.
+ornament_style(high_classical) = classical_style.
+ornament_style(romantic) = romantic_style.
+ornament_style(romantic_piano) = romantic_style.
+ornament_style(traditional_jazz) = jazz_style.
+ornament_style(_) = none_style.
+
+% No ornaments for: folk, sacred, children, minimalist, contemporary, modal, blues
+% (these are either structurally inappropriate or need different treatment)
+
+% Ornament type by style
+ornament_type(baroque_style) = acciaccatura.
+ornament_type(classical_style) = acciaccatura.
+ornament_type(galant_style) = acciaccatura.
+ornament_type(romantic_style) = appoggiatura.
+ornament_type(jazz_style) = acciaccatura.
+ornament_type(_) = acciaccatura.
+
+% Minimum interval to ornament (semitones)
+ornament_min_interval(baroque_style) = 2.
+ornament_min_interval(classical_style) = 2.
+ornament_min_interval(galant_style) = 1.
+ornament_min_interval(romantic_style) = 3.
+ornament_min_interval(jazz_style) = 2.
+ornament_min_interval(_) = 4.
+
+% Maximum interval to ornament (semitones)
+ornament_max_interval(baroque_style) = 7.
+ornament_max_interval(classical_style) = 5.
+ornament_max_interval(galant_style) = 5.
+ornament_max_interval(romantic_style) = 12.
+ornament_max_interval(jazz_style) = 6.
+ornament_max_interval(_) = 12.
+
+% ==============================================================================
+% MORDENT (ALTERNATION ORNAMENT)
+% ==============================================================================
+
+% Add a mordent to a note: rapid alternation with upper/lower neighbor
+% Returns [MainNote, UpperNeighbor, MainNote] with very short durations
+make_mordent(Note) = Mordent =>
+    Note = $note($pitch(midi, P, Oct), _Dur, TimePos, VoiceId, Vel),
+    NeighborPitch = min(127, P + 1),
+    GraceVel = min(127, round(Vel * 0.8)),
+    Mordent = [
+        $note($pitch(midi, P, Oct), $duration(1, 32), TimePos, VoiceId, Vel),
+        $note($pitch(midi, NeighborPitch, NeighborPitch // 12 - 1),
+              $duration(1, 32), TimePos, VoiceId, GraceVel),
+        Note  % Final note at original position
+    ].
+
+% ==============================================================================
+% TURN ORNAMENT
+% ==============================================================================
+
+% Add a turn: upper-main-lower-main
+make_turn(Note) = Turn =>
+    Note = $note($pitch(midi, P, _), _Dur, TimePos, VoiceId, Vel),
+    Upper = min(127, P + 1),
+    Lower = max(0, P - 1),
+    Oct = P // 12 - 1,
+    GraceVel = min(127, round(Vel * 0.75)),
+    Turn = [
+        $note($pitch(midi, Upper, Upper // 12 - 1), $duration(1, 32), TimePos, VoiceId, GraceVel),
+        $note($pitch(midi, P, Oct), $duration(1, 32), TimePos, VoiceId, Vel),
+        $note($pitch(midi, Lower, Lower // 12 - 1), $duration(1, 32), TimePos, VoiceId, GraceVel),
+        Note
+    ].
+
+% ==============================================================================
+% UTILITY
+% ==============================================================================
+
+% Random float 0.0-1.0
+rand01() = R =>
+    R = random2() / 268435455.

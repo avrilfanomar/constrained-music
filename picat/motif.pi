@@ -135,3 +135,50 @@ print_motif(MotifIntervals) =>
 join_list([], _) = "".
 join_list([X], _) = X.
 join_list([X|Rest], Sep) = X ++ Sep ++ join_list(Rest, Sep).
+
+% ==============================================================================
+% THEMATIC RECALL (Section Return)
+% ==============================================================================
+% For ABA form: constrain the return section (A') to closely match the original A section.
+% MatchRatio: fraction of notes that must be identical (e.g., 0.8 = 80%)
+
+% Apply thematic recall constraint to CP pitch variables
+% OriginalPitches: list of concrete pitch values from section A
+% NewPitches: list of CP variables for section A'
+% MatchRatio: 0.0-1.0, fraction of notes that must match
+apply_thematic_recall(OriginalPitches, NewPitches, MatchRatio) =>
+    OrigLen = length(OriginalPitches),
+    NewLen = length(NewPitches),
+    MatchLen = min(OrigLen, NewLen),
+    if MatchLen > 0 then
+        RequiredMatches = max(1, round(MatchLen * MatchRatio)),
+        % Create match indicators for each position
+        Matches = new_list(MatchLen),
+        Matches :: 0..1,
+        foreach(I in 1..MatchLen)
+            Matches[I] #<=> (NewPitches[I] #= OriginalPitches[I])
+        end,
+        % Require at least RequiredMatches notes to be identical
+        sum(Matches) #>= RequiredMatches
+    end.
+
+% Apply thematic recall as a soft constraint (weighted cost)
+% Returns a cost variable proportional to deviations from original
+apply_thematic_recall_soft(OriginalPitches, NewPitches, Weight, Cost) =>
+    OrigLen = length(OriginalPitches),
+    NewLen = length(NewPitches),
+    MatchLen = min(OrigLen, NewLen),
+    if MatchLen > 0 then
+        Deviations = new_list(MatchLen),
+        Deviations :: 0..1,
+        foreach(I in 1..MatchLen)
+            Deviations[I] #<=> (NewPitches[I] #!= OriginalPitches[I])
+        end,
+        Cost #= Weight * sum(Deviations)
+    else
+        Cost = 0
+    end.
+
+% Extract pitch values from a melody (list of $note structures)
+extract_pitches_from_melody(Melody) = Pitches =>
+    Pitches = [P : $note($pitch(midi, P, _), _, _, _, _) in Melody].

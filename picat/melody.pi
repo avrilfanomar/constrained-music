@@ -1129,6 +1129,15 @@ solve_genre_melody(Pitches, TotalCost, Randomness) =>
     end.
 
 % ==============================================================================
+% THEMATIC RECALL HELPER
+% ==============================================================================
+
+% Extract recall pitches from preferences
+get_recall_pitches([], _) => fail.
+get_recall_pitches([recall_pitches=P | _], P) => true.
+get_recall_pitches([_ | Rest], P) => get_recall_pitches(Rest, P).
+
+% ==============================================================================
 % GENRE-BASED SEGMENT GENERATION
 % ==============================================================================
 
@@ -1179,6 +1188,11 @@ generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Prefere
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     TotalCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
 
+    % Apply thematic recall if original pitches are provided
+    if get_recall_pitches(Preferences, RecallPitches1) then
+        motif.apply_thematic_recall(RecallPitches1, Pitches, 0.8)
+    end,
+
     % Solve
     solve_genre_melody(Pitches, TotalCost, Randomness),
 
@@ -1224,6 +1238,11 @@ generate_segment_melody_with_motif(MusicParams, KeyRoot, NumBars, Genre, Prefere
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
 
+    % Apply thematic recall if original pitches are provided
+    if get_recall_pitches(Preferences, RecallPitchesM1) then
+        motif.apply_thematic_recall(RecallPitchesM1, Pitches, 0.8)
+    end,
+
     % Apply motif constraint if motif is provided
     if MotifIntervals != [], not constraint_selector.skip_soft_optimization(Randomness) then
         motif.apply_contour_constraint(Pitches, MotifIntervals, MotifWeight, MotifCost),
@@ -1264,6 +1283,11 @@ generate_connected_segment_with_motif(MusicParams, KeyRoot, NumBars, PrevLastPit
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
 
+    % Apply thematic recall if original pitches are provided
+    if get_recall_pitches(Preferences, RecallPitchesCM1) then
+        motif.apply_thematic_recall(RecallPitchesCM1, Pitches, 0.8)
+    end,
+
     % Connection constraint
     ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
     if ValidConnectionNotes != [] then
@@ -1296,6 +1320,11 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     VelVar = get_velocity_var(MusicParams),
     Randomness = get_randomness(MusicParams),
 
+    % Extract meter from preferences (default 4/4)
+    Meter = get_meter_from_prefs(Preferences),
+    TicksPerBar = ticks_per_bar_for_meter(Meter),
+    TicksPerBeat = ticks_per_beat_for_meter(Meter),
+
     TotalNotes = NumBars * Density,
     Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
     ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
@@ -1306,15 +1335,15 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
 
     % Duration variables (in ticks: 1=sixteenth, 2=eighth, 3=dotted-eighth, 4=quarter, 6=dotted-quarter, 8=half)
     Durations = new_list(TotalNotes),
-    AllowedDurs = allowed_durations_for_density(Density),
+    AllowedDurs = allowed_durations_for_density_and_meter(Density, TicksPerBar),
     Durations :: AllowedDurs,
 
-    % Bar-filling constraint: durations in each bar must sum to 16 ticks (one 4/4 bar)
+    % Bar-filling constraint: durations in each bar must sum to TicksPerBar
     NotesPerBar = Density,
     foreach(Bar in 1..NumBars)
         BarStart = (Bar - 1) * NotesPerBar + 1,
         BarEnd = Bar * NotesPerBar,
-        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+        sum([Durations[I] : I in BarStart..BarEnd]) #= TicksPerBar
     end,
 
     % Duration variety: prevent all-same-duration solutions
@@ -1349,6 +1378,11 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
 
+    % Apply thematic recall if original pitches are provided
+    if get_recall_pitches(Preferences, RecallPitchesR1) then
+        motif.apply_thematic_recall(RecallPitchesR1, Pitches, 0.8)
+    end,
+
     % Apply rhythm constraints
     RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
 
@@ -1359,7 +1393,7 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness),
 
     % Build melody with variable durations
-    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat).
 
 % Allowed durations for a given density (notes per bar in 4/4 = 16 ticks)
 % Returns a list of tick values that can sum to 16 for that density
@@ -1409,7 +1443,12 @@ solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness) =>
     end.
 
 % Build melody with variable durations using cumulative tick positions
-build_melody_with_durations(Pitches, Durations, _NumBars, _NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Melody =>
+% Overload: without meter params (backward compat, assumes 4/4)
+build_melody_with_durations(Pitches, Durations, NumBars, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Melody =>
+    Melody = build_melody_with_durations(Pitches, Durations, NumBars, NotesPerBar, VoiceId, VelBase, VelVar, Randomness, 16, 4).
+
+% Build melody with variable durations using cumulative tick positions (meter-aware)
+build_melody_with_durations(Pitches, Durations, _NumBars, _NotesPerBar, VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat) = Melody =>
     Len = length(Pitches),
     % Compute cumulative tick positions: TickPos[1]=0, TickPos[I]=TickPos[I-1]+Durations[I-1]
     TickPos = new_list(Len),
@@ -1417,26 +1456,36 @@ build_melody_with_durations(Pitches, Durations, _NumBars, _NotesPerBar, VoiceId,
     foreach(I in 2..Len)
         TickPos[I] = TickPos[I-1] + Durations[I-1]
     end,
-    Melody = [build_note_with_duration(Pitches[I], Durations[I], TickPos[I], VoiceId, VelBase, VelVar, Randomness)
+    Melody = [build_note_with_duration(Pitches[I], Durations[I], TickPos[I], VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat)
               : I in 1..Len].
 
 % Build a single note with variable duration using absolute tick position
+% Overload: without meter params (backward compat, assumes 4/4)
 build_note_with_duration(MidiPitch, DurationTicks, AbsoluteTick, VoiceId, VelBase, VelVar, Randomness) = Note =>
+    Note = build_note_with_duration(MidiPitch, DurationTicks, AbsoluteTick, VoiceId, VelBase, VelVar, Randomness, 16, 4).
+
+% Build a single note with variable duration using absolute tick position (meter-aware)
+build_note_with_duration(MidiPitch, DurationTicks, AbsoluteTick, VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat) = Note =>
     Octave = MidiPitch // 12 - 1,
 
     % Compute Bar and Beat from absolute tick position
-    % 16 ticks per bar in 4/4, 4 ticks per beat
-    Bar = (AbsoluteTick // 16) + 1,
-    TickInBar = AbsoluteTick mod 16,
-    Beat = (TickInBar // 4) + 1,
-    Sub = (TickInBar mod 4) / 4.0,
+    Bar = (AbsoluteTick // TicksPerBar) + 1,
+    TickInBar = AbsoluteTick mod TicksPerBar,
+    Beat = (TickInBar // TicksPerBeat) + 1,
+    Sub = (TickInBar mod TicksPerBeat) / (1.0 * TicksPerBeat),
 
     % Convert ticks to duration fraction
     Duration = ticks_to_duration(DurationTicks),
 
-    % Strong-beat velocity boost: beat 1 (tick 0) or beat 3 (tick 8)
-    IsStrongBeat = (TickInBar == 0 ; TickInBar == 8),
-    VelOffset = cond(IsStrongBeat, VelVar // 2, -VelVar // 4),
+    % Strong-beat velocity boost: beat 1 or middle beat
+    MidBeatTick = TicksPerBar // 2,
+    if TickInBar == 0 then
+        VelOffset = VelVar // 2
+    elseif TickInBar == MidBeatTick then
+        VelOffset = VelVar // 2
+    else
+        VelOffset = -VelVar // 4
+    end,
     RandomPerturbation = round((rand01() - 0.5) * 2 * 15 * Randomness),
     Velocity = max(40, min(127, VelBase + VelOffset + RandomPerturbation)),
 
@@ -1473,6 +1522,11 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     VelVar = get_velocity_var(MusicParams),
     Randomness = get_randomness(MusicParams),
 
+    % Extract meter from preferences (default 4/4)
+    Meter = get_meter_from_prefs(Preferences),
+    TicksPerBar = ticks_per_bar_for_meter(Meter),
+    TicksPerBeat = ticks_per_beat_for_meter(Meter),
+
     TotalNotes = NumBars * Density,
     Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
     ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
@@ -1482,14 +1536,14 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
 
     % Duration variables with density-specific domains + bar-filling
     Durations = new_list(TotalNotes),
-    AllowedDurs = allowed_durations_for_density(Density),
+    AllowedDurs = allowed_durations_for_density_and_meter(Density, TicksPerBar),
     Durations :: AllowedDurs,
 
     NotesPerBar = Density,
     foreach(Bar in 1..NumBars)
         BarStart = (Bar - 1) * NotesPerBar + 1,
         BarEnd = Bar * NotesPerBar,
-        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+        sum([Durations[I] : I in BarStart..BarEnd]) #= TicksPerBar
     end,
 
     if TotalNotes >= 4 then
@@ -1510,6 +1564,11 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
     RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
 
+    % Apply thematic recall if original pitches are provided
+    if get_recall_pitches(Preferences, RecallPitchesR2) then
+        motif.apply_thematic_recall(RecallPitchesR2, Pitches, 0.8)
+    end,
+
     % Connection constraint
     ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
     if ValidConnectionNotes != [] then
@@ -1519,7 +1578,7 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     TotalCost #= PitchCost + RhythmCost,
     solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness),
 
-    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat).
 
 % ==============================================================================
 % CONNECTED SEGMENT WITH RHYTHM AND MOTIF
@@ -1534,6 +1593,11 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
     VelVar = get_velocity_var(MusicParams),
     Randomness = get_randomness(MusicParams),
 
+    % Extract meter from preferences (default 4/4)
+    Meter = get_meter_from_prefs(Preferences),
+    TicksPerBar = ticks_per_bar_for_meter(Meter),
+    TicksPerBeat = ticks_per_beat_for_meter(Meter),
+
     TotalNotes = NumBars * Density,
     Voice = $voice(VoiceId, _, _, $range(LowMidi, HighMidi)),
     ScaleNotes = scale_notes_in_range(KeyRoot, Mode, LowMidi, HighMidi),
@@ -1543,14 +1607,14 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
 
     % Duration variables with density-specific domains + bar-filling
     Durations = new_list(TotalNotes),
-    AllowedDurs = allowed_durations_for_density(Density),
+    AllowedDurs = allowed_durations_for_density_and_meter(Density, TicksPerBar),
     Durations :: AllowedDurs,
 
     NotesPerBar = Density,
     foreach(Bar in 1..NumBars)
         BarStart = (Bar - 1) * NotesPerBar + 1,
         BarEnd = Bar * NotesPerBar,
-        sum([Durations[I] : I in BarStart..BarEnd]) #= 16
+        sum([Durations[I] : I in BarStart..BarEnd]) #= TicksPerBar
     end,
 
     if TotalNotes >= 4 then
@@ -1571,6 +1635,11 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
     RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
 
+    % Apply thematic recall if original pitches are provided
+    if get_recall_pitches(Preferences, RecallPitchesRM1) then
+        motif.apply_thematic_recall(RecallPitchesRM1, Pitches, 0.8)
+    end,
+
     % Connection constraint
     ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
     if ValidConnectionNotes != [] then
@@ -1587,7 +1656,7 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
 
     solve_rhythm_melody(Pitches, Durations, TotalCost, Randomness),
 
-    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness).
+    Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat).
 
 % ==============================================================================
 % ORIGINAL CONNECTED SEGMENT (without rhythm)
@@ -1626,6 +1695,11 @@ generate_connected_segment_with_genre(MusicParams, KeyRoot, NumBars, PrevLastPit
     apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     TotalCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+
+    % Apply thematic recall if original pitches are provided
+    if get_recall_pitches(Preferences, RecallPitchesC1) then
+        motif.apply_thematic_recall(RecallPitchesC1, Pitches, 0.8)
+    end,
 
     % Connection constraint
     ValidConnectionNotes = [N : N in ScaleNotes, abs(N - PrevLastPitch) =< MaxInterval + 4],
@@ -1695,6 +1769,60 @@ apply_phrase_structure(Pitches, Root, ScaleNotes, NumBars, Density) =>
         if TonicNotes != [] then
             Pitches[Len] :: TonicNotes
         end
+    end.
+
+% ==============================================================================
+% METER HELPERS
+% ==============================================================================
+
+% Compute ticks per bar for a given meter
+% 16 ticks = whole note, so quarter note = 4 ticks, eighth note = 2 ticks
+ticks_per_bar_for_meter(meter(Beats, Unit)) = TicksPerBar =>
+    WholeNoteTicks = 16,
+    TicksPerBeat = WholeNoteTicks // Unit,
+    TicksPerBar = Beats * TicksPerBeat.
+ticks_per_bar_for_meter(_) = 16.  % Default: 4/4
+
+% Compute ticks per beat for a given meter
+ticks_per_beat_for_meter(meter(_, Unit)) = TicksPerBeat =>
+    TicksPerBeat = 16 // Unit.
+ticks_per_beat_for_meter(_) = 4.  % Default: quarter note
+
+% Extract meter from preferences, defaulting to 4/4
+get_meter_from_prefs([]) = $meter(4, 4).
+get_meter_from_prefs([meter=M|_]) = M.
+get_meter_from_prefs([_|Rest]) = get_meter_from_prefs(Rest).
+
+% Allowed durations for a given density and ticks per bar
+% Returns a list of tick values that can sum to TicksPerBar for that density
+allowed_durations_for_density_and_meter(Density, TicksPerBar) = Durations =>
+    if TicksPerBar == 16 then
+        % 4/4 time - use original values
+        Durations = allowed_durations_for_density(Density)
+    elseif TicksPerBar == 12 then
+        % 3/4 or 6/8 time (12 ticks per bar)
+        if Density =< 2 then Durations = [4, 6, 8]
+        elseif Density == 3 then Durations = [2, 4, 6]
+        elseif Density == 4 then Durations = [2, 3, 4]
+        elseif Density =< 6 then Durations = [1, 2, 3, 4]
+        else Durations = [1, 2, 3]
+        end
+    elseif TicksPerBar == 6 then
+        % 3/8 time (6 ticks per bar)
+        if Density =< 2 then Durations = [2, 3, 4]
+        elseif Density == 3 then Durations = [1, 2, 3]
+        else Durations = [1, 2]
+        end
+    elseif TicksPerBar == 8 then
+        % 2/2 or 2/4 (8 ticks per bar)
+        if Density =< 2 then Durations = [2, 4, 6]
+        elseif Density == 3 then Durations = [2, 3, 4]
+        elseif Density == 4 then Durations = [1, 2, 3, 4]
+        else Durations = [1, 2, 3]
+        end
+    else
+        % Fallback: use standard durations
+        Durations = allowed_durations_for_density(Density)
     end.
 
 % ==============================================================================

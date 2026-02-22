@@ -21,8 +21,12 @@ tempo_change_bpm(tempo_change(_, BPM)) = BPM.
 % JSON EXPORT
 % ==============================================================================
 
-% Export session to JSON file
+% Export session to JSON file (default 4/4 meter)
 export_session_json(Notes, TempoChanges, FilePath) =>
+    export_session_json(Notes, TempoChanges, $meter(4, 4), FilePath).
+
+% Export session to JSON file with time signature
+export_session_json(Notes, TempoChanges, Meter, FilePath) =>
     FD = open(FilePath, write),
 
     % Write JSON header
@@ -31,9 +35,11 @@ export_session_json(Notes, TempoChanges, FilePath) =>
     % Write metadata
     println(FD, "  \"metadata\": {"),
     println(FD, "    \"generator\": \"Music Companion\","),
-    println(FD, "    \"version\": \"1.0\","),
+    println(FD, "    \"version\": \"1.1\","),
     printf(FD, "    \"num_notes\": %d,%n", length(Notes)),
-    printf(FD, "    \"num_tempo_changes\": %d%n", length(TempoChanges)),
+    printf(FD, "    \"num_tempo_changes\": %d,%n", length(TempoChanges)),
+    Meter = $meter(MeterBeats, MeterUnit),
+    printf(FD, "    \"time_signature\": {\"beats\": %d, \"beat_unit\": %d}%n", MeterBeats, MeterUnit),
     println(FD, "  },"),
 
     % Write tempo changes
@@ -102,6 +108,65 @@ write_pitch_list(FD, [P]) =>
 write_pitch_list(FD, [P | Rest]) =>
     printf(FD, "%d, ", P),
     write_pitch_list(FD, Rest).
+
+% ==============================================================================
+% PEDAL EVENT STRUCTURE
+% ==============================================================================
+
+% pedal_event(Bar, Beat, On) - sustain pedal on (1) or off (0) at a position
+% Standard technique: lift pedal slightly after chord change (beat 1), depress again
+
+% Generate pedal events for a chord progression
+% One pedal cycle per bar: lift on beat 1 (briefly), down on beat 1
+generate_pedal_events(NumBars) = Events =>
+    Events1 = [],
+    foreach(Bar in 1..NumBars)
+        % Lift pedal slightly before beat 1 of each bar (end of previous bar)
+        Events1 := Events1 ++ [$pedal_event(Bar, 1, 0)],
+        % Depress pedal on beat 1 (after chord change)
+        Events1 := Events1 ++ [$pedal_event(Bar, 1, 1)]
+    end,
+    Events = Events1.
+
+% Export session with pedal events
+export_session_json_with_pedal(Notes, TempoChanges, Meter, PedalEvents, FilePath) =>
+    FD = open(FilePath, write),
+    println(FD, "{"),
+    % metadata
+    println(FD, "  \"metadata\": {"),
+    println(FD, "    \"generator\": \"Music Companion\","),
+    println(FD, "    \"version\": \"1.2\","),
+    printf(FD, "    \"num_notes\": %d,%n", length(Notes)),
+    printf(FD, "    \"num_tempo_changes\": %d,%n", length(TempoChanges)),
+    Meter = $meter(Beats, BeatUnit),
+    printf(FD, "    \"time_signature\": {\"beats\": %d, \"beat_unit\": %d}%n", Beats, BeatUnit),
+    println(FD, "  },"),
+    % tempo changes
+    println(FD, "  \"tempo_changes\": ["),
+    write_tempo_changes_json(FD, TempoChanges),
+    println(FD, "  ],"),
+    % pedal events
+    println(FD, "  \"pedal_events\": ["),
+    write_pedal_events_json(FD, PedalEvents),
+    println(FD, "  ],"),
+    % notes
+    println(FD, "  \"notes\": ["),
+    write_notes_json(FD, Notes),
+    println(FD, "  ]"),
+    println(FD, "}"),
+    close(FD).
+
+% Write pedal events as JSON
+write_pedal_events_json(_, []) => true.
+write_pedal_events_json(FD, [PE]) =>
+    write_pedal_event_json(FD, PE, false).
+write_pedal_events_json(FD, [PE | Rest]) =>
+    write_pedal_event_json(FD, PE, true),
+    write_pedal_events_json(FD, Rest).
+
+write_pedal_event_json(FD, pedal_event(Bar, Beat, On), HasMore) =>
+    printf(FD, "    {\"bar\": %d, \"beat\": %d, \"on\": %d}", Bar, Beat, On),
+    if HasMore then println(FD, ",") else nl(FD) end.
 
 % ==============================================================================
 % CONSOLE OUTPUT (for debugging)
