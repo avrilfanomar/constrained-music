@@ -192,9 +192,9 @@ apply_soft(sequential_repetition, Notes, _Root, Weight, Cost) =>
     reify_sequential_repetition(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
-% Weak-beat justification (passing tones / neighbor tones)
-apply_soft(weak_beat_justified, Notes, _Root, Weight, Cost) =>
-    reify_weak_beat_justified(Notes, ViolationCount),
+% Weak-beat justification (passing tones / neighbor tones / chord tones)
+apply_soft(weak_beat_justified, Notes, Root, Weight, Cost) =>
+    reify_weak_beat_justified(Notes, Root, ViolationCount),
     Cost #= Weight * ViolationCount.
 
 % Emotional Constraints
@@ -1054,10 +1054,15 @@ reify_sequential_repetition(Notes, ViolationCount) =>
 % Weak-beat notes should be chord tones, passing tones, or neighbor tones
 % Passing tone: step from both sides in same direction
 % Neighbor tone: step away and back (from either direction)
+% Chord tone: root, minor/major 3rd, or 5th of the key
 % Checks even-indexed notes (beats 2, 4 in 4/4 when density=4)
 % Returns count of unjustified weak-beat notes
-reify_weak_beat_justified(Notes, ViolationCount) =>
+reify_weak_beat_justified(Notes, Root, ViolationCount) =>
     Len = length(Notes),
+    RootPC = Root mod 12,
+    MajThirdPC = (RootPC + 4) mod 12,
+    MinThirdPC = (RootPC + 3) mod 12,
+    FifthPC = (RootPC + 7) mod 12,
     if Len >= 3 then
         % Check notes at even positions (2, 4, 6...) as "weak beats"
         Violations = new_list(Len),
@@ -1072,28 +1077,37 @@ reify_weak_beat_justified(Notes, ViolationCount) =>
                 AbsBefore = $abs(IntervalBefore),
                 AbsAfter = $abs(IntervalAfter),
 
-                % Passing tone: stepwise from both sides, same direction
-                % (before and after intervals have same sign, both <= 2)
+                % Passing tone: stepwise from both sides, moving through in one direction
                 IsPassing :: 0..1,
                 IsPassing #<=> (
                     (AbsBefore #=< 2) #/\ (AbsBefore #> 0) #/\
                     (AbsAfter #=< 2) #/\ (AbsAfter #> 0) #/\
-                    (IntervalBefore * IntervalAfter #< 0)  % opposite signed = same overall direction
+                    (IntervalBefore * IntervalAfter #< 0)
                 ),
 
-                % Neighbor tone: step away and back (returns near start)
-                % Before: step of 1-2, After: step of 1-2, opposite direction
+                % Neighbor tone: step away and back
                 IsNeighbor :: 0..1,
                 IsNeighbor #<=> (
                     (AbsBefore #=< 2) #/\ (AbsBefore #> 0) #/\
                     (AbsAfter #=< 2) #/\ (AbsAfter #> 0) #/\
-                    (IntervalBefore * IntervalAfter #> 0)  % same signed = returns
+                    (IntervalBefore * IntervalAfter #> 0)
                 ),
 
-                % Chord tone on weak beat also acceptable (handled by chord_tone constraint)
-                % Here we just check if it's a passing or neighbor tone
+                % Chord tone on weak beat: root, minor 3rd, major 3rd, or 5th of key
+                % Accepting both major and minor 3rd handles both major/minor mode contexts
+                NotePC :: 0..11,
+                QNote :: 0..10,
+                Notes[I] #= 12 * QNote + NotePC,
+                IsChordTone :: 0..1,
+                IsChordTone #<=> (
+                    (NotePC #= RootPC) #\/
+                    (NotePC #= MajThirdPC) #\/
+                    (NotePC #= MinThirdPC) #\/
+                    (NotePC #= FifthPC)
+                ),
+
                 Justified :: 0..1,
-                Justified #<=> (IsPassing #\/ IsNeighbor),
+                Justified #<=> (IsPassing #\/ IsNeighbor #\/ IsChordTone),
                 Violations[I] #<=> (Justified #= 0)
             else
                 Violations[I] = 0
@@ -1229,13 +1243,16 @@ supported_rhythm_constraints() = [
 % Chord tone on strong beats: notes on beats 1 and 3 (strong beats in 4/4)
 % should predominantly be chord tones (root, 3rd, 5th of the key)
 % We approximate strong beats as notes at positions 1, 3, 5, 7... (odd indices for 4/4)
-% Returns count of non-chord-tone notes on strong beat positions exceeding 25% threshold
+% Accepts both major and minor 3rd to handle both major/minor key contexts.
+% Note: hard constraint apply_chord_tone_constraints in melody.pi enforces exact chord tones;
+% this soft constraint is a secondary check for cases without chord-first melody.
 reify_chord_tone_on_strong_beats(Notes, RootPitch, ViolationCount) =>
     Len = length(Notes),
     if Len >= 2 then
-        % Chord tones: root, major third (4 semitones), perfect fifth (7 semitones)
+        % Chord tones: root, minor third, major third, perfect fifth
         RootPC = RootPitch mod 12,
-        ThirdPC = (RootPitch + 4) mod 12,
+        MajThirdPC = (RootPitch + 4) mod 12,
+        MinThirdPC = (RootPitch + 3) mod 12,
         FifthPC = (RootPitch + 7) mod 12,
 
         % Check notes at odd positions (1, 3, 5, ...) as "strong beats"
@@ -1247,7 +1264,12 @@ reify_chord_tone_on_strong_beats(Notes, RootPitch, ViolationCount) =>
             Q :: 0..10,
             Notes[I] #= 12 * Q + NotePC,
             IsChordTone :: 0..1,
-            IsChordTone #<=> ((NotePC #= RootPC) #\/ (NotePC #= ThirdPC) #\/ (NotePC #= FifthPC)),
+            IsChordTone #<=> (
+                (NotePC #= RootPC) #\/
+                (NotePC #= MajThirdPC) #\/
+                (NotePC #= MinThirdPC) #\/
+                (NotePC #= FifthPC)
+            ),
             % Violation if on strong beat (odd position) AND not chord tone
             IsStrongBeat = cond(I mod 2 == 1, 1, 0),
             StrongBeatFlags[I] #<=> ((IsStrongBeat #= 1) #/\ (IsChordTone #= 0))
