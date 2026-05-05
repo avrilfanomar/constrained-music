@@ -367,8 +367,3 @@ soft_constraints_for_genre(folk)      % Soft with weights
 - Whole-Tone
 - Chromatic
 - Diminished
-
-## License
-
-All rights for this software belong to author, Andrii Andriichuk. No usage, apart from explicitly granted by author, is
-allowed.
