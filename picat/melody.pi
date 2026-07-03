@@ -1140,6 +1140,84 @@ segment_progression(Preferences, NumBars, Mode, Genre) = Degrees =>
     end.
 
 % ==============================================================================
+% REGISTER ARC (piece-level climax architecture)
+% ==============================================================================
+
+% Generic key=value preference lookup (see get_recall_pitches for why the
+% output argument must be distinct from the decomposed pattern variables)
+get_pref_value([], _, _) => fail.
+get_pref_value([Key0=V | Rest], Key, Out) =>
+    if Key0 == Key then
+        Out = V
+    else
+        get_pref_value(Rest, Key, Out)
+    end.
+get_pref_value([_ | Rest], Key, Out) => get_pref_value(Rest, Key, Out).
+
+% Soft register-arc cost. companion.pi assigns each segment a target register
+% center on a piece-level arc rising to a single climax (near the golden
+% ratio of the piece) and falling after. Without this pull the CP labeling
+% pins every melody to the bottom of its voice range (and no piece-level
+% climax can exist, since segments are solved independently).
+%   register_center=C  -> cost 3 per semitone any note sits outside C +- Span
+%   register_span=S    -> free band half-width (default 4)
+%   climax_target=T    -> climax segment: cost 100 unless some note reaches T
+%   register_ceiling=T -> other segments: cost 20/semitone above T, so only
+%                         the climax segment tops the piece
+apply_register_arc(Pitches, Preferences) = Cost =>
+    if get_pref_value(Preferences, register_center, Center) then
+        if get_pref_value(Preferences, register_span, Span0) then
+            Span = Span0
+        else
+            Span = 4
+        end,
+        Len = length(Pitches),
+        % Hard tessitura window: CP labeling biases toward low domain values,
+        % so a soft pull alone leaves the melody at the bottom of the VOICE
+        % range (the optimizer can't climb 60+ notes within the anytime
+        % budget). The window pins the segment to the right octave outright;
+        % it sits asymmetrically around the center so even a fully
+        % bottom-biased solve lands near the target tessitura. The top is
+        % the piece climax (climax segment) or just under it (the rest), so
+        % only the climax segment can carry the piece's highest note.
+        WLow0 = Center - 5,
+        if get_pref_value(Preferences, climax_target, ClimaxNeed) then
+            WHigh = max(Center + 5, ClimaxNeed)
+        elseif get_pref_value(Preferences, register_ceiling, CeilNeed) then
+            WHigh = min(Center + 11, CeilNeed)
+        else
+            WHigh = Center + 11
+        end,
+        WLow = min(WLow0, WHigh - 7),  % keep at least a 7-semitone window
+        foreach(I in 1..Len)
+            Pitches[I] #>= WLow,
+            Pitches[I] #=< WHigh
+        end,
+        Devs = new_list(Len),
+        Devs :: 0..64,
+        foreach(I in 1..Len)
+            Devs[I] #= max(0, abs(Pitches[I] - Center) - Span)
+        end,
+        CenterCost #= 3 * sum(Devs),
+        if get_pref_value(Preferences, climax_target, TargetP) then
+            % The climax segment should TOUCH the piece climax — once or
+            % twice, like a real high point, not sit on it
+            MaxP :: 0..127,
+            MaxP #= max(Pitches),
+            Reached :: 0..1,
+            Reached #<=> (MaxP #>= TargetP),
+            TopCount :: 0..127,
+            TopCount #= sum([Pitches[I] #= MaxP : I in 1..Len]),
+            PeakCost #= 100 * (1 - Reached) + 40 * max(0, TopCount - 2)
+        else
+            PeakCost = 0
+        end,
+        Cost #= CenterCost + PeakCost
+    else
+        Cost = 0
+    end.
+
+% ==============================================================================
 % GENRE-BASED SEGMENT GENERATION
 % ==============================================================================
 
@@ -1189,14 +1267,15 @@ generate_segment_melody_with_genre(MusicParams, KeyRoot, NumBars, Genre, Prefere
     apply_base_melodic_constraints_ctx(Pitches, KeyRoot, MaxInterval, ScaleNotes, Context),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     BaseCost1 = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RegCost1 = apply_register_arc(Pitches, Preferences),
 
     % Thematic recall as soft constraint (hard 80% match can be infeasible
     % against period/chord-tone constraints and abort generation)
     if get_recall_pitches(Preferences, RecallPitches1) then
         motif.apply_thematic_recall_soft(RecallPitches1, Pitches, 60, RecallCost1),
-        TotalCost #= BaseCost1 + RecallCost1
+        TotalCost #= BaseCost1 + RegCost1 + RecallCost1
     else
-        TotalCost = BaseCost1
+        TotalCost #= BaseCost1 + RegCost1
     end,
 
     % Solve
@@ -1243,13 +1322,14 @@ generate_segment_melody_with_motif(MusicParams, KeyRoot, NumBars, Genre, Prefere
     apply_base_melodic_constraints_ctx(Pitches, KeyRoot, MaxInterval, ScaleNotes, Context),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RegCostM = apply_register_arc(Pitches, Preferences),
 
     % Thematic recall as soft constraint
     if get_recall_pitches(Preferences, RecallPitchesM1) then
         motif.apply_thematic_recall_soft(RecallPitchesM1, Pitches, 60, RecallCostM1),
-        PitchCostM1 #= PitchCost + RecallCostM1
+        PitchCostM1 #= PitchCost + RegCostM + RecallCostM1
     else
-        PitchCostM1 = PitchCost
+        PitchCostM1 #= PitchCost + RegCostM
     end,
 
     % Motif statements (exact/inverted intervals) at phrase starts
@@ -1293,13 +1373,14 @@ generate_connected_segment_with_motif(MusicParams, KeyRoot, NumBars, PrevLastPit
     apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RegCostCM = apply_register_arc(Pitches, Preferences),
 
     % Thematic recall as soft constraint
     if get_recall_pitches(Preferences, RecallPitchesCM1) then
         motif.apply_thematic_recall_soft(RecallPitchesCM1, Pitches, 60, RecallCostCM1),
-        PitchCostCM1 #= PitchCost + RecallCostCM1
+        PitchCostCM1 #= PitchCost + RegCostCM + RecallCostCM1
     else
-        PitchCostCM1 = PitchCost
+        PitchCostCM1 #= PitchCost + RegCostCM
     end,
 
     % Connection constraint
@@ -1371,8 +1452,8 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     ChordDegrees = segment_progression(Preferences, NumBars, Mode, Genre),
     BarChordTones = chord_generator.compute_bar_chord_tones(ChordDegrees, RootPC, Mode),
 
-    % Apply chord-tone constraints on strong beats
-    apply_chord_tone_constraints(Pitches, BarChordTones, NumBars, Density, ScaleNotes),
+    % Apply chord-tone constraints: downbeat hard, beat 3 by actual tick position
+    apply_chord_tone_constraints_ticked(Pitches, Durations, BarChordTones, NumBars, Density, ScaleNotes, TicksPerBeat),
 
     % Apply phrase structure (full A/A' period when the harmony is periodic)
     apply_period_structure(Pitches, Durations, KeyRoot, ScaleNotes, NumBars, Density, ChordDegrees),
@@ -1392,17 +1473,21 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     apply_base_melodic_constraints_ctx(Pitches, KeyRoot, MaxInterval, ScaleNotes, Context),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RegCostR = apply_register_arc(Pitches, Preferences),
 
-    % Apply thematic recall if original pitches are provided
+    % Thematic recall as soft constraint
     if get_recall_pitches(Preferences, RecallPitchesR1) then
-        motif.apply_thematic_recall(RecallPitchesR1, Pitches, 0.8)
+        motif.apply_thematic_recall_soft(RecallPitchesR1, Pitches, 60, RecallCostR1),
+        PitchCostR1 #= PitchCost + RegCostR + RecallCostR1
+    else
+        PitchCostR1 #= PitchCost + RegCostR
     end,
 
     % Apply rhythm constraints
     RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
 
     % Solve pitches then durations, minimizing each cost
-    solve_rhythm_melody(Pitches, Durations, PitchCost, RhythmCost, Randomness),
+    solve_rhythm_melody(Pitches, Durations, PitchCostR1, RhythmCost, Randomness),
 
     % Build melody with variable durations
     Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat).
@@ -1443,20 +1528,23 @@ apply_rhythm_soft_constraints(Durations, Genre) = TotalCost =>
 % optimization actually runs instead of timing out to a first-feasible melody.
 solve_rhythm_melody(Pitches, Durations, PitchSideCost, RhythmCost, Randomness) =>
     SolveOpts = constraint_selector.picat_solve_options(Randomness),
-    solve_minimizing(Pitches, PitchSideCost, SolveOpts, "pitch"),
-    solve_minimizing(Durations, RhythmCost, SolveOpts, "rhythm").
+    solve_minimizing(Pitches, PitchSideCost, SolveOpts, "pitch", 9000),
+    solve_minimizing(Durations, RhythmCost, SolveOpts, "rhythm", 4000).
 
 % Minimize Cost over Vars within a time budget, ANYTIME-style: every improving
 % solution is recorded via the solver's report hook, so when the budget expires
 % we keep the best solution found instead of discarding all progress (which is
 % what a plain time_out(solve(min(...))) does — and it expires on most segments).
 solve_minimizing(Vars, Cost, SolveOpts, Label) =>
+    solve_minimizing(Vars, Cost, SolveOpts, Label, 9000).
+
+solve_minimizing(Vars, Cost, SolveOpts, Label, BudgetMs) =>
     if (integer(Cost), Cost == 0) then
         solve(SolveOpts, Vars)
     else
         Map = get_global_map(),
         Map.put(anytime_best_solution, none),
-        if time_out(solve($[min(Cost), report(record_best_solution(Vars))|SolveOpts], Vars ++ [Cost]), 5000, Status), Status == success then
+        if time_out(solve($[min(Cost), report(record_best_solution(Vars))|SolveOpts], Vars ++ [Cost]), BudgetMs, Status), Status == success then
             true
         else
             Best = Map.get(anytime_best_solution, none),
@@ -1585,7 +1673,7 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     RootPC4 = KeyRoot mod 12,
     ChordDegrees4 = segment_progression(Preferences, NumBars, Mode, Genre),
     BarChordTones4 = chord_generator.compute_bar_chord_tones(ChordDegrees4, RootPC4, Mode),
-    apply_chord_tone_constraints(Pitches, BarChordTones4, NumBars, Density, ScaleNotes),
+    apply_chord_tone_constraints_ticked(Pitches, Durations, BarChordTones4, NumBars, Density, ScaleNotes, TicksPerBeat),
     apply_period_structure(Pitches, Durations, KeyRoot, ScaleNotes, NumBars, Density, ChordDegrees4),
 
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
@@ -1594,11 +1682,15 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RegCostCR = apply_register_arc(Pitches, Preferences),
     RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
 
-    % Apply thematic recall if original pitches are provided
+    % Thematic recall as soft constraint
     if get_recall_pitches(Preferences, RecallPitchesR2) then
-        motif.apply_thematic_recall(RecallPitchesR2, Pitches, 0.8)
+        motif.apply_thematic_recall_soft(RecallPitchesR2, Pitches, 60, RecallCostR2),
+        PitchCostR2 #= PitchCost + RegCostCR + RecallCostR2
+    else
+        PitchCostR2 #= PitchCost + RegCostCR
     end,
 
     % Connection constraint
@@ -1607,7 +1699,7 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
         Pitches[1] :: ValidConnectionNotes
     end,
 
-    solve_rhythm_melody(Pitches, Durations, PitchCost, RhythmCost, Randomness),
+    solve_rhythm_melody(Pitches, Durations, PitchCostR2, RhythmCost, Randomness),
 
     Melody = build_melody_with_durations(Pitches, Durations, NumBars, Density, VoiceId, VelBase, VelVar, Randomness, TicksPerBar, TicksPerBeat).
 
@@ -1656,7 +1748,7 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
     RootPC5 = KeyRoot mod 12,
     ChordDegrees5 = segment_progression(Preferences, NumBars, Mode, Genre),
     BarChordTones5 = chord_generator.compute_bar_chord_tones(ChordDegrees5, RootPC5, Mode),
-    apply_chord_tone_constraints(Pitches, BarChordTones5, NumBars, Density, ScaleNotes),
+    apply_chord_tone_constraints_ticked(Pitches, Durations, BarChordTones5, NumBars, Density, ScaleNotes, TicksPerBeat),
     apply_period_structure(Pitches, Durations, KeyRoot, ScaleNotes, NumBars, Density, ChordDegrees5),
 
     ConstraintSet = constraint_selector.select_constraints(Genre, Preferences, Randomness),
@@ -1665,11 +1757,15 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
     apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
     PitchCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RegCostCRM = apply_register_arc(Pitches, Preferences),
     RhythmCost = apply_rhythm_soft_constraints(Durations, Genre),
 
-    % Apply thematic recall if original pitches are provided
+    % Thematic recall as soft constraint
     if get_recall_pitches(Preferences, RecallPitchesRM1) then
-        motif.apply_thematic_recall(RecallPitchesRM1, Pitches, 0.8)
+        motif.apply_thematic_recall_soft(RecallPitchesRM1, Pitches, 60, RecallCostRM1),
+        PitchCostRM1 #= PitchCost + RegCostCRM + RecallCostRM1
+    else
+        PitchCostRM1 #= PitchCost + RegCostCRM
     end,
 
     % Connection constraint
@@ -1682,9 +1778,9 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
     if MotifIntervals != [], not constraint_selector.skip_soft_optimization(Randomness) then
         PhraseStartsRM = motif_phrase_starts(NumBars, Density, ChordDegrees5),
         motif.apply_motif_statements(Pitches, MotifIntervals, PhraseStartsRM, MotifWeight, MotifCost),
-        MelodyCost #= PitchCost + MotifCost
+        MelodyCost #= PitchCostRM1 + MotifCost
     else
-        MelodyCost = PitchCost
+        MelodyCost = PitchCostRM1
     end,
 
     solve_rhythm_melody(Pitches, Durations, MelodyCost, RhythmCost, Randomness),
@@ -1727,11 +1823,15 @@ generate_connected_segment_with_genre(MusicParams, KeyRoot, NumBars, PrevLastPit
     % Apply constraints
     apply_base_melodic_constraints(Pitches, KeyRoot, MaxInterval, ScaleNotes),
     apply_genre_hard_constraints(Pitches, KeyRoot, ConstraintSet),
-    TotalCost = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    BaseCostCG = apply_genre_soft_constraints(Pitches, KeyRoot, ConstraintSet, Randomness),
+    RegCostCG = apply_register_arc(Pitches, Preferences),
 
-    % Apply thematic recall if original pitches are provided
+    % Thematic recall as soft constraint
     if get_recall_pitches(Preferences, RecallPitchesC1) then
-        motif.apply_thematic_recall(RecallPitchesC1, Pitches, 0.8)
+        motif.apply_thematic_recall_soft(RecallPitchesC1, Pitches, 60, RecallCostC1),
+        TotalCost #= BaseCostCG + RegCostCG + RecallCostC1
+    else
+        TotalCost #= BaseCostCG + RegCostCG
     end,
 
     % Connection constraint
@@ -1770,12 +1870,57 @@ apply_chord_tone_constraints(Pitches, BarChordTones, NumBars, Density, ScaleNote
             % Beat 1 of each bar (first note) MUST be a chord tone
             Pitches[BarStart] :: Valid1
         end,
-        % Beat 3 (if density >= 4, third note in bar) should be chord tone
-        if Density >= 4 then
-            Beat3Idx = BarStart + 2,
+        % Beat 3: with Density evenly-spaced notes per bar, the note starting
+        % on beat 3 is note Density/2 + 1 of the bar (even densities only)
+        if Density >= 2, Density mod 2 == 0 then
+            Beat3Idx = BarStart + Density // 2,
             Valid3 = [N : N in ScaleNotes, pc_in_list(N mod 12, ChordPCs3)],
             if Valid3 != [], Beat3Idx =< length(Pitches) then
                 Pitches[Beat3Idx] :: Valid3
+            end
+        end
+    end.
+
+% Tick-aware variant for the variable-rhythm paths: with CP duration
+% variables the bar's Nth note has no fixed beat, so anchoring "the third
+% note" (as the isochronous variant does) lands on arbitrary beats. Here the
+% bar's first note is hard-constrained as before, and any note whose start
+% tick lands exactly on beat 3 is required (by reified implication) to be a
+% chord tone of that half of the bar — split ((DegA,DegB)) bars check their
+% second chord. Notes elsewhere in the bar stay free (passing/neighbor tones).
+apply_chord_tone_constraints_ticked(Pitches, Durations, BarChordTones, NumBars, Density, ScaleNotes, TicksPerBeat) =>
+    Beat3Tick = 2 * TicksPerBeat,
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * Density + 1,
+        BarEnd = min(Bar * Density, length(Pitches)),
+        Entry = BarChordTones[Bar],
+        if Entry = $split(PCsA, PCsB) then
+            ChordPCs1 = PCsA,
+            ChordPCs3 = PCsB
+        else
+            ChordPCs1 = Entry,
+            ChordPCs3 = Entry
+        end,
+        Valid1 = [N : N in ScaleNotes, pc_in_list(N mod 12, ChordPCs1)],
+        if Valid1 != [] then
+            Pitches[BarStart] :: Valid1
+        end,
+        Valid3 = [N : N in ScaleNotes, pc_in_list(N mod 12, ChordPCs3)],
+        if Valid3 != [], BarEnd > BarStart then
+            NumIn = BarEnd - BarStart + 1,
+            % StartTicks[K]: tick offset of the bar's Kth note from the barline
+            StartTicks = new_list(NumIn),
+            StartTicks :: 0..64,
+            StartTicks[1] #= 0,
+            foreach(K in 2..NumIn)
+                StartTicks[K] #= StartTicks[K-1] + Durations[BarStart + K - 2]
+            end,
+            foreach(K in 2..NumIn)
+                OnBeat3 :: 0..1,
+                OnBeat3 #<=> (StartTicks[K] #= Beat3Tick),
+                IsChordTone :: 0..1,
+                IsChordTone #<=> sum([Pitches[BarStart + K - 1] #= V : V in Valid3]) #>= 1,
+                OnBeat3 #=> IsChordTone
             end
         end
     end.

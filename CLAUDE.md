@@ -172,7 +172,13 @@ Multi-start best-of-N; each round boosts weights of top-3 worst-violated constra
 B/C sections in form-based generation automatically use a contrasting genre (e.g., `classical_period` → `sturm_und_drang`). Defined in `form.contrast_genre()`. Disable with `contrast=off`.
 
 ### Chord-First Melody
-The chord progression is planned in `companion.pi` before melody solving (see "Single Source of Harmonic Truth"). Melody beats 1+3 constrained to chord tones. Phrase structure: antecedent ends open (deg 2/5/7), consequent ends on tonic. Soft constraints: `register_target`, `sequential_repetition`, `weak_beat_justified`.
+The chord progression is planned in `companion.pi` before melody solving (see "Single Source of Harmonic Truth"). Melody downbeats are hard-constrained to chord tones; beat 3 likewise — in rhythm mode via `apply_chord_tone_constraints_ticked` (reified on actual start ticks, since "the bar's 3rd note" has no fixed beat with CP durations). Phrase structure: antecedent ends open (deg 2/5/7), consequent ends on tonic. Soft constraints: `register_target`, `sequential_repetition`, `weak_beat_justified`, `no_zigzag` (penalizes step-reversals → scalar runs), `leap_presence` (≥1 skip per 8 intervals).
+
+### Register Arc / Piece Climax
+`companion.choose_climax_segment` picks the climax segment (highest mood-driven voice; ties → golden-ratio index) and an absolute piece-climax pitch. Each segment gets `register_center` (arc position mapped into its voice range), a hard tessitura window (center−5 .. center+11, capped at `register_ceiling` = climax−2 for non-climax segments, extended to `climax_target` for the climax segment), a soft centering cost, and (climax segment) reach-the-top + don't-plateau costs — all in `melody.apply_register_arc`. This is what makes pieces rise to a single high point; without the hard window, min-value labeling pins melodies to the bottom of the voice range.
+
+### Solver Defaults
+CLI default `randomness=0.2`; any randomness ≥0.05 turns on `rand_val` labeling (variety), optimization always on. Anytime budgets: 9s pitch solve, 4s rhythm solve (`solve_minimizing/5`).
 
 ### Piano Accompaniment (`accomp=pattern`)
 Patterns: `alberti` (classical), `arpeggiated` (baroque/romantic), `stride` (jazz), `block` (folk/sacred), `none`. Multi-track MIDI: voices ≤9 = Track 0 (melody), voice ≥10 = Track 1 (accompaniment).

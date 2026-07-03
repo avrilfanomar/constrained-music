@@ -152,21 +152,24 @@ def rhythm_stats(melody):
 
 
 def harmony_agreement(melody, accomp):
-    """Fraction of melody strong-beat notes whose pitch class is in the
-    accompaniment's sounding chord for that half of the bar."""
+    """Fraction of melody strong-beat notes whose pitch class belongs to the
+    accompaniment's chord for that bar.
+
+    Accompaniment figures (Alberti, arpeggios) spread the triad across the
+    bar — a half-bar snapshot often sounds only root+fifth while the melody
+    correctly holds the third — so chord membership is judged against the
+    union of accompaniment pitch classes over the whole bar."""
     if not accomp:
         return None
-    acc_pcs = {}  # (bar, half) -> set of pitch classes
+    acc_pcs = {}  # bar -> set of pitch classes sounded during the bar
     for n in accomp:
-        half = 0 if n["beat"] < 3 else 1
-        acc_pcs.setdefault((n["bar"], half), set()).add(n["pitch"] % 12)
+        acc_pcs.setdefault(n["bar"], set()).add(n["pitch"] % 12)
 
     checked = agreed = 0
     for n in melody:
         if n["beat"] not in (1, 3) or n.get("sub", 0.0) > 0.05:
             continue
-        half = 0 if n["beat"] < 3 else 1
-        pcs = acc_pcs.get((n["bar"], half)) or acc_pcs.get((n["bar"], 1 - half))
+        pcs = acc_pcs.get(n["bar"])
         if not pcs:
             continue
         checked += 1
@@ -175,9 +178,14 @@ def harmony_agreement(melody, accomp):
     return agreed / checked if checked else None
 
 
-def climax_count(pitches):
-    top = max(pitches)
-    return sum(1 for p in pitches if p == top)
+def climax_bar_spread(melody):
+    """Number of distinct bars containing the piece's highest pitch.
+
+    A/A' period restatement legitimately repeats the peak bar (antecedent
+    and consequent), so 2-3 bars is idiomatic; a top note scattered across
+    many bars means no real climax."""
+    top = max(n["pitch"] for n in melody)
+    return len({n["bar"] for n in melody if n["pitch"] == top})
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +211,7 @@ TARGET_METRICS = {
     "rhythm_entropy": ("rhythm entropy (bits)", 1.0, 2.4, 1.0, 1.0),
     "bar_rhythm_repeat": ("bar-rhythm repetition", 0.5, 1.0, 1.0, 0.5),
     "harmony_agreement": ("harmony agreement", 0.85, 1.0, 2.0, 0.15),
-    "climax_count": ("climax uniqueness (count)", 1.0, 2.0, 0.8, 2.0),
+    "climax_bar_spread": ("climax spread (bars)", 1.0, 3.0, 0.8, 2.0),
 }
 
 
@@ -233,12 +241,12 @@ def evaluate(path, ref):
 
     entropy, bar_repeat = rhythm_stats(melody)
     agreement = harmony_agreement(melody, accomp)
-    clx = climax_count(pitches)
+    clx = climax_bar_spread(melody)
     target_values = {
         "rhythm_entropy": entropy,
         "bar_rhythm_repeat": bar_repeat,
         "harmony_agreement": agreement,
-        "climax_count": float(clx),
+        "climax_bar_spread": float(clx),
     }
     for key, (label, lo, hi, weight, scale) in TARGET_METRICS.items():
         val = target_values[key]

@@ -223,6 +223,18 @@ apply_soft(consonant_outline, Notes, _Root, Weight, Cost) =>
     reify_consonant_outline(Notes, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+% No zigzag: penalize immediate direction reversals between two STEPS
+% (encourages scalar runs; reversals after leaps stay free/required)
+apply_soft(no_zigzag, Notes, _Root, Weight, Cost) =>
+    reify_no_zigzag(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
+% Leap presence: each 2-bar window should contain at least one skip/leap
+% (>= 3 semitones) so melodies outline chords, not just walk scales
+apply_soft(leap_presence, Notes, _Root, Weight, Cost) =>
+    reify_leap_presence(Notes, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown constraint returns 0 cost (no penalty)
 apply_soft(_UnknownId, _Notes, _Root, _Weight, Cost) =>
     Cost #= 0.
@@ -1669,6 +1681,58 @@ reify_consonant_outline(Notes, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% No zigzag: a violation is a direction reversal where BOTH intervals are
+% steps (1-2 semitones). Masterpiece melodies move in short scalar runs and
+% reverse direction on ~40% of moves; unconstrained CP output reverses on
+% ~90% (audible as aimless wobbling). Reversals around leaps are untouched —
+% leap_recovery actively requires those.
+reify_no_zigzag(Notes, ViolationCount) =>
+    Len = length(Notes),
+    if Len >= 3 then
+        Violations = new_list(Len - 2),
+        Violations :: 0..1,
+        foreach(I in 1..Len-2)
+            Iv1 :: -24..24,
+            Iv2 :: -24..24,
+            Iv1 #= Notes[I+1] - Notes[I],
+            Iv2 #= Notes[I+2] - Notes[I+1],
+            UpDown :: 0..1,
+            DownUp :: 0..1,
+            UpDown #<=> ((Iv1 #>= 1) #/\ (Iv1 #=< 2) #/\ (Iv2 #=< -1) #/\ (Iv2 #>= -2)),
+            DownUp #<=> ((Iv1 #=< -1) #/\ (Iv1 #>= -2) #/\ (Iv2 #>= 1) #/\ (Iv2 #=< 2)),
+            Violations[I] #<=> (UpDown #\/ DownUp)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
+% Leap presence: per window of 8 consecutive intervals (roughly 1-2 bars),
+% at least one skip or leap (>= 3 semitones). Corpus melodies outline chords
+% with skips ~10% of the time; all-stepwise output sounds like an exercise.
+reify_leap_presence(Notes, ViolationCount) =>
+    Len = length(Notes),
+    Window = 8,
+    if Len >= Window + 1 then
+        NumW = (Len - 1) // Window,
+        Violations = new_list(NumW),
+        Violations :: 0..1,
+        foreach(K in 1..NumW)
+            Start = (K - 1) * Window + 1,
+            HasLeaps = new_list(Window),
+            HasLeaps :: 0..1,
+            foreach(J in 1..Window)
+                IvL :: -24..24,
+                IvL #= Notes[Start + J] - Notes[Start + J - 1],
+                HasLeaps[J] #<=> ((IvL #>= 3) #\/ (IvL #=< -3))
+            end,
+            Violations[K] #<=> (sum(HasLeaps) #= 0)
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
 % ==============================================================================
 % UTILITY FUNCTIONS
 % ==============================================================================
@@ -1722,7 +1786,9 @@ supported_soft_constraints() = [
     contour_smoothness,
     expressive_leaps,
     consonant_outline,
-    compound_interval_recovery
+    compound_interval_recovery,
+    no_zigzag,
+    leap_presence
 ].
 
 % Check if a constraint ID is supported for soft application

@@ -278,8 +278,11 @@ skip_soft_optimization(_Randomness) => fail.
 
 % Get solve options for Picat CP solver
 picat_solve_options(Randomness) = Opts =>
-    if Randomness < 0.3 then
-        Opts = [ff]  % First-fail, deterministic
+    if Randomness < 0.05 then
+        Opts = [ff]  % Deterministic min-value labeling (reproducible)
     else
-        Opts = [ff, rand_val]  % First-fail with random value selection
+        % Any nonzero randomness: random value selection. This is where
+        % run-to-run variety comes from (optimization always stays on);
+        % min-value labeling also biases melodies toward domain bottoms.
+        Opts = [ff, rand_val]
     end.

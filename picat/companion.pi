@@ -321,21 +321,74 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     println("Done! Run midi_writer.py to convert to MIDI."),
     nl.
 
+% Piece-level register arc: each segment gets a target register center on an
+% arc rising toward the piece climax and falling after; the climax segment
+% must touch the PIECE climax pitch (an absolute pitch, the same for the
+% whole piece) and every other segment is capped just below it, so the piece
+% has ONE highest moment. The climax lands on the segment whose mood-driven
+% voice reaches highest (an arousal ramp climaxes at the end, like a real
+% crescendo piece); among equally-high segments the golden-ratio one wins.
+register_arc_prefs(Params, SegIndex, TotalSegs, ClimaxIdx, PieceClimax) = RegPrefs =>
+    Voice = get_voice(Params),
+    Voice = $voice(_, _, _, $range(Low, High)),
+    T = (SegIndex - 0.5) / max(1, TotalSegs),
+    Peak = 0.618,
+    Arc = 1.0 - abs(T - Peak) / max(Peak, 1.0 - Peak),
+    Center = Low + round((0.30 + 0.40 * Arc) * (High - Low)),
+    if SegIndex == ClimaxIdx then
+        RegPrefs = [register_center=Center, register_span=4, climax_target=PieceClimax]
+    else
+        RegPrefs = [register_center=Center, register_span=4, register_ceiling=PieceClimax - 2]
+    end.
+
+% Index of the segment nearest the golden ratio of the piece
+climax_segment_index(TotalSegs) = max(1, min(TotalSegs, round(0.618 * TotalSegs))).
+
+% The comfortable top of a segment's voice (its own potential climax)
+segment_own_climax(Seg) = P =>
+    Params = get_segment_params(Seg),
+    Voice = get_voice(Params),
+    Voice = $voice(_, _, _, $range(Low, High)),
+    P = Low + round(0.85 * (High - Low)).
+
+% Choose the climax segment and the absolute piece-climax pitch: the segment
+% whose voice tops out highest; ties broken toward the golden-ratio index.
+choose_climax_segment(Segments) = (ClimaxIdx, PieceClimax) =>
+    N = length(Segments),
+    Climaxes = [segment_own_climax(S) : S in Segments],
+    PieceClimax = max(Climaxes),
+    Golden = climax_segment_index(N),
+    BestIdx = 0,
+    BestDist = N + 1,
+    foreach(I in 1..N)
+        if Climaxes[I] == PieceClimax, abs(I - Golden) < BestDist then
+            BestIdx := I,
+            BestDist := abs(I - Golden)
+        end
+    end,
+    ClimaxIdx = BestIdx.
+
 % Generate segments with genre-based constraints (with motif memory)
 % Returns (AllNotes, ChordPlan): ChordPlan is the list of $chord_span() entries
 % describing the progression each segment's melody was constrained against,
 % so the accompaniment can play the exact same chords.
 generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences) = (AllNotes, ChordPlan) =>
-    (AllNotes, ChordPlan) = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, [], [], []).
+    TotalSegs = length(Segments),
+    ClimaxInfo = choose_climax_segment(Segments),
+    (AllNotes, ChordPlan) = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, [], [], [], TotalSegs, ClimaxInfo).
 
-generate_segments_genre_helper([], _, _, _, _, _, Acc, _MotifIntervals, PlanAcc) = (flatten(reverse(Acc)), reverse(PlanAcc)).
-generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc, MotifIntervals, PlanAcc) = Result =>
+generate_segments_genre_helper([], _, _, _, _, _, Acc, _MotifIntervals, PlanAcc, _TotalSegs, _ClimaxInfo) = (flatten(reverse(Acc)), reverse(PlanAcc)).
+generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc, MotifIntervals, PlanAcc, TotalSegs, ClimaxInfo) = Result =>
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
     MotifWeight = 80,  % Weight per phrase start lacking a motif statement
 
     % Inject segment mood into preferences for emotional constraints
     SegmentMood = get_segment_mood(Seg),
+
+    % Piece-level register arc (single absolute climax pitch for the piece)
+    (ClimaxIdx, PieceClimax) = ClimaxInfo,
+    RegPrefs = register_arc_prefs(Params, SegIndex, TotalSegs, ClimaxIdx, PieceClimax),
 
     % Plan the segment's chord progression up front (single source of harmonic
     % truth: melody solve and accompaniment both use this exact progression)
@@ -361,7 +414,7 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     NumRounds = refiner.get_refine_rounds(Preferences),
 
     % Round 1: generate normally
-    MoodPrefs1 = [mood=SegmentMood, progression=SegDegrees | Preferences],
+    MoodPrefs1 = [mood=SegmentMood, progression=SegDegrees | RegPrefs ++ Preferences],
     SegMelody1 = try_genre_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs1, UseRhythm, PrevLastPitch, MotifIntervals, MotifWeight),
 
     % Refinement rounds
@@ -375,7 +428,7 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
         foreach(Round in 2..NumRounds)
             advance_random_state(Round * 73),
             BoostedPrefs = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelody), KeyRoot, Genre, Preferences, Round),
-            BoostedMoodPrefs = [mood=SegmentMood, progression=SegDegrees | BoostedPrefs],
+            BoostedMoodPrefs = [mood=SegmentMood, progression=SegDegrees | RegPrefs ++ BoostedPrefs],
             % Minimum randomness that enables rand_val labeling for round diversity
             % (optimization always stays on; see constraint_selector.solve_strategy)
             RefinedParams = refiner.ensure_min_randomness(Params, 0.3),
@@ -428,7 +481,7 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     % Adjust timing
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
-    Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, [ChordSpan | PlanAcc]).
+    Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, [ChordSpan | PlanAcc], TotalSegs, ClimaxInfo).
 
 % ==============================================================================
 % SEGMENT GENERATION HELPERS (for refinement)
@@ -734,13 +787,19 @@ get_style_overrides(Preferences, BaseGenre) = Overrides =>
 generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = (AllNotes, ChordPlan) =>
     % Determine style overrides for section contrast
     StyleOverrides = cond(Genre != none, get_style_overrides(Preferences, Genre), []),
-    (AllNotes, ChordPlan) = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, StyleOverrides, 1, 0, [], [], new_map(), new_map(), []).
+    TotalSegsF = length(Segments),
+    ClimaxInfoF = choose_climax_segment(Segments),
+    (AllNotes, ChordPlan) = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, StyleOverrides, 1, 0, [], [], new_map(), new_map(), [], TotalSegsF, ClimaxInfoF).
 
-generate_form_segments_helper([], _, _, _, _, _, _, _, Acc, _MotifIntervals, _SectionPitchMap, _SectionChordMap, PlanAcc) = (flatten(reverse(Acc)), reverse(PlanAcc)).
-generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, StyleOverrides, SegIndex, CurrentBar, Acc, MotifIntervals, SectionPitchMap, SectionChordMap, PlanAcc) = Result =>
+generate_form_segments_helper([], _, _, _, _, _, _, _, Acc, _MotifIntervals, _SectionPitchMap, _SectionChordMap, PlanAcc, _TotalSegs, _ClimaxInfo) = (flatten(reverse(Acc)), reverse(PlanAcc)).
+generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, StyleOverrides, SegIndex, CurrentBar, Acc, MotifIntervals, SectionPitchMap, SectionChordMap, PlanAcc, TotalSegs, ClimaxInfo) = Result =>
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
     MotifWeight = 80,
+
+    % Piece-level register arc (single absolute climax pitch for the piece)
+    (ClimaxIdxF, PieceClimaxF) = ClimaxInfo,
+    RegPrefsF = register_arc_prefs(Params, SegIndex, TotalSegs, ClimaxIdxF, PieceClimaxF),
 
     % Get form context
     SectionKey = get_form_segment_key(Seg),
@@ -805,7 +864,7 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     % Generate melody (genre-based path uses try_genre_segment; non-genre uses direct calls)
     if SectionGenre != none then
         % Genre-based: use try_genre_segment with refinement
-        MoodPrefsF1 = [mood=SegmentMood, progression=SegDegreesF | SectionPrefsF],
+        MoodPrefsF1 = [mood=SegmentMood, progression=SegDegreesF | RegPrefsF ++ SectionPrefsF],
         SegMelodyF1 = try_genre_segment(Params, TransposedKeyRoot, NumBars, SectionGenre, MoodPrefsF1, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
 
         if NumRoundsF > 1, SegMelodyF1 != [] then
@@ -818,7 +877,7 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
             foreach(RoundF in 2..NumRoundsF)
                 advance_random_state(RoundF * 73),
                 BoostedPrefsF = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelodyF), TransposedKeyRoot, SectionGenre, SectionPrefsF, RoundF),
-                BoostedMoodPrefsF = [mood=SegmentMood, progression=SegDegreesF | BoostedPrefsF],
+                BoostedMoodPrefsF = [mood=SegmentMood, progression=SegDegreesF | RegPrefsF ++ BoostedPrefsF],
                 % Minimum randomness that enables rand_val labeling for round diversity
                 % (optimization always stays on; see constraint_selector.solve_strategy)
                 RefinedParamsF = refiner.ensure_min_randomness(Params, 0.3),
@@ -889,7 +948,7 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
     Result = generate_form_segments_helper(Rest, FormSections, KeyRoot, Genre, Preferences, StyleOverrides,
-                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, SectionPitchMap, SectionChordMap, [ChordSpanF | PlanAcc]).
+                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, SectionPitchMap, SectionChordMap, [ChordSpanF | PlanAcc], TotalSegs, ClimaxInfo).
 
 % Pitch class to note name (copied from form.pi for local use)
 pitch_class_name(0) = "C".
@@ -1184,7 +1243,10 @@ main(Args) =>
     elseif FirstArg == "demo" then
         % Parse additional options for demo (genre, accomp, randomness, etc.)
         ParsedOpts = parse_args(RestArgs),
-        Randomness = get_arg(ParsedOpts, randomness, 0.0),
+        % Default 0.2: rand_val labeling varies output run-to-run without
+        % weakening optimization; deterministic solves over-repeat 4-gram
+        % patterns vs the masterpiece corpus (randomness=0.0 restores)
+        Randomness = get_arg(ParsedOpts, randomness, 0.2),
         % Quality path by default; genre=none / rhythm=off restore legacy behavior
         Genre = get_arg(ParsedOpts, genre, classical_period),
         Accomp = get_arg(ParsedOpts, accomp, auto),
@@ -1219,7 +1281,8 @@ main(Args) =>
     % Extract options
     Duration = get_arg(ParsedArgs, duration, 300),
     Output = get_arg(ParsedArgs, output, "session.json"),
-    Randomness = get_arg(ParsedArgs, randomness, 0.0),
+    % Default 0.2: variety without weakening optimization (see demo branch)
+    Randomness = get_arg(ParsedArgs, randomness, 0.2),
 
     % Handle VA coordinates or presets - at least one of from/from_va and to/to_va required
     FromVA = get_arg(ParsedArgs, from_va, none),

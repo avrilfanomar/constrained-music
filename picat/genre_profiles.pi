@@ -31,6 +31,8 @@ genre_profile(
         (authentic_cadence_melody, 75),
         (large_leap_recovery, 75),
         (mostly_stepwise, 75),
+        (no_zigzag, 30),
+        (leap_presence, 30),
         (chord_tone_on_strong_beats, 85),
         (cadential_descent, 70),
         (peak_approach_exit, 70),
@@ -83,6 +85,8 @@ genre_profile(
         (register_consistency, 45),
         (register_target, 40),
         (no_repetitive_intervals, 40),
+        (no_zigzag, 25),
+        (leap_presence, 30),
         (consonant_outline, 70)
     ],
     [max_interval=6, tempo_range=(60,120), accomp_pattern=arpeggiated]
@@ -108,6 +112,8 @@ genre_profile(
         (large_leap_recovery, 45),
         (weak_beat_justified, 65),
         (prefer_smaller_intervals, 35),
+        (no_zigzag, 20),
+        (leap_presence, 35),
         (consonant_outline, 50)
     ],
     [max_interval=7, tempo_range=(50,160), min_range=7, accomp_pattern=arpeggiated]
@@ -147,6 +153,8 @@ genre_profile(
     [
         (chord_tone_on_strong_beats, 85),
         (mostly_stepwise, 85),
+        (no_zigzag, 20),
+        (leap_presence, 20),
         (consonant_leaps_only, 80),
         (phrase_ends_stable, 75),
         (leap_recovery, 70),
@@ -314,6 +322,8 @@ genre_profile(
     [no_augmented_seconds, no_tritone_outline, max_consecutive_repeats, max_range],
     [
         (mostly_stepwise, 90),
+        (no_zigzag, 25),
+        (leap_presence, 25),
         (consonant_leaps_only, 85),
         (leading_tone_resolution, 80),
         (prefer_smaller_intervals, 80),
@@ -356,6 +366,8 @@ genre_profile(
         (phrase_arch_contour, 75),
         (large_leap_recovery, 75),
         (mostly_stepwise, 75),
+        (no_zigzag, 30),
+        (leap_presence, 30),
         (cadential_descent, 70),
         (peak_approach_exit, 70),
         (max_octave_leaps, 70),
@@ -397,6 +409,8 @@ genre_profile(
         (large_leap_recovery, 60),
         (cadential_descent, 60),
         (mostly_stepwise, 55),
+        (no_zigzag, 20),
+        (leap_presence, 40),
         (peak_approach_exit, 55),
         (antecedent_consequent, 55),
         (min_unique_pitches, 55),
@@ -423,6 +437,8 @@ genre_profile(
     [min_range, max_consecutive_repeats],
     [
         (chord_tone_on_strong_beats, 80),
+        (no_zigzag, 20),
+        (leap_presence, 35),
         (phrase_ends_stable, 75),
         (min_unique_pitches, 70),
         (no_repetitive_intervals, 55),
