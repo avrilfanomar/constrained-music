@@ -1144,6 +1144,10 @@ apply_soft_rhythm(no_short_note_isolation, Durations, Weight, Cost) =>
     reify_no_short_note_isolation(Durations, ViolationCount),
     Cost #= Weight * ViolationCount.
 
+apply_soft_rhythm(long_short_pattern, Durations, Weight, Cost) =>
+    reify_long_short_pattern(Durations, ViolationCount),
+    Cost #= Weight * ViolationCount.
+
 % Default: unknown rhythm constraint returns 0 cost
 apply_soft_rhythm(_UnknownId, _Durations, _Weight, Cost) =>
     Cost #= 0.
@@ -1227,13 +1231,33 @@ reify_no_short_note_isolation(Durations, ViolationCount) =>
         ViolationCount = 0
     end.
 
+% Long-short pattern (trochaic rhythm, common in classical dances):
+% each odd-position note should be at least as long as the note that follows.
+% Violation per pair where the short note comes first.
+reify_long_short_pattern(Durations, ViolationCount) =>
+    Len = length(Durations),
+    if Len >= 2 then
+        PairStarts = [I : I in 1..2..Len-1],
+        NumPairs = length(PairStarts),
+        Violations = new_list(NumPairs),
+        Violations :: 0..1,
+        foreach(K in 1..NumPairs)
+            I = PairStarts[K],
+            Violations[K] #<=> (Durations[I] #< Durations[I+1])
+        end,
+        ViolationCount #= sum(Violations)
+    else
+        ViolationCount = 0
+    end.
+
 % List of supported rhythmic constraints
 supported_rhythm_constraints() = [
     opening_note_duration,
     rhythmic_acceleration,
     strong_phrase_start,
     rhythmic_cadence,
-    no_short_note_isolation
+    no_short_note_isolation,
+    long_short_pattern
 ].
 
 % ==============================================================================

@@ -616,12 +616,13 @@ rhythm_profile(traditional_jazz) = [
     (no_short_note_isolation, 30)
 ].
 
-% Folk - simple, regular rhythms
+% Folk - simple, regular rhythms with a long-short (trochaic) lilt
 rhythm_profile(folk_traditional) = [
     (opening_note_duration, 60),
     (strong_phrase_start, 65),
     (rhythmic_cadence, 60),
-    (no_short_note_isolation, 50)
+    (no_short_note_isolation, 50),
+    (long_short_pattern, 30)
 ].
 
 % Contemporary - minimal rhythmic rules
@@ -638,12 +639,13 @@ rhythm_profile(sacred_chant) = [
     (no_short_note_isolation, 60)
 ].
 
-% Children's Songs - very simple, clear meter
+% Children's Songs - very simple, clear meter, long-short sing-song rhythm
 rhythm_profile(children_songs) = [
     (opening_note_duration, 70),
     (strong_phrase_start, 75),
     (rhythmic_cadence, 70),
-    (no_short_note_isolation, 65)
+    (no_short_note_isolation, 65),
+    (long_short_pattern, 35)
 ].
 
 % Minimalist - repetitive patterns
@@ -668,13 +670,14 @@ rhythm_profile(blues) = [
     (no_short_note_isolation, 35)
 ].
 
-% Galant (Early Classical) - light, decorative
+% Galant (Early Classical) - light, decorative, dance-like long-short pairs
 rhythm_profile(galant) = [
     (opening_note_duration, 65),
     (rhythmic_acceleration, 50),
     (strong_phrase_start, 70),
     (rhythmic_cadence, 65),
-    (no_short_note_isolation, 55)
+    (no_short_note_isolation, 55),
+    (long_short_pattern, 25)
 ].
 
 % High Classical - maximum structure

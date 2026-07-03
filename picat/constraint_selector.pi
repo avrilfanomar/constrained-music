@@ -262,18 +262,19 @@ print_constraint_set(ConstraintSet) =>
 
 % Get solve options based on randomness
 % Used by melody generation to decide optimization approach
+% Soft-constraint optimization always runs; randomness only changes labeling.
+% Variation comes from rand_val labeling and weight perturbation, never from
+% abandoning the objective (that produced unmusical output at high randomness).
 solve_strategy(Randomness) = Strategy =>
     if Randomness < 0.3 then
         Strategy = optimize     % Minimize cost strictly
-    elseif Randomness < 0.7 then
-        Strategy = optimize_random  % Optimize with random value selection
     else
-        Strategy = satisfice    % Accept any valid solution
+        Strategy = optimize_random  % Optimize with random value selection
     end.
 
 % Should we skip soft constraint optimization?
-skip_soft_optimization(Randomness) =>
-    Randomness >= 0.8.
+% Never: soft constraints are what makes the output musical.
+skip_soft_optimization(_Randomness) => fail.
 
 % Get solve options for Picat CP solver
 picat_solve_options(Randomness) = Opts =>
