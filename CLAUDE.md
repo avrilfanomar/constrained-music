@@ -136,7 +136,16 @@ PICATPATH="/abs/path/to/picat" picat /tmp/test.pi
 - `no_three_semitone_intervals` / `no_augmented_seconds` — forbids ALL 3-semitone intervals
 - `no_augmented_seconds_in_scale` — forbids only true aug2 between adjacent scale degrees (requires `mode=Mode` in params)
 
-### Variable Rhythm (`rhythm=on`)
+### Quality Defaults (genre + rhythm on)
+CLI defaults to `genre=classical_period` and `rhythm=on`, so all generation routes through the genre path (chord-first harmony, soft-constraint optimization, ornaments, dynamics). `genre=none` / `rhythm=off` restore the legacy basic generator / uniform durations.
+
+### Single Source of Harmonic Truth (chord plan)
+`companion.pi` plans each segment's chord progression up front and passes it to the melody solver via `progression=Degrees` in preferences (`melody.segment_progression()` uses it; only generates locally as a legacy fallback). The collected `$chord_span(StartBar, NumBars, KeyRoot, Mode, Degrees)` plan drives `generate_accompaniment_from_plan()`, so accompaniment plays the exact chords the melody was constrained against (including transposed section keys in form mode; returning section labels reuse the same progression). Legacy callers without a plan get melody-fitted chords via `harmonizer.harmonize_melody()`.
+
+### Anytime Optimization (`melody.solve_minimizing`)
+Soft-constraint optimization always runs regardless of randomness (`constraint_selector.solve_strategy` never satisfices; `skip_soft_optimization` always fails). The CP solve uses the `report()` hook to record each improving solution; when the 5s budget expires, the best-found solution is kept instead of discarded (plain `time_out(solve(min(...)))` loses everything, and the budget expires on most segments). Pitch and duration costs are minimized sequentially — no constraint couples them, so this is exact and much faster than the joint solve.
+
+### Variable Rhythm (`rhythm=on`, default)
 Tick system: 16 ticks = whole note. Bar-filling CP constraint sums note durations to `ticks_per_bar`. `no_rhythmic_monotony` prevents all-same-duration. Genre-specific rhythm weights in `genre_profiles.pi`.
 
 ### Variable Time Signatures (`meter=N/M`)
@@ -158,7 +167,7 @@ Multi-start best-of-N; each round boosts weights of top-3 worst-violated constra
 B/C sections in form-based generation automatically use a contrasting genre (e.g., `classical_period` → `sturm_und_drang`). Defined in `form.contrast_genre()`. Disable with `contrast=off`.
 
 ### Chord-First Melody
-`chord_generator.generate_progression()` runs before melody solving. Melody beats 1+3 constrained to chord tones. Phrase structure: antecedent ends open (deg 2/5/7), consequent ends on tonic. Soft constraints: `register_target`, `sequential_repetition`, `weak_beat_justified`.
+The chord progression is planned in `companion.pi` before melody solving (see "Single Source of Harmonic Truth"). Melody beats 1+3 constrained to chord tones. Phrase structure: antecedent ends open (deg 2/5/7), consequent ends on tonic. Soft constraints: `register_target`, `sequential_repetition`, `weak_beat_justified`.
 
 ### Piano Accompaniment (`accomp=pattern`)
 Patterns: `alberti` (classical), `arpeggiated` (baroque/romantic), `stride` (jazz), `block` (folk/sacred), `none`. Multi-track MIDI: voices ≤9 = Track 0 (melody), voice ≥10 = Track 1 (accompaniment).
@@ -170,7 +179,7 @@ Auto-applied: `midi_export.generate_pedal_events()` creates pedal-down-per-bar e
 Post-processing: `ornaments.add_ornaments(Notes, Genre, Density)`. Grace notes for baroque/classical/romantic. Default density 0.3.
 
 ### Phrase-Level Dynamic Arcs
-`humanize.make_standard_plan(NumBars, VelBase)` → `apply_dynamics_plan()`. Transition types: `crescendo`, `diminuendo`, `subito`, `sforzando`. Auto-applied in `run_companion_with_genre`.
+`humanize.make_standard_plan(NumBars, VelBase)` → `apply_dynamics_plan()`. Transition types: `crescendo`, `diminuendo`, `subito`, `sforzando`. Auto-applied in `run_companion_with_genre` and `run_companion_with_form` (ornaments too).
 
 ### Thematic Recall (ABA/rondo)
 `motif.apply_thematic_recall(OrigPitches, NewPitches, 0.8)` — ≥80% exact pitch match for returning sections. `companion.py` maintains `SectionPitchMap`; injects `recall_pitches=Pitches` into preferences automatically.

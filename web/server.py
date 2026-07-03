@@ -512,8 +512,8 @@ async def generate(req: GenerateRequest):
     if req.accompaniment:
         args.append(f"accomp={req.accompaniment}")
 
-    if req.rhythm:
-        args.append("rhythm=on")
+    # CLI now defaults rhythm=on, so pass the toggle explicitly both ways
+    args.append("rhythm=on" if req.rhythm else "rhythm=off")
 
     if req.refine > 1:
         args.append(f"refine={req.refine}")
