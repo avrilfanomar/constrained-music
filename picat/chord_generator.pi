@@ -27,6 +27,41 @@ plan_progression(NumBars, Mode, Genre) = Degrees =>
     end,
     Degrees = apply_cadential_split(Degrees0, Genre).
 
+% Human-readable progression string, e.g. "I IV I64-V I" or "i iv V i".
+% Split bars ((DegA, DegB) pairs) print halves joined by a dash.
+format_progression([], _Mode) = "".
+format_progression([D], Mode) = format_degree(D, Mode).
+format_progression([D | Rest], Mode) =
+    format_degree(D, Mode) ++ " " ++ format_progression(Rest, Mode).
+
+format_degree(Deg, Mode) = S =>
+    if integer(Deg) then
+        S = roman_numeral(Deg, Mode)
+    else
+        (DA, DB) = Deg,
+        if DA == 1, DB == 5 then
+            S = roman_numeral(1, Mode) ++ "64-" ++ roman_numeral(5, Mode)
+        else
+            S = roman_numeral(DA, Mode) ++ "-" ++ roman_numeral(DB, Mode)
+        end
+    end.
+
+roman_numeral(Deg, Mode) = S =>
+    if Deg == 8 then
+        S = "bVI"
+    elseif Deg == 9 then
+        S = "bII"
+    elseif Deg >= 1, Deg =< 7 then
+        if Mode == minor then
+            Names = ["i", "iio", "III", "iv", "V", "VI", "VII"]
+        else
+            Names = ["I", "ii", "iii", "IV", "V", "vi", "viio"]
+        end,
+        S = Names[Deg]
+    else
+        S = to_string(Deg)
+    end.
+
 % Generate a chord progression for NumBars bars
 % Mode: major, minor, dorian, etc.
 % Genre: genre atom for cadence style preferences

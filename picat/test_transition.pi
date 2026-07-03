@@ -129,9 +129,10 @@ test_apply_easing =>
 test_calculate_num_segments =>
     println("Testing calculate_num_segments..."),
 
-    % Short duration (60 seconds) -> minimum segments
+    % Short duration (60 seconds) -> few, period-sized segments (~17s each)
     N1 = transition.calculate_num_segments(60),
-    assert_true(N1 >= 8, "short duration gets at least 8 segments"),
+    assert_true(N1 >= 3, "short duration gets at least 3 segments"),
+    assert_true(N1 =< 6, "short duration keeps segments period-sized"),
 
     % Medium duration (300 seconds = 5 min)
     N2 = transition.calculate_num_segments(300),
@@ -142,9 +143,9 @@ test_calculate_num_segments =>
     N3 = transition.calculate_num_segments(600),
     assert_true(N3 <= 45, "long duration capped at 45 segments"),
 
-    % Very short duration
+    % Very short duration still gets the minimum
     N4 = transition.calculate_num_segments(30),
-    assert_true(N4 >= 8, "very short still gets minimum segments"),
+    assert_true(N4 >= 3, "very short still gets minimum segments"),
 
     println("  Calculate num segments: OK").
 
@@ -181,6 +182,15 @@ test_plan_transition =>
     LastMood = transition.get_segment_mood(LastSeg),
     assert_true(mood.mood_distance(LastMood, EndMood) < 0.5,
                 "last segment mood close to end"),
+
+    % Segments of 3+ bars snap to even counts >=4 (parallel-period sized)
+    foreach(Seg in Segments)
+        SegBars = transition.get_segment_num_bars(Seg),
+        if SegBars >= 3 then
+            assert_true(SegBars >= 4, "3+ bar segment snapped to >=4"),
+            assert_true(SegBars mod 2 == 0, "3+ bar segment has even bars")
+        end
+    end,
 
     % All segments should have valid params
     foreach(Seg in Segments)

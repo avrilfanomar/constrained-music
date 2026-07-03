@@ -74,10 +74,13 @@ apply_easing(T, _) = ease_linear(T).
 % ==============================================================================
 
 % Calculate optimal number of segments based on duration
-% Aim for ~15-20 second segments for faster melody switches
+% Aim for ~15-20 second segments: long enough for a full parallel period
+% (6-10 bars), the unit of musical repetition. A high minimum-segment count
+% would force short pieces into 3-5 bar fragments in which the period
+% machinery (melody.apply_period_structure) never fires.
 calculate_num_segments(DurationSecs) = NumSegments =>
-    TargetSegmentDuration = 17,  % seconds (1.5x faster than original 25s)
-    NumSegments = max(8, min(45, round(DurationSecs / TargetSegmentDuration))).
+    TargetSegmentDuration = 17,  % seconds
+    NumSegments = max(3, min(45, round(DurationSecs / TargetSegmentDuration))).
 
 % Plan transition from start to end mood (without randomness)
 % Returns list of segment structures
@@ -114,12 +117,21 @@ create_segment(Index, TotalSegments, SegmentDuration, StartMood, EndMood, Easing
     % Calculate timing
     StartTime = (Index - 1) * SegmentDuration,
 
-    % Calculate bars in this segment based on tempo
+    % Calculate bars in this segment based on tempo.
+    % Snap 3+ bar segments to an even count >=4: parallel periods
+    % (antecedent/consequent) need even bar counts, and even 4/6/8-bar
+    % phrases are the norm in the target styles.
     Tempo = get_tempo(Params),
     BeatsPerBar = 4,  % Assuming 4/4
     SecondsPerBeat = 60.0 / Tempo,
     SecondsPerBar = SecondsPerBeat * BeatsPerBar,
-    NumBars = max(1, round(SegmentDuration / SecondsPerBar)),
+    RawBars = SegmentDuration / SecondsPerBar,
+    NumBars0 = max(1, round(RawBars)),
+    if NumBars0 >= 3 then
+        NumBars = max(4, 2 * round(RawBars / 2.0))
+    else
+        NumBars = NumBars0
+    end,
 
     Segment = $segment(Index, StartTime, SegmentDuration, SegmentMood, Params, NumBars).
 

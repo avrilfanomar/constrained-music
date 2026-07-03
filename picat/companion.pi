@@ -417,6 +417,13 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
                SegIndex, CurrentBar + 1, CurrentBar + NumBars,
                get_tempo(Params), Genre)
     end,
+    if melody.is_periodic_progression(SegDegrees, NumBars) then
+        PeriodTag = " (period: A A')"
+    else
+        PeriodTag = ""
+    end,
+    printf("    harmony: %s%s%n",
+           chord_generator.format_progression(SegDegrees, SegMode), PeriodTag),
 
     % Adjust timing
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
@@ -870,6 +877,13 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
                SegIndex, SectionLabel, CurrentBar + 1, CurrentBar + NumBars,
                get_tempo(Params), pitch_class_name(SectionKey), SectionMode)
     end,
+    if melody.is_periodic_progression(SegDegreesF, NumBars) then
+        PeriodTagF = " (period: A A')"
+    else
+        PeriodTagF = ""
+    end,
+    printf("    harmony: %s%s%n",
+           chord_generator.format_progression(SegDegreesF, SegModeF), PeriodTagF),
 
     % Adjust timing
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
