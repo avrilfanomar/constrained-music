@@ -88,6 +88,9 @@ velocity_offset(_) = -15.  % Default
 % ==============================================================================
 
 % Render one bar of accompaniment from a chord assignment
+% Split bars ($chord_pair from chord_generator) render two half-bar figures
+render_bar(chord_pair(CAa, CAb), Pattern, VoiceId, Vel) = Notes =>
+    Notes = render_pair(CAa, CAb, Pattern, VoiceId, Vel).
 render_bar(CA, block, VoiceId, Vel) = Notes =>
     Notes = render_block(CA, VoiceId, Vel).
 render_bar(CA, alberti, VoiceId, Vel) = Notes =>
@@ -170,6 +173,64 @@ render_stride(CA, VoiceId, Vel) = Notes =>
     Chord2 = [make_note(P, Bar, 2, 1, 4, VoiceId, Vel - 5) : P in ChordNotes],
     Chord4 = [make_note(P, Bar, 4, 1, 4, VoiceId, Vel - 5) : P in ChordNotes],
     Notes = [Bass1] ++ Chord2 ++ [Bass3] ++ Chord4.
+
+% ==============================================================================
+% SPLIT-BAR (TWO CHORDS PER BAR) RENDERING
+% ==============================================================================
+% Beat positions assume the second chord starts at beat 3 (half of a 4-beat
+% bar); in triple meters this lands the chord change on the last beat, which
+% is still a usable cadential placement.
+
+render_pair(CAa, CAb, alberti, VoiceId, Vel) = Notes =>
+    Notes = alberti_half(CAa, 1, VoiceId, Vel + 5) ++ alberti_half(CAb, 3, VoiceId, Vel).
+render_pair(CAa, CAb, arpeggiated, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CAa),
+    Notes = [make_note(harmonizer.chord_bass(CAa), Bar, 1, 1, 4, VoiceId, Vel + 5),
+             make_note(lowest_voicing_note(CAa), Bar, 2, 1, 4, VoiceId, Vel - 2),
+             make_note(harmonizer.chord_bass(CAb), Bar, 3, 1, 4, VoiceId, Vel),
+             make_note(lowest_voicing_note(CAb), Bar, 4, 1, 4, VoiceId, Vel - 2)].
+render_pair(CAa, CAb, waltz, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CAa),
+    BassNoteObj = make_note(harmonizer.chord_bass(CAa), Bar, 1, 1, 4, VoiceId, Vel + 8),
+    ChordBeat2 = [make_note(P, Bar, 2, 1, 4, VoiceId, Vel - 5) : P in get_chord_voicing(CAa)],
+    ChordBeat3 = [make_note(P, Bar, 3, 1, 4, VoiceId, Vel - 5) : P in get_chord_voicing(CAb)],
+    Notes = [BassNoteObj] ++ ChordBeat2 ++ ChordBeat3.
+render_pair(CAa, CAb, stride, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CAa),
+    Bass1 = make_note(harmonizer.chord_bass(CAa), Bar, 1, 1, 4, VoiceId, Vel + 5),
+    Chord2 = [make_note(P, Bar, 2, 1, 4, VoiceId, Vel - 5) : P in get_chord_voicing(CAa)],
+    Bass3 = make_note(harmonizer.chord_bass(CAb), Bar, 3, 1, 4, VoiceId, Vel),
+    Chord4 = [make_note(P, Bar, 4, 1, 4, VoiceId, Vel - 5) : P in get_chord_voicing(CAb)],
+    Notes = [Bass1] ++ Chord2 ++ [Bass3] ++ Chord4.
+render_pair(CAa, CAb, _, VoiceId, Vel) = Notes =>
+    Notes = block_half(CAa, 1, VoiceId, Vel) ++ block_half(CAb, 3, VoiceId, Vel).
+
+% Two-note alberti figure (root, fifth) filling half a bar
+alberti_half(CA, StartBeat, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    Voicing = get_chord_voicing(CA),
+    if length(Voicing) >= 3 then
+        Notes = [make_note(Voicing[1], Bar, StartBeat, 1, 4, VoiceId, Vel),
+                 make_note(Voicing[3], Bar, StartBeat + 1, 1, 4, VoiceId, Vel - 3)]
+    else
+        Notes = block_half(CA, StartBeat, VoiceId, Vel)
+    end.
+
+% Bass + chord tones sustained for half a bar
+block_half(CA, StartBeat, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    BassNote = harmonizer.chord_bass(CA),
+    ChordNotes = get_chord_voicing(CA),
+    Notes = [make_note(P, Bar, StartBeat, 1, 2, VoiceId, Vel) : P in [BassNote | ChordNotes]].
+
+% Lowest chord-voicing note (fallback: bass)
+lowest_voicing_note(CA) = N =>
+    Voicing = get_chord_voicing(CA),
+    if Voicing == [] then
+        N = harmonizer.chord_bass(CA)
+    else
+        N = min(Voicing)
+    end.
 
 % ==============================================================================
 % CHORD VOICING
