@@ -70,6 +70,39 @@ apply_motif_constraint(Pitches, MotifIntervals, Weight, Cost) =>
         Cost #= Weight * (1 - FoundMotif)
     end.
 
+% Motif STATEMENTS at phrase starts (interval-exact, stronger than contour).
+% A statement is the motif's exact interval pattern — which is transposition-
+% invariant — or its inversion (mirrored intervals) beginning at a phrase
+% start. Cost = Weight per phrase start lacking a statement, so the optimizer
+% places literal, recognizable motif entries where listeners expect them.
+% PhraseStarts: 1-based note indices where phrases begin (e.g. [1, 17]).
+apply_motif_statements(Pitches, MotifIntervals, PhraseStarts, Weight, Cost) =>
+    Len = length(Pitches),
+    MotifLen = length(MotifIntervals),
+    ValidStarts = [P : P in PhraseStarts, P >= 1, P + MotifLen =< Len],
+    if MotifLen < 2 ; ValidStarts == [] then
+        Cost #= 0
+    else
+        NS = length(ValidStarts),
+        Stated = new_list(NS),
+        Stated :: 0..1,
+        foreach(K in 1..NS)
+            P = ValidStarts[K],
+            ExactMatches = new_list(MotifLen),
+            ExactMatches :: 0..1,
+            InvMatches = new_list(MotifLen),
+            InvMatches :: 0..1,
+            foreach(J in 1..MotifLen)
+                Iv :: -24..24,
+                Iv #= Pitches[P + J] - Pitches[P + J - 1],
+                ExactMatches[J] #<=> (Iv #= MotifIntervals[J]),
+                InvMatches[J] #<=> (Iv #= -MotifIntervals[J])
+            end,
+            Stated[K] #<=> ((sum(ExactMatches) #= MotifLen) #\/ (sum(InvMatches) #= MotifLen))
+        end,
+        Cost #= Weight * (NS - sum(Stated))
+    end.
+
 % Apply contour-matching constraint (softer version)
 % Instead of exact intervals, matches direction pattern (up/down/same)
 % This allows transposition AND some interval variation

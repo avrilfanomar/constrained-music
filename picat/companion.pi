@@ -33,8 +33,10 @@ import ornaments.
 
 % Main entry point with preset names
 main =>
-    % Default demonstration: sad to energized
-    run_companion_presets(calm_peaceful, energized, 300, "session.json").
+    % Default demonstration: calm to energized, through the full quality path
+    % (genre constraints + variable rhythm), not the legacy harmony-blind path
+    run_companion_with_genre(mood_preset(calm_peaceful), mood_preset(energized),
+                             300, "session.json", 0.0, classical_period, [rhythm=on]).
 
 % Run companion with preset mood names (no randomness)
 run_companion_presets(StartPreset, EndPreset, DurationSecs, OutputPath) =>
@@ -240,29 +242,32 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     if PieceRounds > 1 then
         printf("  Per-piece refinement (%d rounds)...%n", PieceRounds),
         % Round 1
-        PieceNotes1 = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
+        (PieceNotes1, PiecePlan1) = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
         PiecePitches1 = refiner.extract_pitches(PieceNotes1),
         PieceScore1 = refiner.score_for_refinement(PiecePitches1, KeyRoot, Genre, Preferences),
         printf("  Piece round 1: score=%d (%d notes)%n", PieceScore1, length(PieceNotes1)),
         BestPieceNotes = PieceNotes1,
+        BestPiecePlan = PiecePlan1,
         BestPieceScore = PieceScore1,
         % Rounds 2..N
         foreach(PR in 2..PieceRounds)
             advance_random_state(PR * 137),
-            PieceNotesR = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
+            (PieceNotesR, PiecePlanR) = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences),
             PiecePitchesR = refiner.extract_pitches(PieceNotesR),
             PieceScoreR = refiner.score_for_refinement(PiecePitchesR, KeyRoot, Genre, Preferences),
             printf("  Piece round %d: score=%d (%d notes)%n", PR, PieceScoreR, length(PieceNotesR)),
             if PieceScoreR < BestPieceScore then
                 BestPieceScore := PieceScoreR,
-                BestPieceNotes := PieceNotesR
+                BestPieceNotes := PieceNotesR,
+                BestPiecePlan := PiecePlanR
             end
         end,
         PieceImprovePct = cond(PieceScore1 > 0, (PieceScore1 - BestPieceScore) * 100 // PieceScore1, 0),
         printf("  -> Selected best piece (score=%d, -%d%% vs round 1)%n", BestPieceScore, PieceImprovePct),
-        AllNotes = BestPieceNotes
+        AllNotes = BestPieceNotes,
+        ChordPlan = BestPiecePlan
     else
-        AllNotes = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences)
+        (AllNotes, ChordPlan) = generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences)
     end,
     printf("  Generated %d total notes%n%n", length(AllNotes)),
 
@@ -290,9 +295,9 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
         end
     end,
 
-    % Generate accompaniment
+    % Generate accompaniment from the same chord plan the melody used
     AccompPattern = get_accomp_preference(Preferences),
-    AccompNotes = generate_accompaniment_for_melody(AllNotes, KeyRoot, Segments, Genre, AccompPattern),
+    AccompNotes = generate_accompaniment_from_plan(AllNotes, ChordPlan, Genre, AccompPattern),
     FinalNotes = FinalMelody ++ AccompNotes,
 
     % Collect tempo changes
@@ -317,17 +322,26 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     nl.
 
 % Generate segments with genre-based constraints (with motif memory)
-generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences) = AllNotes =>
-    AllNotes = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, [], []).
+% Returns (AllNotes, ChordPlan): ChordPlan is the list of $chord_span() entries
+% describing the progression each segment's melody was constrained against,
+% so the accompaniment can play the exact same chords.
+generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences) = (AllNotes, ChordPlan) =>
+    (AllNotes, ChordPlan) = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, [], [], []).
 
-generate_segments_genre_helper([], _, _, _, _, _, Acc, _MotifIntervals) = flatten(reverse(Acc)).
-generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc, MotifIntervals) = Result =>
+generate_segments_genre_helper([], _, _, _, _, _, Acc, _MotifIntervals, PlanAcc) = (flatten(reverse(Acc)), reverse(PlanAcc)).
+generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegIndex, CurrentBar, Acc, MotifIntervals, PlanAcc) = Result =>
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
-    MotifWeight = 50,  % Default motif reference weight
+    MotifWeight = 80,  % Weight per phrase start lacking a motif statement
 
     % Inject segment mood into preferences for emotional constraints
     SegmentMood = get_segment_mood(Seg),
+
+    % Plan the segment's chord progression up front (single source of harmonic
+    % truth: melody solve and accompaniment both use this exact progression)
+    SegMode = get_mode(Params),
+    SegDegrees = chord_generator.plan_progression(NumBars, SegMode, Genre),
+    ChordSpan = $chord_span(CurrentBar, NumBars, KeyRoot, SegMode, SegDegrees),
 
     % Check if rhythm mode is active
     if find_first_key(Preferences, rhythm, RhythmVal1), RhythmVal1 == on then
@@ -347,7 +361,7 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     NumRounds = refiner.get_refine_rounds(Preferences),
 
     % Round 1: generate normally
-    MoodPrefs1 = [mood=SegmentMood | Preferences],
+    MoodPrefs1 = [mood=SegmentMood, progression=SegDegrees | Preferences],
     SegMelody1 = try_genre_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs1, UseRhythm, PrevLastPitch, MotifIntervals, MotifWeight),
 
     % Refinement rounds
@@ -361,9 +375,10 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
         foreach(Round in 2..NumRounds)
             advance_random_state(Round * 73),
             BoostedPrefs = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelody), KeyRoot, Genre, Preferences, Round),
-            BoostedMoodPrefs = [mood=SegmentMood | BoostedPrefs],
-            % Ensure randomness for solver diversity in refinement rounds
-            RefinedParams = refiner.ensure_min_randomness(Params, 0.4),
+            BoostedMoodPrefs = [mood=SegmentMood, progression=SegDegrees | BoostedPrefs],
+            % Minimum randomness that enables rand_val labeling for round diversity
+            % (optimization always stays on; see constraint_selector.solve_strategy)
+            RefinedParams = refiner.ensure_min_randomness(Params, 0.3),
             CandidateMelody = try_genre_segment(RefinedParams, KeyRoot, NumBars, Genre, BoostedMoodPrefs, UseRhythm, PrevLastPitch, MotifIntervals, MotifWeight),
             if CandidateMelody != [] then
                 CandidatePitches = refiner.extract_pitches(CandidateMelody),
@@ -406,7 +421,7 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     % Adjust timing
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
-    Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals).
+    Result = generate_segments_genre_helper(Rest, KeyRoot, Genre, Preferences, SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, [ChordSpan | PlanAcc]).
 
 % ==============================================================================
 % SEGMENT GENERATION HELPERS (for refinement)
@@ -517,21 +532,39 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
 
     % Generate melodies with form awareness
     println("Generating music for each segment..."),
-    AllNotes = generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences),
+    (AllNotes, ChordPlanForm) = generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences),
     printf("  Generated %d total notes%n%n", length(AllNotes)),
 
     % Apply velocity curves (phrase-level dynamics per segment)
     println("Applying expression..."),
     ExpressiveNotes = apply_segment_expression(AllNotes, Segments),
 
+    % Apply phrase-level dynamic arcs
+    TotalBarsPlanForm = sum([get_segment_num_bars(S) : S in Segments]),
+    DynamicsPlanForm = humanize.make_standard_plan(TotalBarsPlanForm, 80),
+    PlannedNotesForm = humanize.apply_dynamics_plan(ExpressiveNotes, DynamicsPlanForm),
+
     % Apply humanization
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
-    FinalMelody = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
+    HumanizedNotesForm = humanize.humanize_notes(PlannedNotesForm, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
 
-    % Generate accompaniment
+    % Add ornaments (genre-appropriate grace notes)
+    if Genre != none then
+        OrnamentDensityForm = get_ornament_density(Preferences),
+        FinalMelody = ornaments.add_ornaments(HumanizedNotesForm, Genre, OrnamentDensityForm),
+        OrnCountForm = length(FinalMelody) - length(HumanizedNotesForm),
+        if OrnCountForm > 0 then
+            printf("  Ornaments: %d grace notes added%n", OrnCountForm)
+        end
+    else
+        FinalMelody = HumanizedNotesForm
+    end,
+
+    % Generate accompaniment from the same chord plan the melody used
+    % (uses each section's transposed key, so accompaniment follows modulations)
     AccompPattern = cond(Genre != none, get_accomp_preference(Preferences), none),
-    AccompNotes = generate_accompaniment_for_melody(AllNotes, KeyRoot, Segments, Genre, AccompPattern),
+    AccompNotes = generate_accompaniment_from_plan(AllNotes, ChordPlanForm, Genre, AccompPattern),
     FinalNotes = FinalMelody ++ AccompNotes,
 
     % Collect tempo changes
@@ -690,16 +723,17 @@ get_style_overrides(Preferences, BaseGenre) = Overrides =>
     end.
 
 % Generate all segments with form awareness (with motif memory and thematic recall)
-generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = AllNotes =>
+% Returns (AllNotes, ChordPlan) — see generate_all_segments_with_genre.
+generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferences) = (AllNotes, ChordPlan) =>
     % Determine style overrides for section contrast
     StyleOverrides = cond(Genre != none, get_style_overrides(Preferences, Genre), []),
-    AllNotes = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, StyleOverrides, 1, 0, [], [], new_map()).
+    (AllNotes, ChordPlan) = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, StyleOverrides, 1, 0, [], [], new_map(), new_map(), []).
 
-generate_form_segments_helper([], _, _, _, _, _, _, _, Acc, _MotifIntervals, _SectionPitchMap) = flatten(reverse(Acc)).
-generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, StyleOverrides, SegIndex, CurrentBar, Acc, MotifIntervals, SectionPitchMap) = Result =>
+generate_form_segments_helper([], _, _, _, _, _, _, _, Acc, _MotifIntervals, _SectionPitchMap, _SectionChordMap, PlanAcc) = (flatten(reverse(Acc)), reverse(PlanAcc)).
+generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Preferences, StyleOverrides, SegIndex, CurrentBar, Acc, MotifIntervals, SectionPitchMap, SectionChordMap, PlanAcc) = Result =>
     NumBars = get_segment_num_bars(Seg),
     Params = get_segment_params(Seg),
-    MotifWeight = 50,
+    MotifWeight = 80,
 
     % Get form context
     SectionKey = get_form_segment_key(Seg),
@@ -719,6 +753,20 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
 
     % Inject segment mood into preferences for emotional constraints
     SegmentMood = get_segment_mood(Seg),
+
+    % Plan the segment's chord progression up front, reusing the progression of
+    % a returning section label (ABA) so recalled melodies meet the same harmony.
+    SegModeF = get_mode(Params),
+    GenreForProgF = cond(SectionGenre != none, SectionGenre, classical_period),
+    if SectionChordMap.has_key(SectionLabel), SectionChordMap.get(SectionLabel) = (NumBars, StoredDegreesF) then
+        SegDegreesF = StoredDegreesF
+    else
+        SegDegreesF = chord_generator.plan_progression(NumBars, SegModeF, GenreForProgF)
+    end,
+    if not SectionChordMap.has_key(SectionLabel) then
+        SectionChordMap.put(SectionLabel, (NumBars, SegDegreesF))
+    end,
+    ChordSpanF = $chord_span(CurrentBar, NumBars, TransposedKeyRoot, SegModeF, SegDegreesF),
 
     % Check if this section label has been seen before (thematic recall for ABA form)
     % If so, inject recall_pitches into preferences to constrain the return section
@@ -750,7 +798,7 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     % Generate melody (genre-based path uses try_genre_segment; non-genre uses direct calls)
     if SectionGenre != none then
         % Genre-based: use try_genre_segment with refinement
-        MoodPrefsF1 = [mood=SegmentMood | SectionPrefsF],
+        MoodPrefsF1 = [mood=SegmentMood, progression=SegDegreesF | SectionPrefsF],
         SegMelodyF1 = try_genre_segment(Params, TransposedKeyRoot, NumBars, SectionGenre, MoodPrefsF1, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
 
         if NumRoundsF > 1, SegMelodyF1 != [] then
@@ -763,9 +811,10 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
             foreach(RoundF in 2..NumRoundsF)
                 advance_random_state(RoundF * 73),
                 BoostedPrefsF = refiner.boost_worst_constraints(refiner.extract_pitches(BestMelodyF), TransposedKeyRoot, SectionGenre, SectionPrefsF, RoundF),
-                BoostedMoodPrefsF = [mood=SegmentMood | BoostedPrefsF],
-                % Ensure randomness for solver diversity in refinement rounds
-                RefinedParamsF = refiner.ensure_min_randomness(Params, 0.4),
+                BoostedMoodPrefsF = [mood=SegmentMood, progression=SegDegreesF | BoostedPrefsF],
+                % Minimum randomness that enables rand_val labeling for round diversity
+                % (optimization always stays on; see constraint_selector.solve_strategy)
+                RefinedParamsF = refiner.ensure_min_randomness(Params, 0.3),
                 CandidateMelodyF = try_genre_segment(RefinedParamsF, TransposedKeyRoot, NumBars, SectionGenre, BoostedMoodPrefsF, UseRhythmF, PrevLastPitchF, MotifIntervals, MotifWeight),
                 if CandidateMelodyF != [] then
                     CandidatePitchesF = refiner.extract_pitches(CandidateMelodyF),
@@ -826,7 +875,7 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     TimedMelody = [adjust_note_bar(Note, CurrentBar) : Note in SegmentMelody],
 
     Result = generate_form_segments_helper(Rest, FormSections, KeyRoot, Genre, Preferences, StyleOverrides,
-                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, SectionPitchMap).
+                                           SegIndex + 1, CurrentBar + NumBars, [TimedMelody | Acc], NewMotifIntervals, SectionPitchMap, SectionChordMap, [ChordSpanF | PlanAcc]).
 
 % Pitch class to note name (copied from form.pi for local use)
 pitch_class_name(0) = "C".
@@ -886,12 +935,47 @@ generate_segments_helper([Seg | Rest], KeyRoot, SegIndex, CurrentBar, Acc) = Res
 % ACCOMPANIMENT GENERATION
 % ==============================================================================
 
-% Generate accompaniment for a melody
+% Generate accompaniment from the chord plan the melody was solved against
+% ChordPlan: list of $chord_span(StartBarOffset, NumBars, KeyRoot, Mode, Degrees)
+% Genre = none means use default pattern; Pattern = none means disabled
+generate_accompaniment_from_plan(MelodyNotes, ChordPlan, Genre, Pattern) = AccompNotes =>
+    if MelodyNotes == [] ; ChordPlan == [] then
+        AccompNotes = []
+    elseif Pattern == none then
+        AccompNotes = [],
+        println("Accompaniment disabled")
+    else
+        println("Generating accompaniment..."),
+        ChordProg = flatten([span_to_assignments(Span) : Span in ChordPlan]),
+        AccompNotes = render_accompaniment(ChordProg, MelodyNotes, Genre, Pattern)
+    end.
+
+% Convert one chord_span into chord assignments at absolute bar positions
+span_to_assignments(chord_span(StartBar, _NumBars, SpanKeyRoot, SpanMode, Degrees)) = Assignments =>
+    CAs = chord_generator.degrees_to_chord_assignments(Degrees, SpanKeyRoot mod 12, SpanMode),
+    Assignments = [offset_assignment(CA, StartBar) : CA in CAs].
+
+% Shift a chord assignment's bar number by an offset
+% (split bars are $chord_pair entries holding two assignments)
+offset_assignment(chord_pair(CAa, CAb), Offset) = CA =>
+    NewA = offset_assignment(CAa, Offset),
+    NewB = offset_assignment(CAb, Offset),
+    CA = $chord_pair(NewA, NewB).
+offset_assignment(chord_assignment(Bar, Deg, Quality, RootPC, Bass), Offset) = CA =>
+    NewBar = Bar + Offset,
+    CA = $chord_assignment(NewBar, Deg, Quality, RootPC, Bass).
+
+% Generate accompaniment for a melody without a chord plan (legacy path)
+% Fits chords to the melody that was actually generated (harmonizer),
+% instead of solving an unrelated progression that could clash with it.
 % Genre = none means use default (block) pattern
-% Pattern = none means auto-select from genre
+% Pattern = none means disabled
 generate_accompaniment_for_melody(MelodyNotes, KeyRoot, Segments, Genre, Pattern) = AccompNotes =>
     if MelodyNotes == [] then
         AccompNotes = []
+    elseif Pattern == none then
+        AccompNotes = [],
+        println("Accompaniment disabled")
     else
         % Determine mode from first segment
         FirstParams = get_segment_params(Segments[1]),
@@ -900,39 +984,27 @@ generate_accompaniment_for_melody(MelodyNotes, KeyRoot, Segments, Genre, Pattern
         % Total bars from melody notes
         MaxBar = max([Bar : $note(_, _, $time_pos(Bar, _, _), _, _) in MelodyNotes]),
 
-        % Generate chord progression using chord-first approach
         println("Generating accompaniment..."),
         GenreForChords = cond(Genre != none, Genre, classical_period),
-        ChordDegrees = chord_generator.generate_progression(MaxBar, Mode, GenreForChords),
-        RootPC = KeyRoot mod 12,
-        ChordProg = chord_generator.degrees_to_chord_assignments(ChordDegrees, RootPC, Mode),
-
-        % Check if accompaniment is disabled
-        if Pattern == none then
-            AccompNotes = [],
-            println("Accompaniment disabled")
-        else
-            % Get average melody velocity
-            AvgVel = accompaniment.average_velocity(MelodyNotes),
-
-            % Select pattern (auto = use genre default, explicit = use specified pattern)
-            if Pattern == auto then
-                % Auto-select based on genre
-                if Genre != none then
-                    AccompNotes = accompaniment.generate_accompaniment(ChordProg, Genre, AvgVel)
-                else
-                    AccompNotes = accompaniment.generate_accompaniment(ChordProg, classical_period, AvgVel)
-                end
-            else
-                % Use explicit pattern with genre fallback for velocity offset
-                AccompNotes = accompaniment.generate_accompaniment(ChordProg, Pattern, Genre, AvgVel)
-            end,
-
-            % Light humanization for accompaniment
-            AccompNotes := humanize.humanize_notes(AccompNotes, 0.15),
-            printf("  Generated %d accompaniment notes%n%n", length(AccompNotes))
-        end
+        ChordProg = harmonizer.harmonize_melody(MelodyNotes, KeyRoot, Mode, GenreForChords, MaxBar),
+        AccompNotes = render_accompaniment(ChordProg, MelodyNotes, Genre, Pattern)
     end.
+
+% Render chord assignments into accompaniment notes with pattern selection
+render_accompaniment(ChordProg, MelodyNotes, Genre, Pattern) = AccompNotes =>
+    AvgVel = accompaniment.average_velocity(MelodyNotes),
+
+    % Select pattern (auto = use genre default, explicit = use specified pattern)
+    if Pattern == auto then
+        GenreForPattern = cond(Genre != none, Genre, classical_period),
+        AccompNotes0 = accompaniment.generate_accompaniment(ChordProg, GenreForPattern, AvgVel)
+    else
+        AccompNotes0 = accompaniment.generate_accompaniment(ChordProg, Pattern, Genre, AvgVel)
+    end,
+
+    % Light humanization for accompaniment
+    AccompNotes = humanize.humanize_notes(AccompNotes0, 0.15),
+    printf("  Generated %d accompaniment notes%n%n", length(AccompNotes)).
 
 % Get accomp pattern preference from CLI preferences list
 % Returns: explicit pattern name, 'auto' (use genre default), or 'none' (disabled)
@@ -1099,9 +1171,10 @@ main(Args) =>
         % Parse additional options for demo (genre, accomp, randomness, etc.)
         ParsedOpts = parse_args(RestArgs),
         Randomness = get_arg(ParsedOpts, randomness, 0.0),
-        Genre = get_arg(ParsedOpts, genre, none),
+        % Quality path by default; genre=none / rhythm=off restore legacy behavior
+        Genre = get_arg(ParsedOpts, genre, classical_period),
         Accomp = get_arg(ParsedOpts, accomp, auto),
-        Rhythm = get_arg(ParsedOpts, rhythm, off),
+        Rhythm = get_arg(ParsedOpts, rhythm, on),
         Refine = get_arg(ParsedOpts, refine, 1),
         RefinePiece = get_arg(ParsedOpts, refine_piece, 1),
         MeterOpt = get_arg(ParsedOpts, meter, none),
@@ -1156,7 +1229,8 @@ main(Args) =>
 
     % Check for form-based generation
     FormType = get_arg(ParsedArgs, form, none),
-    Genre = get_arg(ParsedArgs, genre, none),
+    % Quality path by default; genre=none restores the legacy basic generator
+    Genre = get_arg(ParsedArgs, genre, classical_period),
     Count = get_arg(ParsedArgs, count, 1),
     Preferences = build_preferences(ParsedArgs),
 
@@ -1371,19 +1445,20 @@ print_usage() =>
     println("                   keep best (default: 1 = no refinement, 'on' = 3)"),
     nl,
     println("Rhythm & Tempo Options:"),
-    println("  rhythm=on        Enable variable rhythm (default: off/uniform durations)"),
-    println("                   Generates melodies with mixed note durations"),
-    println("                   Requires genre= to be set"),
+    println("  rhythm=on|off    Variable rhythm (default: on)"),
+    println("                   on: melodies with mixed note durations"),
+    println("                   off: uniform durations (legacy behavior)"),
     println("  meter=N/M        Time signature (default: 4/4)"),
     println("                   Supported: 3/4, 6/8, 3/8, 2/2, 2/4"),
     println("  rit=off          Disable cadential ritardando (default: on)"),
     println("                   When on, last 2 bars of segments >= 4 bars slow to 80% tempo"),
     nl,
     println("Genre Options (for weighted constraint optimization):"),
-    println("  genre=GENRE      Use genre-based constraint selection"),
+    println("  genre=GENRE      Genre-based constraint selection (default: classical_period)"),
     println("                   (classical_period, baroque, romantic, traditional_jazz,"),
     println("                   folk_traditional, contemporary, sacred_chant, children_songs,"),
     println("                   minimalist, modal, blues)"),
+    println("                   genre=none disables genre constraints (legacy generator)"),
     println("  intensity=LEVEL  Constraint intensity: light, standard, strict"),
     println("  disable=ID       Disable a specific constraint (can use multiple times)"),
     println("  weight:ID=N      Override constraint weight (0-100)"),
@@ -1442,8 +1517,8 @@ build_preferences(ParsedArgs) = Preferences =>
     if Accomp != none then
         Prefs := Prefs ++ [accomp=Accomp]
     end,
-    % Add rhythm mode
-    Rhythm = get_arg(ParsedArgs, rhythm, off),
+    % Add rhythm mode (on by default; rhythm=off gives uniform durations)
+    Rhythm = get_arg(ParsedArgs, rhythm, on),
     if Rhythm == on then
         Prefs := Prefs ++ [rhythm=on]
     end,
