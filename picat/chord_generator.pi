@@ -14,6 +14,19 @@ import harmonic.
 % MAIN INTERFACE
 % ==============================================================================
 
+% Progression planner used by companion.pi: even segments of 4+ bars get a
+% parallel period (antecedent ending on a half cadence, consequent restating
+% it and closing V-I); the final V bar is split into I6/4 -> V where idiomatic.
+% Entries in the result are chord degrees, except split bars which are
+% (DegA, DegB) pairs (first/second half of the bar).
+plan_progression(NumBars, Mode, Genre) = Degrees =>
+    if NumBars >= 4, NumBars mod 2 == 0 then
+        Degrees0 = generate_period_progression(NumBars, Mode, Genre)
+    else
+        Degrees0 = generate_progression(NumBars, Mode, Genre)
+    end,
+    Degrees = apply_cadential_split(Degrees0, Genre).
+
 % Generate a chord progression for NumBars bars
 % Mode: major, minor, dorian, etc.
 % Genre: genre atom for cadence style preferences
@@ -112,6 +125,104 @@ generate_cp_progression(NumBars, Mode, Genre) = Degrees =>
         % Fallback: use template
         Degrees := template_progression(NumBars, Genre)
     end.
+
+% ==============================================================================
+% PARALLEL PERIODS (A/A' PHRASE STRUCTURE)
+% ==============================================================================
+
+% Parallel period for even NumBars >= 4: the antecedent (first half) ends on V
+% (half cadence); the consequent restates the antecedent bar-for-bar but
+% replaces its last two bars with an authentic V-I cadence. The repeated bars
+% let the melody solver restate the antecedent's pitches over identical harmony.
+generate_period_progression(NumBars, Mode, Genre) = Degrees =>
+    Half = NumBars // 2,
+    Ant = generate_half_cadence_progression(Half, Mode, Genre),
+    Cons = copy_term(Ant),
+    Cons[Half] := 1,
+    if Half >= 2 then
+        Cons[Half - 1] := 5
+    end,
+    Degrees = Ant ++ Cons.
+
+% Antecedent progression: starts on I, ends on V (half cadence),
+% approached from a pre-dominant. Diatonic only (periods restate harmony
+% literally, so chromatic color is left to non-period segments).
+generate_half_cadence_progression(NumBars, Mode, Genre) = Degrees =>
+    if NumBars < 1 then
+        Degrees = []
+    elseif NumBars == 1 then
+        Degrees = [5]
+    elseif NumBars == 2 then
+        Degrees = [1, 5]
+    else
+        Degrees = generate_half_cadence_cp(NumBars, Mode, Genre)
+    end.
+
+generate_half_cadence_cp(NumBars, _Mode, _Genre) = Degrees =>
+    Degrees = new_list(NumBars),
+    Degrees :: 1..6,
+    Degrees[1] #= 1,
+    Degrees[NumBars] #= 5,
+    % Approach the half cadence from I, ii, IV or vi
+    PreDom #= Degrees[NumBars - 1],
+    PreDom #!= 3,
+    PreDom #!= 5,
+
+    ProgressionCosts = new_list(NumBars - 1),
+    ProgressionCosts :: 0..10,
+    foreach(I in 1..NumBars-1)
+        progression_cost(Degrees[I], Degrees[I+1], ProgressionCosts[I])
+    end,
+    TotalCost #= sum(ProgressionCosts),
+
+    if NumBars >= 4 then
+        nvalue(N, Degrees),
+        N #>= min(3, NumBars // 2)
+    end,
+
+    if time_out(solve($[min(TotalCost), ff], Degrees ++ ProgressionCosts ++ [TotalCost]), 1000, Status), Status == success then
+        true
+    else
+        Degrees := template_half_cadence(NumBars)
+    end.
+
+% Template antecedent fallback: I-IV-... ending pre-dominant -> V
+template_half_cadence(NumBars) = Degrees =>
+    BasePattern = [1, 4, 1, 6, 2, 4, 1, 4],
+    PatternLen = length(BasePattern),
+    Degrees = new_list(NumBars),
+    foreach(I in 1..NumBars)
+        Idx = ((I - 1) mod PatternLen) + 1,
+        Degrees[I] = BasePattern[Idx]
+    end,
+    Degrees[NumBars] := 5,
+    if NumBars >= 3 then
+        Degrees[NumBars - 1] := 4
+    end.
+
+% ==============================================================================
+% CADENTIAL HARMONIC RHYTHM (TWO CHORDS IN THE CADENCE BAR)
+% ==============================================================================
+
+% Split the penultimate V bar of a ...-V-I ending into I6/4 -> V (a (1,5)
+% pair: first half of the bar / second half) for genres where the cadential
+% six-four is idiomatic. Pair entries are understood by
+% compute_bar_chord_tones and degrees_to_chord_assignments.
+apply_cadential_split(Degrees, Genre) = NewDegrees =>
+    N = length(Degrees),
+    if N >= 4, cadential_split_genre(Genre),
+       integer(Degrees[N-1]), Degrees[N-1] == 5, Degrees[N] == 1 then
+        NewDegrees = [Degrees[I] : I in 1..N-2] ++ [(1, 5), Degrees[N]]
+    else
+        NewDegrees = Degrees
+    end.
+
+cadential_split_genre(classical_period).
+cadential_split_genre(high_classical).
+cadential_split_genre(galant).
+cadential_split_genre(baroque).
+cadential_split_genre(romantic).
+cadential_split_genre(romantic_piano).
 
 % Count of diatonic degrees for a mode
 diatonic_degree_count(Mode) = N =>
@@ -284,7 +395,8 @@ template_progression(NumBars, _Genre) = Degrees =>
 % ==============================================================================
 
 % Compute chord tones (pitch classes) for each bar given chord degrees
-% Returns an array where BarChordTones[Bar] = list of pitch classes in that bar's chord
+% Returns an array where BarChordTones[Bar] = list of pitch classes in that
+% bar's chord, or $split(PCsFirstHalf, PCsSecondHalf) for (DegA, DegB) bars.
 compute_bar_chord_tones(Degrees, RootPC, Mode) = BarChordTones =>
     NumBars = length(Degrees),
     Intervals = mode_intervals_safe(Mode),
@@ -292,18 +404,29 @@ compute_bar_chord_tones(Degrees, RootPC, Mode) = BarChordTones =>
     BarChordTones = new_array(NumBars),
     foreach(B in 1..NumBars)
         Deg = Degrees[B],
-        if Deg >= 1, Deg =< NumDegrees then
-            ChordRootPC = (RootPC + Intervals[Deg]) mod 12,
-            % Get 3rd and 5th above the chord root (diatonic)
-            ThirdDegIdx = ((Deg - 1 + 2) mod NumDegrees) + 1,
-            FifthDegIdx = ((Deg - 1 + 4) mod NumDegrees) + 1,
-            ThirdPC = (RootPC + Intervals[ThirdDegIdx]) mod 12,
-            FifthPC = (RootPC + Intervals[FifthDegIdx]) mod 12,
-            BarChordTones[B] = [ChordRootPC, ThirdPC, FifthPC]
+        if integer(Deg) then
+            BarChordTones[B] = degree_chord_pcs(Deg, RootPC, Intervals, NumDegrees)
         else
-            % Chromatic chord pitch classes
-            BarChordTones[B] = chromatic_chord_pcs(Deg, RootPC)
+            (DA, DB) = Deg,
+            PCsA = degree_chord_pcs(DA, RootPC, Intervals, NumDegrees),
+            PCsB = degree_chord_pcs(DB, RootPC, Intervals, NumDegrees),
+            BarChordTones[B] = $split(PCsA, PCsB)
         end
+    end.
+
+% Chord-tone pitch classes for a single degree
+degree_chord_pcs(Deg, RootPC, Intervals, NumDegrees) = PCs =>
+    if Deg >= 1, Deg =< NumDegrees then
+        ChordRootPC = (RootPC + Intervals[Deg]) mod 12,
+        % Get 3rd and 5th above the chord root (diatonic)
+        ThirdDegIdx = ((Deg - 1 + 2) mod NumDegrees) + 1,
+        FifthDegIdx = ((Deg - 1 + 4) mod NumDegrees) + 1,
+        ThirdPC = (RootPC + Intervals[ThirdDegIdx]) mod 12,
+        FifthPC = (RootPC + Intervals[FifthDegIdx]) mod 12,
+        PCs = [ChordRootPC, ThirdPC, FifthPC]
+    else
+        % Chromatic chord pitch classes
+        PCs = chromatic_chord_pcs(Deg, RootPC)
     end.
 
 % Pitch classes for chromatic (borrowed) chords — always major triads
@@ -333,7 +456,8 @@ mode_intervals_safe(Mode) = Intervals =>
 % ==============================================================================
 
 % Convert chord degrees to chord_assignment structures (for accompaniment.pi)
-% Compatible with harmonizer.pi output format
+% Compatible with harmonizer.pi output format. Split bars ((DegA, DegB) pairs)
+% become $chord_pair(CAa, CAb) entries.
 degrees_to_chord_assignments(Degrees, RootPC, Mode) = ChordProg =>
     Intervals = mode_intervals_safe(Mode),
     NumDegrees = length(Intervals),
@@ -341,8 +465,20 @@ degrees_to_chord_assignments(Degrees, RootPC, Mode) = ChordProg =>
     % Compute bass notes with smooth voice leading
     BassNotes = compute_bass_notes(Degrees, RootPC, Intervals, NumBars),
     QualityMode = mode_for_quality(Mode),
-    ChordProg = [build_chord_assignment(B, Degrees[B], RootPC, Intervals, QualityMode, NumDegrees, BassNotes[B])
+    ChordProg = [bar_chord_entry(B, Degrees[B], RootPC, Intervals, QualityMode, NumDegrees, BassNotes[B])
                  : B in 1..NumBars].
+
+% One progression entry: a chord_assignment, or a chord_pair for split bars
+bar_chord_entry(Bar, Deg, RootPC, Intervals, QualityMode, NumDegrees, BassEntry) = Entry =>
+    if integer(Deg) then
+        Entry = build_chord_assignment(Bar, Deg, RootPC, Intervals, QualityMode, NumDegrees, BassEntry)
+    else
+        (DA, DB) = Deg,
+        (BassA, BassB) = BassEntry,
+        CAa = build_chord_assignment(Bar, DA, RootPC, Intervals, QualityMode, NumDegrees, BassA),
+        CAb = build_chord_assignment(Bar, DB, RootPC, Intervals, QualityMode, NumDegrees, BassB),
+        Entry = $chord_pair(CAa, CAb)
+    end.
 
 % Build a single chord_assignment
 build_chord_assignment(Bar, Degree, RootPC, Intervals, QualityMode, NumDegrees, BassNote) = CA =>
@@ -366,21 +502,46 @@ build_chord_assignment(Bar, Degree, RootPC, Intervals, QualityMode, NumDegrees, 
         CA = $chord_assignment(Bar, 1, Quality, ChordRootPC, BassNote)
     end.
 
-% Compute bass notes with smooth voice leading
+% Compute bass notes with smooth voice leading.
+% Split bars get a (BassA, BassB) pair; a (1,5) cadential six-four keeps the
+% dominant in the bass for the whole bar (tonic triad over dominant bass).
 compute_bass_notes(Degrees, RootPC, Intervals, NumBars) = BassNotes =>
     BassNotes = new_list(NumBars),
     NumDegrees = length(Intervals),
     % First bass near middle of bass register (MIDI 43 = G2)
-    FirstPC = (RootPC + Intervals[Degrees[1]]) mod 12,
-    BassNotes[1] = nearest_pitch_to(FirstPC, 36, 55, 43),
-    foreach(B in 2..NumBars)
-        DegIdx = Degrees[B],
-        if DegIdx >= 1, DegIdx =< NumDegrees then
-            PC = (RootPC + Intervals[DegIdx]) mod 12
+    Prev = 43,
+    foreach(B in 1..NumBars)
+        Deg = Degrees[B],
+        if integer(Deg) then
+            PC = degree_bass_pc(Deg, RootPC, Intervals, NumDegrees),
+            Bass = nearest_pitch_to(PC, 36, 55, Prev),
+            BassNotes[B] = Bass,
+            Prev := Bass
         else
-            PC = RootPC
-        end,
-        BassNotes[B] = nearest_pitch_to(PC, 36, 55, BassNotes[B-1])
+            (DA, DB) = Deg,
+            PCB = degree_bass_pc(DB, RootPC, Intervals, NumDegrees),
+            BassB = nearest_pitch_to(PCB, 36, 55, Prev),
+            if DA == 1, DB == 5 then
+                BassA = BassB  % cadential 6/4: dominant pedal under the I chord
+            else
+                PCA = degree_bass_pc(DA, RootPC, Intervals, NumDegrees),
+                BassA = nearest_pitch_to(PCA, 36, 55, Prev)
+            end,
+            BassNotes[B] = (BassA, BassB),
+            Prev := BassB
+        end
+    end.
+
+% Bass pitch class for a degree (diatonic or chromatic)
+degree_bass_pc(Deg, RootPC, Intervals, NumDegrees) = PC =>
+    if Deg >= 1, Deg =< NumDegrees then
+        PC = (RootPC + Intervals[Deg]) mod 12
+    elseif Deg == 8 then
+        PC = (RootPC + 8) mod 12
+    elseif Deg == 9 then
+        PC = (RootPC + 1) mod 12
+    else
+        PC = RootPC
     end.
 
 % Find MIDI pitch with given pitch class closest to Target within range
