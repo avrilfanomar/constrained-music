@@ -55,8 +55,17 @@ constrained-music/
 │   ├── pieces_*.pi             # Reference pieces for validation (Bach, Mozart, etc.)
 │   └── test_*.pi               # Test suites
 │
+├── web/                        # Web interface (Constrained Music Studio)
+│   ├── server.py               # FastAPI backend with REST API
+│   ├── requirements.txt        # Python dependencies (fastapi, uvicorn)
+│   └── static/                 # Frontend assets
+│       ├── index.html          # Main UI
+│       ├── css/                # Styling
+│       └── js/                 # Interactive components (mood pad, piano roll, etc.)
+│
 └── scripts/
     ├── run_picat.sh            # Helper script to run Picat
+    ├── run_web.sh              # Launch web interface
     └── midi_writer.py          # Converts JSON to MIDI files
 ```
 
@@ -66,6 +75,13 @@ constrained-music/
 - **Python 3.6+**
 - **midiutil** - `pip install midiutil`
 - **timidity** (optional) - For audio playback
+
+### Additional for Web Interface
+
+- **fastapi** - `pip install fastapi`
+- **uvicorn** - `pip install uvicorn`
+
+(The `run_web.sh` script automatically installs these from `web/requirements.txt`)
 
 ## Installation
 
@@ -82,6 +98,54 @@ pip install midiutil
 # Set Picat path
 export PICATPATH=/path/to/constrained-music/picat
 ```
+
+## Web Interface
+
+The project includes **Constrained Music Studio**, a web-based UI for interactive music generation without command-line interaction.
+
+### Launch the Web Interface
+
+```bash
+./scripts/run_web.sh              # Start on default port 8000
+./scripts/run_web.sh --port 3000  # Custom port
+```
+
+Then open your browser to `http://localhost:8000`
+
+### Features
+
+**Compose Tab:**
+- **Visual Mood Pad**: Click to set start/end points on the Valence-Arousal emotional space
+- **Genre Selection**: Choose from 12+ genre presets with visual cards (Classical, Baroque, Jazz, Folk, etc.)
+- **Parameter Controls**:
+  - Duration (10-300 seconds)
+  - Randomness (0.0-1.0)
+  - Intensity (Light, Standard, Strict)
+- **Advanced Settings**:
+  - Musical form (Binary, Ternary, Rondo, Through-composed)
+  - Accompaniment patterns (Alberti bass, Arpeggiated, Stride, Block, Waltz)
+  - Variable rhythm toggle
+  - Segment and piece-level refinement (multi-start optimization)
+  - **Constraint Panel**: Fine-tune individual constraint weights for each genre
+- **Real-time Generation**: Generates JSON notes + MIDI playback directly in browser
+- **Piano Roll Visualization**: See the generated melody and accompaniment visually
+
+**Vary a Piece Tab:**
+- **Piece Browser**: Select from built-in reference pieces (Mozart K545, Twinkle Twinkle, etc.)
+- **Variation Modes**:
+  - **Extend**: Keep opening, generate new continuation (configurable split point and output length)
+  - **Rework**: Apply variation techniques (Inversion, Retrograde, Augmentation, Diminution)
+- **Genre Override**: Transform pieces into different styles
+
+### REST API
+
+The web server provides REST endpoints for programmatic access:
+
+- `GET /api/config` - Retrieve mood presets, genres, constraints metadata
+- `POST /api/generate` - Generate music from mood/genre parameters (returns JSON + base64 MIDI)
+- `POST /api/variation` - Create variations of existing pieces
+
+See `web/server.py` for full API schema.
 
 ## Usage
 

@@ -6,9 +6,11 @@
 
 module test_harmony_melody.
 
+import cp.
 import chord_generator.
 import scale_utils.
 import visualizer.
+import motif.
 
 main =>
     println("=== Harmony-Melody Integration Tests ==="),
@@ -125,6 +127,48 @@ main =>
 
     printf("  %-44s", "classical: IV-V-I ending"),
     (test_classical_cadence() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+
+    % --- Period & Cadential Split Tests ---
+    println("Periods & Cadential Splits:"),
+
+    printf("  %-44s", "8-bar plan is a parallel period"),
+    (test_plan_period_shape() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "classical plan splits cadence bar (I64-V)"),
+    (test_plan_cadential_split() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "odd-length plan keeps bar count"),
+    (test_plan_odd_length() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "split bar chord tones = split(I, V)"),
+    (test_split_bar_chord_tones() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "cadential 6/4 keeps dominant bass pedal"),
+    (test_split_bass_pedal() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    nl,
+
+    % --- Motif Statement Tests ---
+    println("Motif Statements:"),
+
+    printf("  %-44s", "exact statement at phrase starts: cost 0"),
+    (test_motif_statement_exact() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "inverted statement counts: cost 0"),
+    (test_motif_statement_inverted() -> println("[PASS]"), PassCount := PassCount + 1
+     ; println("[FAIL]"), FailCount := FailCount + 1),
+
+    printf("  %-44s", "missing statement costs Weight"),
+    (test_motif_statement_missing() -> println("[PASS]"), PassCount := PassCount + 1
      ; println("[FAIL]"), FailCount := FailCount + 1),
 
     nl,
@@ -300,6 +344,77 @@ test_classical_cadence() =>
     Degrees[length(Degrees) - 2] == 4,
     Degrees[length(Degrees) - 1] == 5,
     Degrees[length(Degrees)] == 1.
+
+% ==============================================================================
+% PERIOD & CADENTIAL SPLIT TESTS
+% ==============================================================================
+
+% An 8-bar classical plan: antecedent ends on V (half cadence) at bar 4,
+% consequent restates antecedent bars 1-2 and closes on I.
+test_plan_period_shape() =>
+    Degrees = chord_generator.plan_progression(8, major, classical_period),
+    length(Degrees) == 8,
+    Degrees[1] == 1,
+    Degrees[4] == 5,
+    Degrees[5] == Degrees[1],
+    Degrees[6] == Degrees[2],
+    Degrees[8] == 1.
+
+% The consequent's V bar is split into a cadential six-four: (1, 5) pair
+test_plan_cadential_split() =>
+    Degrees = chord_generator.plan_progression(8, major, classical_period),
+    Pair = Degrees[7],
+    not integer(Pair),
+    (DA, DB) = Pair,
+    DA == 1, DB == 5.
+
+% Odd-length plans fall back to plain progressions but keep the bar count
+test_plan_odd_length() =>
+    Degrees5 = chord_generator.plan_progression(5, major, classical_period),
+    Degrees3 = chord_generator.plan_progression(3, minor, baroque),
+    length(Degrees5) == 5,
+    length(Degrees3) == 3.
+
+% compute_bar_chord_tones on a (1,5) bar yields split(I-tones, V-tones)
+test_split_bar_chord_tones() =>
+    BCT = chord_generator.compute_bar_chord_tones([1, (1, 5), 1], 0, major),
+    BCT[2] = $split(PCsA, PCsB),
+    PCsA == [0, 4, 7],
+    PCsB == [7, 11, 2].
+
+% A (1,5) cadential six-four keeps the dominant in the bass under both chords
+test_split_bass_pedal() =>
+    CAs = chord_generator.degrees_to_chord_assignments([1, 5, (1, 5), 1], 0, major),
+    CAs[3] = $chord_pair(CAa, CAb),
+    CAa = $chord_assignment(_, _, _, _, BassA),
+    CAb = $chord_assignment(_, _, _, _, BassB),
+    BassA == BassB,
+    BassA mod 12 == 7.
+
+% ==============================================================================
+% MOTIF STATEMENT TESTS
+% ==============================================================================
+
+% Motif [2,2,-2] stated exactly (transposed) at both phrase starts: cost 0
+test_motif_statement_exact() =>
+    Pitches = [60, 62, 64, 62, 55, 57, 59, 57],
+    motif.apply_motif_statements(Pitches, [2, 2, -2], [1, 5], 80, Cost),
+    solve([Cost]),
+    Cost == 0.
+
+% Inverted statement (mirrored intervals) also counts as a statement
+test_motif_statement_inverted() =>
+    Pitches = [60, 58, 56, 58],
+    motif.apply_motif_statements(Pitches, [2, 2, -2], [1], 80, Cost),
+    solve([Cost]),
+    Cost == 0.
+
+% No statement at the phrase start: cost = Weight per missing statement
+test_motif_statement_missing() =>
+    Pitches = [60, 60, 60, 60, 60],
+    motif.apply_motif_statements(Pitches, [2, 2, -2], [1], 80, Cost),
+    solve([Cost]),
+    Cost == 80.
 
 % ==============================================================================
 % UTILITY
