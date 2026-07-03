@@ -1,0 +1,73 @@
+% export_pieces.pi - Dump the famous-piece corpus as JSON for evaluation
+%
+% Usage:
+%   ./scripts/run_picat.sh picat/export_pieces.pi                 -> data/masterpieces.json
+%   ./scripts/run_picat.sh picat/export_pieces.pi out=other.json
+%
+% Writes each piece's melody line (soprano for SATB excerpts) with
+% key/mode/genre metadata. scripts/evaluate.py reads this file as the
+% statistical reference corpus, so re-run this after editing
+% picat/famous_pieces/.
+
+module export_pieces.
+
+import util.
+import piece_utils.
+import pieces_bach.
+import pieces_mozart.
+import pieces_beethoven.
+import pieces_folk.
+
+main => export_to("data/masterpieces.json").
+
+main(Args) =>
+    Path = parse_out_path(Args, "data/masterpieces.json"),
+    export_to(Path).
+
+parse_out_path([], Default) = Default.
+parse_out_path([Arg | Rest], Default) = Path =>
+    if append("out=", P, Arg) then
+        Path = P
+    else
+        Path = parse_out_path(Rest, Default)
+    end.
+
+export_to(Path) =>
+    Entries = collect_entries(),
+    Out = open(Path, write),
+    println(Out, "{"),
+    println(Out, "  \"pieces\": ["),
+    N = length(Entries),
+    foreach(I in 1..N)
+        write_entry(Out, Entries[I], I < N)
+    end,
+    println(Out, "  ]"),
+    println(Out, "}"),
+    close(Out),
+    printf("Exported %d pieces to %s%n", N, Path).
+
+% All melody lines: melody excerpts as-is, soprano line for SATB chorales
+collect_entries() = Entries =>
+    Melodies = all_mozart_pieces() ++ all_beethoven_pieces()
+            ++ all_folk_pieces() ++ all_bach_melodies(),
+    MelEntries = [(get_id(P), get_melody(P), get_key(P), get_mode(P), get_genre(P))
+                  : P in Melodies],
+    SatbEntries = [(get_id(P), get_soprano(P), get_satb_key(P), get_satb_mode(P), get_satb_genre(P))
+                   : P in all_bach_satb()],
+    Entries = MelEntries ++ SatbEntries.
+
+write_entry(Out, (Id, Pitches, KeyRoot, Mode, Genre), HasMore) =>
+    printf(Out, "    {\"id\": \"%w\", \"key_root\": %w, \"mode\": \"%w\", \"genre\": \"%w\", \"pitches\": [",
+           Id, KeyRoot, Mode, Genre),
+    write_int_list(Out, Pitches),
+    if HasMore then
+        println(Out, "]},")
+    else
+        println(Out, "]}")
+    end.
+
+write_int_list(_Out, []) => true.
+write_int_list(Out, [X]) => printf(Out, "%w", X).
+write_int_list(Out, [X | Rest]) =>
+    printf(Out, "%w,", X),
+    write_int_list(Out, Rest).

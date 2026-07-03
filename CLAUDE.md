@@ -31,6 +31,11 @@ Constraint-based music generation system using Picat. Generates melodies using c
 ./scripts/run_all_tests.sh
 ./scripts/run_picat.sh picat/test_music_types.pi
 
+# Evaluation loop (Phase 3)
+./scripts/batch_render.sh 5 demo randomness=0.4   # render N pieces + rank vs corpus
+python3 scripts/evaluate.py session.json           # score one piece
+./scripts/run_picat.sh picat/export_pieces.pi      # regenerate data/masterpieces.json
+
 # Clean compiled files
 rm -f picat/*.qi
 ```
@@ -213,3 +218,6 @@ Techniques: `inversion`, `retrograde`, `augmentation`, `diminution`. `split=50` 
 ### Input Validation / Diagnostics
 `validation.pi` — `validate_companion_inputs(...)`, throws `$validation_error(field, value, msg)`.
 `diagnostics.pi` — detects constraint conflicts (min_range > voice range, etc.) before solving.
+
+### Evaluation Loop (masterpiece distance)
+`scripts/evaluate.py session.json` scores a generated piece against `data/masterpieces.json` (regenerate via `picat/export_pieces.pi` after editing `picat/famous_pieces/`): interval-distribution JSD + z-scored melodic stats (stepwise/leap ratios, contour turn rate, 4-gram self-similarity...) plus fixed-target intra-piece checks (harmony agreement melody↔accompaniment, rhythm entropy, bar-rhythm repetition, climax uniqueness). Lower distance = closer to the corpus. `scripts/batch_render.sh N [args...]` renders N variations to `out/batch_*/`, converts to MIDI, and prints a ranking — the A/B listening loop. `demo` accepts `output=` and `count=` like the `from=/to=` path.

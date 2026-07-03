@@ -5,3 +5,4 @@
 *.mid
 *.json
 *.pyc
+out/
