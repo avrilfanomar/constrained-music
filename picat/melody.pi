@@ -1188,7 +1188,12 @@ apply_register_arc(Pitches, Preferences) = Cost =>
         else
             WHigh = Center + 11
         end,
-        WLow = min(WLow0, WHigh - 7),  % keep at least a 7-semitone window
+        % Keep at least a full-octave window: chord-tone/cadence/tonic-ending
+        % hard constraints elsewhere in the solve need a scale note of every
+        % pitch class available inside the window, or the segment becomes
+        % unsolvable outright (a <12-semitone window can lack a class
+        % entirely, e.g. the tonic, if the ceiling clips it tight).
+        WLow = min(WLow0, WHigh - 11),
         foreach(I in 1..Len)
             Pitches[I] #>= WLow,
             Pitches[I] #=< WHigh

@@ -368,6 +368,17 @@ choose_climax_segment(Segments) = (ClimaxIdx, PieceClimax) =>
     end,
     ClimaxIdx = BestIdx.
 
+% Last pitch to connect the next segment to, scanning back through Acc
+% (most-recent-first) past any segment whose generation fully failed (an
+% empty melody) so a solver failure doesn't crash last_pitch on last([]).
+find_prev_last_pitch([]) = none.
+find_prev_last_pitch([Melody | Rest]) = Result =>
+    if Melody != [] then
+        Result = melody.last_pitch(Melody)
+    else
+        Result = find_prev_last_pitch(Rest)
+    end.
+
 % Generate segments with genre-based constraints (with motif memory)
 % Returns (AllNotes, ChordPlan): ChordPlan is the list of $chord_span() entries
 % describing the progression each segment's melody was constrained against,
@@ -403,12 +414,8 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
         UseRhythm = false
     end,
 
-    % Determine connection info
-    if Acc == [] then
-        PrevLastPitch = none
-    else
-        PrevLastPitch = melody.last_pitch(head(Acc))
-    end,
+    % Determine connection info (skips back past any failed/empty segment)
+    PrevLastPitch = find_prev_last_pitch(Acc),
 
     % Determine refinement rounds
     NumRounds = refiner.get_refine_rounds(Preferences),
@@ -851,12 +858,8 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
         UseRhythmF = false
     end,
 
-    % Determine connection info
-    if Acc == [] then
-        PrevLastPitchF = none
-    else
-        PrevLastPitchF = last_pitch(head(Acc))
-    end,
+    % Determine connection info (skips back past any failed/empty segment)
+    PrevLastPitchF = find_prev_last_pitch(Acc),
 
     % Determine refinement rounds (only for genre-based generation)
     NumRoundsF = cond(SectionGenre != none, refiner.get_refine_rounds(SectionPrefsF), 1),

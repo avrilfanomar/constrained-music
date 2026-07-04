@@ -176,6 +176,7 @@ The chord progression is planned in `companion.pi` before melody solving (see "S
 
 ### Register Arc / Piece Climax
 `companion.choose_climax_segment` picks the climax segment (highest mood-driven voice; ties → golden-ratio index) and an absolute piece-climax pitch. Each segment gets `register_center` (arc position mapped into its voice range), a hard tessitura window (center−5 .. center+11, capped at `register_ceiling` = climax−2 for non-climax segments, extended to `climax_target` for the climax segment), a soft centering cost, and (climax segment) reach-the-top + don't-plateau costs — all in `melody.apply_register_arc`. This is what makes pieces rise to a single high point; without the hard window, min-value labeling pins melodies to the bottom of the voice range.
+The window's low end is clamped to `WHigh - 11` (full-octave floor, not 7 semitones) — a narrower window can exclude an entire pitch class (e.g. the tonic) from the segment's register entirely, and the tonic-ending/open-cadence/chord-tone hard constraints elsewhere in the solve then have no legal value, so the whole segment solve (and every fallback attempt) fails and returns `[]`. This mainly bit non-climax segments near the climax whose `register_ceiling` clipped `WHigh` down close to `Center`.
 
 ### Solver Defaults
 CLI default `randomness=0.2`; any randomness ≥0.05 turns on `rand_val` labeling (variety), optimization always on. Anytime budgets: 9s pitch solve, 4s rhythm solve (`solve_minimizing/5`).
