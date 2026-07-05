@@ -26,6 +26,7 @@ import accompaniment.
 import refiner.
 import chord_generator.
 import ornaments.
+import scale_utils.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -334,7 +335,9 @@ register_arc_prefs(Params, SegIndex, TotalSegs, ClimaxIdx, PieceClimax) = RegPre
     T = (SegIndex - 0.5) / max(1, TotalSegs),
     Peak = 0.618,
     Arc = 1.0 - abs(T - Peak) / max(Peak, 1.0 - Peak),
-    Center = Low + round((0.30 + 0.40 * Arc) * (High - Low)),
+    % Arc breadth 0.34..0.68 of the voice range (was 0.30..0.70): corpus
+    % pieces span ~11-18 semitones; the wider arc pushed whole pieces to 22+
+    Center = Low + round((0.34 + 0.34 * Arc) * (High - Low)),
     if SegIndex == ClimaxIdx then
         RegPrefs = [register_center=Center, register_span=4, climax_target=PieceClimax]
     else
@@ -349,7 +352,19 @@ segment_own_climax(Seg) = P =>
     Params = get_segment_params(Seg),
     Voice = get_voice(Params),
     Voice = $voice(_, _, _, $range(Low, High)),
-    P = Low + round(0.85 * (High - Low)).
+    P = Low + round(0.82 * (High - Low)).
+
+% Snap the raw (range-derived) piece-climax pitch DOWN to a scale tone of
+% the climax segment's key. The 85%-of-voice-range point is usually not in
+% the scale at all, and melody.apply_register_arc now HARD-requires the
+% climax segment to reach target-1 — the target must be an attainable pitch.
+snap_climax_to_scale(RawP, SegKeyRoot, Mode) = Snapped =>
+    ScaleBelow = scale_utils.scale_notes_in_range(SegKeyRoot, Mode, RawP - 11, RawP),
+    if ScaleBelow != [] then
+        Snapped = max(ScaleBelow)
+    else
+        Snapped = RawP
+    end.
 
 % Choose the climax segment and the absolute piece-climax pitch: the segment
 % whose voice tops out highest; ties broken toward the golden-ratio index.
@@ -385,7 +400,9 @@ find_prev_last_pitch([Melody | Rest]) = Result =>
 % so the accompaniment can play the exact same chords.
 generate_all_segments_with_genre(Segments, KeyRoot, Genre, Preferences) = (AllNotes, ChordPlan) =>
     TotalSegs = length(Segments),
-    ClimaxInfo = choose_climax_segment(Segments),
+    (ClimaxIdxG, RawClimaxG) = choose_climax_segment(Segments),
+    ClimaxModeG = get_mode(get_segment_params(Segments[ClimaxIdxG])),
+    ClimaxInfo = (ClimaxIdxG, snap_climax_to_scale(RawClimaxG, KeyRoot, ClimaxModeG)),
     (AllNotes, ChordPlan) = generate_segments_genre_helper(Segments, KeyRoot, Genre, Preferences, 1, 0, [], [], [], TotalSegs, ClimaxInfo).
 
 generate_segments_genre_helper([], _, _, _, _, _, Acc, _MotifIntervals, PlanAcc, _TotalSegs, _ClimaxInfo) = (flatten(reverse(Acc)), reverse(PlanAcc)).
@@ -795,7 +812,12 @@ generate_all_segments_with_form(Segments, FormSections, KeyRoot, Genre, Preferen
     % Determine style overrides for section contrast
     StyleOverrides = cond(Genre != none, get_style_overrides(Preferences, Genre), []),
     TotalSegsF = length(Segments),
-    ClimaxInfoF = choose_climax_segment(Segments),
+    (ClimaxIdxF0, RawClimaxF) = choose_climax_segment(Segments),
+    ClimaxSegF = Segments[ClimaxIdxF0],
+    % Form sections transpose: snap against the climax section's actual key
+    ClimaxKeyF = KeyRoot + get_form_segment_key(ClimaxSegF),
+    ClimaxModeF0 = get_mode(get_segment_params(ClimaxSegF)),
+    ClimaxInfoF = (ClimaxIdxF0, snap_climax_to_scale(RawClimaxF, ClimaxKeyF, ClimaxModeF0)),
     (AllNotes, ChordPlan) = generate_form_segments_helper(Segments, FormSections, KeyRoot, Genre, Preferences, StyleOverrides, 1, 0, [], [], new_map(), new_map(), [], TotalSegsF, ClimaxInfoF).
 
 generate_form_segments_helper([], _, _, _, _, _, _, _, Acc, _MotifIntervals, _SectionPitchMap, _SectionChordMap, PlanAcc, _TotalSegs, _ClimaxInfo) = (flatten(reverse(Acc)), reverse(PlanAcc)).

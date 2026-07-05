@@ -42,6 +42,7 @@ generate_accompaniment(ChordProg, Genre, MelodyVelocity) = AccompNotes =>
     VelOffset = velocity_offset(Genre),
     BaseVel = max(35, min(110, MelodyVelocity + VelOffset)),
     VoiceId = lh_voice_id(),
+    reset_voice_leading,
     AccompNotes = flatten([render_bar(CA, Pattern, VoiceId, BaseVel)
                            : CA in ChordProg]).
 
@@ -50,6 +51,7 @@ generate_accompaniment(ChordProg, Pattern, _Genre, MelodyVelocity) = AccompNotes
     VelOffset = default_velocity_offset(),
     BaseVel = max(35, min(110, MelodyVelocity + VelOffset)),
     VoiceId = lh_voice_id(),
+    reset_voice_leading,
     AccompNotes = flatten([render_bar(CA, Pattern, VoiceId, BaseVel)
                            : CA in ChordProg]).
 
@@ -116,16 +118,17 @@ render_block(CA, VoiceId, Vel) = Notes =>
     AllPitches = [BassNote | ChordNotes],
     Notes = [make_note(P, Bar, 1, 1, 1, VoiceId, Vel) : P in AllPitches].
 
-% ALBERTI: Root-5th-3rd-5th pattern (4 quarter notes)
+% ALBERTI: low-high-mid-high figure (4 quarter notes) over the voice-led
+% voicing (ascending), whatever inversion that turned out to be
 render_alberti(CA, VoiceId, Vel) = Notes =>
     Bar = harmonizer.chord_bar(CA),
     Voicing = get_chord_voicing(CA),
     % Need at least 3 notes for Alberti pattern
     if length(Voicing) >= 3 then
-        Root = Voicing[1],
-        Third = Voicing[2],
-        Fifth = Voicing[3],
-        Pattern = [Root, Fifth, Third, Fifth],
+        LowN = Voicing[1],
+        MidN = Voicing[2],
+        HighN = Voicing[3],
+        Pattern = [LowN, HighN, MidN, HighN],
         Notes = [make_note(Pattern[I], Bar, I, 1, 4, VoiceId,
                           cond(I == 1, Vel + 5, Vel - 3))
                  : I in 1..4]
@@ -205,7 +208,7 @@ render_pair(CAa, CAb, stride, VoiceId, Vel) = Notes =>
 render_pair(CAa, CAb, _, VoiceId, Vel) = Notes =>
     Notes = block_half(CAa, 1, VoiceId, Vel) ++ block_half(CAb, 3, VoiceId, Vel).
 
-% Two-note alberti figure (root, fifth) filling half a bar
+% Two-note alberti figure (lowest, highest voicing note) filling half a bar
 alberti_half(CA, StartBeat, VoiceId, Vel) = Notes =>
     Bar = harmonizer.chord_bar(CA),
     Voicing = get_chord_voicing(CA),
@@ -236,24 +239,73 @@ lowest_voicing_note(CA) = N =>
 % CHORD VOICING
 % ==============================================================================
 
-% Get 3 chord tones in the chord register (48-67)
+% Get the chord's tones voiced in the chord register (48-67), ASCENDING.
+% Voice leading is stateful: each chord picks the close-position inversion
+% that moves least from the previous bar's voicing (common tones stay put,
+% like a real left hand), tracked in the global map and reset per
+% generate_accompaniment call. Renderers therefore address voicing notes by
+% register (Voicing[1] = lowest), not by chord function — an Alberti figure
+% is low-high-mid-high of whatever inversion voice leading chose.
 get_chord_voicing(CA) = Voicing =>
     PCs = harmonizer.chord_tone_pcs(CA),
+    M = get_global_map(),
+    Prev = M.get(accomp_prev_voicing, []),
+    Voicing = smooth_voicing(PCs, Prev),
+    M.put(accomp_prev_voicing, Voicing).
+
+% Forget voice-leading state (start of each accompaniment render)
+reset_voice_leading =>
+    get_global_map().put(accomp_prev_voicing, []).
+
+% The close-position voicing (one pitch per PC, span <= an octave + a bit
+% for 4+ note chords) that minimizes total voice movement from Prev;
+% without a Prev, the one centered in the register.
+smooth_voicing(PCs, Prev) = Best =>
+    Cands = candidate_voicings(PCs),
+    if Cands == [] then
+        Best = []
+    else
+        BestC = Cands[1],
+        BestCost = voicing_cost(Cands[1], Prev),
+        foreach(C in Cands)
+            Cost = voicing_cost(C, Prev),
+            if Cost < BestCost then
+                BestC := C,
+                BestCost := Cost
+            end
+        end,
+        Best = BestC
+    end.
+
+% All ways to place one pitch per chord PC inside the register, filtered to
+% close position, as ascending pitch lists
+candidate_voicings(PCs) = Cands =>
     Lo = chord_lo(),
     Hi = chord_hi(),
-    % Collect all valid pitches, pick the lowest occurrence of each PC
-    AllNotes = sort([N : N in Lo..Hi, pc_in_list(N mod 12, PCs)]),
-    % Take one per pitch class (lowest voicing = root position tendency)
-    Voicing = pick_one_per_pc(AllNotes, PCs, []).
+    PerPC = [[N : N in Lo..Hi, N mod 12 == PC] : PC in PCs],
+    NonEmpty = [L : L in PerPC, L != []],
+    Combos = cartesian(NonEmpty),
+    MaxSpan = 12 + 4 * max(0, length(PCs) - 3),
+    Cands0 = [sort(C) : C in Combos, max(C) - min(C) =< MaxSpan],
+    if Cands0 == [] then
+        Cands0 := [sort(C) : C in Combos]   % degenerate chords: drop the span filter
+    end,
+    Cands = sort_remove_dups(Cands0).
 
-% Pick one note per pitch class (preserving PC order for correct Root-3rd-5th)
-pick_one_per_pc(_, [], Acc) = reverse(Acc).
-pick_one_per_pc(Notes, [PC|RestPC], Acc) = Result =>
-    Candidates = [N : N in Notes, N mod 12 == PC],
-    if Candidates != [] then
-        Result = pick_one_per_pc(Notes, RestPC, [Candidates[1] | Acc])
+cartesian([]) = [[]].
+cartesian([L | Ls]) = [[X | Rest] : X in L, Rest in cartesian(Ls)].
+
+% Positional (both lists ascending) movement cost, dominated by voice
+% motion; the register-centering term only breaks ties / anchors chord 1
+voicing_cost(C, Prev) = Cost =>
+    Center = (chord_lo() + chord_hi()) // 2,
+    Mean = sum(C) // max(1, length(C)),
+    if Prev == [] then
+        Cost = abs(Mean - Center)
     else
-        Result = pick_one_per_pc(Notes, RestPC, Acc)
+        K = min(length(C), length(Prev)),
+        Move = sum([abs(C[I] - Prev[I]) : I in 1..K]),
+        Cost = 10 * Move + abs(Mean - Center)
     end.
 
 % Deterministic pitch class membership
