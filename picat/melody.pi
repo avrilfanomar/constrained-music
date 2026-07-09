@@ -1243,18 +1243,24 @@ apply_register_arc(Pitches, Preferences) = Cost =>
             % other segment's register_ceiling = target-2) and TOUCH it at
             % most 3 times, like a real high point, not sit on it. Both are
             % HARD: the equivalent soft costs routinely survived the anytime
-            % budget (top pitch smeared over 4-8 bars). Satisfiable because
-            % companion snaps the target to a scale tone inside the window,
-            % and period restatement duplicates a peak at most once (2 < 3).
-            MaxP :: 0..127,
-            MaxP #= max(Pitches),
-            MaxP #>= TargetP - 1,
-            TopCount :: 0..127,
-            TopCount #= sum([Pitches[I] #= MaxP : I in 1..Len]),
-            TopCount #=< 3,
-            % Gradient (not a cliff) so the anytime optimizer can climb:
-            % prefer actually reaching the target, with a single top note
-            PeakCost #= 12 * max(0, TargetP - MaxP) + 40 * max(0, TopCount - 1)
+            % budget (top pitch smeared over 4-8 bars). Formulated as a
+            % TOP-BAND count — notes in [target-1, target] (the window top
+            % is the target, so the band IS the peak) — because the earlier
+            % MaxP #= max(Pitches) + reified-equality-with-MaxP version
+            % propagated so poorly the whole segment routinely found NO
+            % solution within budget. Constant-bound reifications are cheap.
+            % Satisfiable: the target is snapped to a scale tone inside the
+            % window, and period restatement duplicates a peak once (2 < 3).
+            TopBand :: 0..Len,
+            TopBand #= sum([Pitches[I] #>= TargetP - 1 : I in 1..Len]),
+            TopBand #>= 1,
+            if get_pref_value(Preferences, climax_topcount, TCFlag), TCFlag == off then
+                true
+            else
+                TopBand #=< 3
+            end,
+            % Gradient so the anytime optimizer still prefers a single touch
+            PeakCost #= 40 * max(0, TopBand - 1)
         else
             PeakCost = 0
         end,
@@ -1478,23 +1484,8 @@ generate_segment_melody_with_rhythm(MusicParams, KeyRoot, NumBars, Genre, Prefer
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
-    % Duration variables (in ticks: 1=sixteenth, 2=eighth, 3=dotted-eighth, 4=quarter, 6=dotted-quarter, 8=half)
-    Durations = new_list(TotalNotes),
-    AllowedDurs = allowed_durations_for_density_and_meter(Density, TicksPerBar),
-    Durations :: AllowedDurs,
-
-    % Bar-filling constraint: durations in each bar must sum to TicksPerBar
-    NotesPerBar = Density,
-    foreach(Bar in 1..NumBars)
-        BarStart = (Bar - 1) * NotesPerBar + 1,
-        BarEnd = Bar * NotesPerBar,
-        sum([Durations[I] : I in BarStart..BarEnd]) #= TicksPerBar
-    end,
-
-    % Duration variety: prevent all-same-duration solutions
-    if TotalNotes >= 4 then
-        rhythmic.no_rhythmic_monotony(Durations, Density)
-    end,
+    % Duration variables: domains, bar-filling, variety, cadential arrival
+    Durations = post_duration_vars(TotalNotes, NumBars, Density, TicksPerBar),
 
     % CHORD-FIRST: Generate chord progression before melody
     RootPC = KeyRoot mod 12,
@@ -1553,6 +1544,46 @@ allowed_durations_for_density(7) = [1, 2, 3, 4].     % Sixteenth to quarter
 allowed_durations_for_density(8) = [1, 2, 3, 4].     % Sixteenth to quarter
 allowed_durations_for_density(_) = [2, 3, 4, 6, 8].  % Default fallback
 
+% Create the segment's duration variables (ticks: 1=sixteenth, 2=eighth,
+% 3=dotted-eighth, 4=quarter, 6=dotted-quarter, 8=half): density-specific
+% domains, bar-filling to TicksPerBar, variety, and a CADENTIAL ARRIVAL —
+% the last note of each cadence bar (the final bar, and the half-cadence
+% bar of even 4+-bar segments) must fill at least half the bar, so phrases
+% land on a held note instead of running sixteenths through the cadence.
+% Cadence bars draw from an extended domain (down to sixteenths for the
+% approach, up to the arrival value) to keep the bar sum satisfiable; the
+% arrival is skipped when the bar's other notes couldn't fit (very high
+% density in short meters).
+post_duration_vars(TotalNotes, NumBars, Density, TicksPerBar) = Durations =>
+    Durations = new_list(TotalNotes),
+    AllowedDurs = allowed_durations_for_density_and_meter(Density, TicksPerBar),
+    Arrival = TicksPerBar // 2,
+    if NumBars >= 4, NumBars mod 2 == 0 then
+        HalfCadBar = NumBars // 2
+    else
+        HalfCadBar = -1
+    end,
+    CadDurs = sort_remove_dups(AllowedDurs ++ [1, 2, Arrival]),
+    foreach(Bar in 1..NumBars)
+        BarStart = (Bar - 1) * Density + 1,
+        BarEnd = Bar * Density,
+        if (Bar == NumBars ; Bar == HalfCadBar),
+           Density - 1 =< TicksPerBar - Arrival then
+            foreach(I in BarStart..BarEnd - 1)
+                Durations[I] :: CadDurs
+            end,
+            Durations[BarEnd] :: [D : D in CadDurs, D >= Arrival]
+        else
+            foreach(I in BarStart..BarEnd)
+                Durations[I] :: AllowedDurs
+            end
+        end,
+        sum([Durations[I] : I in BarStart..BarEnd]) #= TicksPerBar
+    end,
+    if TotalNotes >= 4 then
+        rhythmic.no_rhythmic_monotony(Durations, Density)
+    end.
+
 % Apply rhythm soft constraints and return total cost
 apply_rhythm_soft_constraints(Durations, Genre) = TotalCost =>
     % Get rhythm constraints from genre profile (or default)
@@ -1590,7 +1621,7 @@ solve_minimizing(Vars, Cost, SolveOpts, Label) =>
 
 solve_minimizing(Vars, Cost, SolveOpts, Label, BudgetMs) =>
     if (integer(Cost), Cost == 0) then
-        solve(SolveOpts, Vars)
+        solve_first_feasible(Vars, SolveOpts, Label, BudgetMs)
     else
         Map = get_global_map(),
         Map.put(anytime_best_solution, none),
@@ -1602,9 +1633,25 @@ solve_minimizing(Vars, Cost, SolveOpts, Label, BudgetMs) =>
                 Vars = Best
             else
                 printf("    [warn] %s optimization found nothing in budget; using first feasible solution%n", Label),
-                solve(SolveOpts, Vars)
+                solve_first_feasible(Vars, SolveOpts, Label, BudgetMs)
             end
         end
+    end.
+
+% First feasible solution within a hard budget. An effectively-unsatisfiable
+% constraint set can make an unbounded solve() search for hours (the whole
+% generation appears hung); bounding it and FAILING on expiry lets
+% try_genre_segment fall through to its next, less-constrained shape.
+% Deliberately labels with plain ff, NOT the caller's rand_val options:
+% random value ordering is far worse at proving feasibility on hard
+% instances, and the hard register window already keeps a bottom-biased
+% solution in the right tessitura.
+solve_first_feasible(Vars, _SolveOpts, Label, BudgetMs) =>
+    if time_out(solve([ff], Vars), BudgetMs, FStatus), FStatus == success then
+        true
+    else
+        printf("    [warn] %s found no feasible solution in budget; falling back%n", Label),
+        fail
     end.
 
 % Report hook: store the current (improving) solution non-backtrackably
@@ -1703,21 +1750,8 @@ generate_connected_segment_with_rhythm(MusicParams, KeyRoot, NumBars, PrevLastPi
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
-    % Duration variables with density-specific domains + bar-filling
-    Durations = new_list(TotalNotes),
-    AllowedDurs = allowed_durations_for_density_and_meter(Density, TicksPerBar),
-    Durations :: AllowedDurs,
-
-    NotesPerBar = Density,
-    foreach(Bar in 1..NumBars)
-        BarStart = (Bar - 1) * NotesPerBar + 1,
-        BarEnd = Bar * NotesPerBar,
-        sum([Durations[I] : I in BarStart..BarEnd]) #= TicksPerBar
-    end,
-
-    if TotalNotes >= 4 then
-        rhythmic.no_rhythmic_monotony(Durations, Density)
-    end,
+    % Duration variables: domains, bar-filling, variety, cadential arrival
+    Durations = post_duration_vars(TotalNotes, NumBars, Density, TicksPerBar),
 
     % CHORD-FIRST
     RootPC4 = KeyRoot mod 12,
@@ -1779,21 +1813,8 @@ generate_connected_segment_with_rhythm_and_motif(MusicParams, KeyRoot, NumBars, 
     Pitches = new_list(TotalNotes),
     Pitches :: ScaleNotes,
 
-    % Duration variables with density-specific domains + bar-filling
-    Durations = new_list(TotalNotes),
-    AllowedDurs = allowed_durations_for_density_and_meter(Density, TicksPerBar),
-    Durations :: AllowedDurs,
-
-    NotesPerBar = Density,
-    foreach(Bar in 1..NumBars)
-        BarStart = (Bar - 1) * NotesPerBar + 1,
-        BarEnd = Bar * NotesPerBar,
-        sum([Durations[I] : I in BarStart..BarEnd]) #= TicksPerBar
-    end,
-
-    if TotalNotes >= 4 then
-        rhythmic.no_rhythmic_monotony(Durations, Density)
-    end,
+    % Duration variables: domains, bar-filling, variety, cadential arrival
+    Durations = post_duration_vars(TotalNotes, NumBars, Density, TicksPerBar),
 
     % CHORD-FIRST
     RootPC5 = KeyRoot mod 12,
@@ -2068,13 +2089,25 @@ apply_period_structure(Pitches, Durations, Root, ScaleNotes, NumBars, Density, D
         open_cadence_pitch(Pitches, HalfNotes, RootClass, ScaleNotes),
         if TonicNotes != [] then
             Pitches[Len] :: TonicNotes
-        end
+        end,
+        final_cadence_approach(Pitches, Len)
     elseif NumBars >= 3, Len >= 8 then
         HalfPoint = Len // 2,
         open_cadence_pitch(Pitches, HalfPoint, RootClass, ScaleNotes),
         if TonicNotes != [] then
             Pitches[Len] :: TonicNotes
-        end
+        end,
+        final_cadence_approach(Pitches, Len)
+    end.
+
+% Closing melodic formula: the final tonic must be reached by step or
+% repetition (2->1, 7->1, or 1-1), never by leap. Scale domains always
+% contain a tone within 2 semitones of the tonic (supertonic above;
+% leading tone / subtonic below), so this is satisfiable alongside the
+% chord-tone and NCT constraints (2 and 7 are both chord tones of V).
+final_cadence_approach(Pitches, Len) =>
+    if Len >= 2 then
+        abs(Pitches[Len - 1] - Pitches[Len]) #=< 2
     end.
 
 % Domain maximum of a duration variable (or the value itself if already fixed)

@@ -43,8 +43,7 @@ generate_accompaniment(ChordProg, Genre, MelodyVelocity) = AccompNotes =>
     BaseVel = max(35, min(110, MelodyVelocity + VelOffset)),
     VoiceId = lh_voice_id(),
     reset_voice_leading,
-    AccompNotes = flatten([render_bar(CA, Pattern, VoiceId, BaseVel)
-                           : CA in ChordProg]).
+    AccompNotes = render_all_bars(ChordProg, Pattern, VoiceId, BaseVel).
 
 % Generate with explicit pattern override
 generate_accompaniment(ChordProg, Pattern, _Genre, MelodyVelocity) = AccompNotes =>
@@ -52,8 +51,16 @@ generate_accompaniment(ChordProg, Pattern, _Genre, MelodyVelocity) = AccompNotes
     BaseVel = max(35, min(110, MelodyVelocity + VelOffset)),
     VoiceId = lh_voice_id(),
     reset_voice_leading,
-    AccompNotes = flatten([render_bar(CA, Pattern, VoiceId, BaseVel)
-                           : CA in ChordProg]).
+    AccompNotes = render_all_bars(ChordProg, Pattern, VoiceId, BaseVel).
+
+% Render every bar with the pattern except the last one, which becomes a
+% sustained final chord — a piece ends on a solid tonic, not on a bar of
+% running figuration that just stops. (Recursion keeps the voice-leading
+% state updates in bar order.)
+render_all_bars([], _Pattern, _VoiceId, _Vel) = [].
+render_all_bars([CA], _Pattern, VoiceId, Vel) = render_final_bar(CA, VoiceId, Vel).
+render_all_bars([CA | Rest], Pattern, VoiceId, Vel) =
+    render_bar(CA, Pattern, VoiceId, Vel) ++ render_all_bars(Rest, Pattern, VoiceId, Vel).
 
 % ==============================================================================
 % GENRE-TO-PATTERN MAPPING
@@ -109,6 +116,37 @@ render_bar(CA, _, VoiceId, Vel) = Notes =>
 % ==============================================================================
 % PATTERN RENDERERS
 % ==============================================================================
+
+% FINAL BAR: root-position chord held for the whole bar, root doubled in the
+% low bass, slightly emphasized. Ignores the voice-led inversion on purpose —
+% closing chords are root position. A split pair in final position (unusual)
+% keeps both chords as sustained half-bar blocks.
+render_final_bar(chord_pair(CAa, CAb), VoiceId, Vel) = Notes =>
+    Notes = block_half(CAa, 1, VoiceId, Vel) ++ block_half(CAb, 3, VoiceId, Vel + 3).
+render_final_bar(CA, VoiceId, Vel) = Notes =>
+    Bar = harmonizer.chord_bar(CA),
+    BassNote = harmonizer.chord_bass(CA),
+    Voicing = root_position_voicing(CA),
+    Notes = [make_note(BassNote, Bar, 1, 1, 1, VoiceId, Vel + 8)] ++
+            [make_note(P, Bar, 1, 1, 1, VoiceId, Vel + 3) : P in Voicing].
+
+% Root-position close voicing: root just above chord_lo, remaining chord
+% tones (chord_tone_pcs order: root, third, fifth[, ...]) stacked upward
+root_position_voicing(CA) = Voicing =>
+    PCs = harmonizer.chord_tone_pcs(CA),
+    if PCs == [] then
+        Voicing = []
+    else
+        Lo = chord_lo(),
+        Root = Lo + ((head(PCs) - Lo) mod 12),
+        Voicing = stack_upward(tail(PCs), [Root])
+    end.
+
+stack_upward([], Acc) = reverse(Acc).
+stack_upward([PC | Rest], Acc) = Voicing =>
+    Prev = head(Acc),
+    Next = Prev + 1 + ((PC - Prev - 1) mod 12),  % smallest pitch above Prev with class PC
+    Voicing = stack_upward(Rest, [Next | Acc]).
 
 % BLOCK: all chord notes on beat 1, sustained for whole bar
 render_block(CA, VoiceId, Vel) = Notes =>
@@ -184,14 +222,14 @@ render_stride(CA, VoiceId, Vel) = Notes =>
 % bar); in triple meters this lands the chord change on the last beat, which
 % is still a usable cadential placement.
 
+% Alberti/arpeggiated figures shrunk to a half bar can only sound 2 of the
+% chord's 3 tones (the dropped tone is usually the six-four's root — thin,
+% and heard as a wrong chord). Cadential split bars are punctuation, so
+% render them as solid block chords, like a real cadential I6/4 -> V.
 render_pair(CAa, CAb, alberti, VoiceId, Vel) = Notes =>
-    Notes = alberti_half(CAa, 1, VoiceId, Vel + 5) ++ alberti_half(CAb, 3, VoiceId, Vel).
+    Notes = block_half(CAa, 1, VoiceId, Vel + 3) ++ block_half(CAb, 3, VoiceId, Vel).
 render_pair(CAa, CAb, arpeggiated, VoiceId, Vel) = Notes =>
-    Bar = harmonizer.chord_bar(CAa),
-    Notes = [make_note(harmonizer.chord_bass(CAa), Bar, 1, 1, 4, VoiceId, Vel + 5),
-             make_note(lowest_voicing_note(CAa), Bar, 2, 1, 4, VoiceId, Vel - 2),
-             make_note(harmonizer.chord_bass(CAb), Bar, 3, 1, 4, VoiceId, Vel),
-             make_note(lowest_voicing_note(CAb), Bar, 4, 1, 4, VoiceId, Vel - 2)].
+    Notes = block_half(CAa, 1, VoiceId, Vel + 3) ++ block_half(CAb, 3, VoiceId, Vel).
 render_pair(CAa, CAb, waltz, VoiceId, Vel) = Notes =>
     Bar = harmonizer.chord_bar(CAa),
     BassNoteObj = make_note(harmonizer.chord_bass(CAa), Bar, 1, 1, 4, VoiceId, Vel + 8),
@@ -208,32 +246,12 @@ render_pair(CAa, CAb, stride, VoiceId, Vel) = Notes =>
 render_pair(CAa, CAb, _, VoiceId, Vel) = Notes =>
     Notes = block_half(CAa, 1, VoiceId, Vel) ++ block_half(CAb, 3, VoiceId, Vel).
 
-% Two-note alberti figure (lowest, highest voicing note) filling half a bar
-alberti_half(CA, StartBeat, VoiceId, Vel) = Notes =>
-    Bar = harmonizer.chord_bar(CA),
-    Voicing = get_chord_voicing(CA),
-    if length(Voicing) >= 3 then
-        Notes = [make_note(Voicing[1], Bar, StartBeat, 1, 4, VoiceId, Vel),
-                 make_note(Voicing[3], Bar, StartBeat + 1, 1, 4, VoiceId, Vel - 3)]
-    else
-        Notes = block_half(CA, StartBeat, VoiceId, Vel)
-    end.
-
 % Bass + chord tones sustained for half a bar
 block_half(CA, StartBeat, VoiceId, Vel) = Notes =>
     Bar = harmonizer.chord_bar(CA),
     BassNote = harmonizer.chord_bass(CA),
     ChordNotes = get_chord_voicing(CA),
     Notes = [make_note(P, Bar, StartBeat, 1, 2, VoiceId, Vel) : P in [BassNote | ChordNotes]].
-
-% Lowest chord-voicing note (fallback: bass)
-lowest_voicing_note(CA) = N =>
-    Voicing = get_chord_voicing(CA),
-    if Voicing == [] then
-        N = harmonizer.chord_bass(CA)
-    else
-        N = min(Voicing)
-    end.
 
 % ==============================================================================
 % CHORD VOICING

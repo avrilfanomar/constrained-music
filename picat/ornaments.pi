@@ -11,6 +11,7 @@
 module ornaments.
 
 import music_types.
+import scale_utils.
 
 % ==============================================================================
 % MAIN ENTRY POINT
@@ -18,35 +19,44 @@ import music_types.
 
 % Add ornaments to a melody based on genre and density
 % Density: 0.0 = no ornaments, 1.0 = all eligible notes ornamented
-add_ornaments(Notes, Genre, Density) = Ornamented =>
+% ChordPlan: list of $chord_span(StartBarOffset, NumBars, KeyRoot, Mode, _)
+%   giving the key of each bar, so grace pitches are diatonic; [] = C major.
+% Meter: $meter(BeatsPerBar, _) for placing graces at the end of the previous
+%   bar when the main note falls on beat 1.
+add_ornaments(Notes, Genre, Density) =
+    add_ornaments(Notes, Genre, Density, [], $meter(4, 4)).
+
+add_ornaments(Notes, Genre, Density, ChordPlan, Meter) = Ornamented =>
     if Density =< 0.0 then
         Ornamented = Notes
     else
         OrnamentStyle = ornament_style(Genre),
-        Ornamented = add_ornaments_with_style(Notes, OrnamentStyle, Density)
+        KeySpans = [(SB + 1, SB + NB, Root, Mode) :
+                    $chord_span(SB, NB, Root, Mode, _) in ChordPlan],
+        Ornamented = add_ornaments_with_style(Notes, OrnamentStyle, Density, KeySpans, Meter)
     end.
 
 % Add ornaments using a specific style
-add_ornaments_with_style(Notes, Style, Density) = Result =>
+add_ornaments_with_style(Notes, Style, Density, KeySpans, Meter) = Result =>
     Len = length(Notes),
     if Len < 2 then
         Result = Notes
     else
-        Result = insert_ornaments(Notes, Style, Density, 1, [])
+        Result = insert_ornaments(Notes, Style, Density, 1, [], KeySpans, Meter)
     end.
 
 % Insert ornaments recursively through note list
-insert_ornaments([], _Style, _Density, _I, Acc) = reverse(Acc).
-insert_ornaments([Note], _Style, _Density, _I, Acc) = reverse([Note | Acc]).
-insert_ornaments([Note, Next | Rest], Style, Density, I, Acc) = Result =>
+insert_ornaments([], _Style, _Density, _I, Acc, _KeySpans, _Meter) = reverse(Acc).
+insert_ornaments([Note], _Style, _Density, _I, Acc, _KeySpans, _Meter) = reverse([Note | Acc]).
+insert_ornaments([Note, Next | Rest], Style, Density, I, Acc, KeySpans, Meter) = Result =>
     % Decide whether to add an ornament before this note
     if should_ornament(Note, Next, I, Style, Density) then
-        GraceNote = make_grace_note(Note, Next, Style),
+        GraceNote = make_grace_note(Note, Next, Style, KeySpans, Meter),
         NewAcc = [Note, GraceNote | Acc]
     else
         NewAcc = [Note | Acc]
     end,
-    Result = insert_ornaments([Next | Rest], Style, Density, I + 1, NewAcc).
+    Result = insert_ornaments([Next | Rest], Style, Density, I + 1, NewAcc, KeySpans, Meter).
 
 % ==============================================================================
 % ORNAMENT DECISION
@@ -84,25 +94,32 @@ should_ornament(_, _, _, _, _) => fail.
 % ==============================================================================
 
 % Create a grace note for the approach to Next from Current
-make_grace_note(Current, Next, Style) = GraceNote =>
-    Current = $note(_, _, $time_pos(Bar1, _, _), VoiceId, _),
+make_grace_note(Current, Next, Style, KeySpans, Meter) = GraceNote =>
+    Current = $note(_, _, _, VoiceId, _),
     Next = $note($pitch(midi, P2, _), _, $time_pos(Bar2, Beat2, Sub2), _, Vel),
 
-    % Grace note pitch: chromatic lower neighbor or scale tone below
+    % Grace note pitch: diatonic neighbor in the key of the ornamented bar
     GraceType = ornament_type(Style),
-    GracePitch = grace_pitch(P2, GraceType),
+    (Root, Mode) = key_for_bar(KeySpans, Bar2),
+    GracePitch = grace_pitch(P2, GraceType, Root, Mode),
     Octave = GracePitch // 12 - 1,
 
-    % Grace note position: just before the main note (same bar, tiny sub offset)
-    % If main note is on beat 1, grace is at end of previous bar
-    if Beat2 == 1, Sub2 < 0.05 then
-        GraceBar = max(1, Bar1),
-        GraceBeat = 4,
-        GraceSub = 0.9
-    else
+    % Grace note position: strictly before the main note. A main note right on
+    % a beat borrows the end of the previous beat (previous bar for beat 1) —
+    % clamping to the note's own position would sound both simultaneously.
+    Meter = $meter(BeatsPerBar, _),
+    if Sub2 >= 0.1 then
         GraceBar = Bar2,
         GraceBeat = Beat2,
-        GraceSub = max(0.0, Sub2 - 0.1)
+        GraceSub = Sub2 - 0.1
+    elseif Beat2 > 1 then
+        GraceBar = Bar2,
+        GraceBeat = Beat2 - 1,
+        GraceSub = 0.9
+    else
+        GraceBar = max(1, Bar2 - 1),
+        GraceBeat = BeatsPerBar,
+        GraceSub = 0.9
     end,
 
     % Very short duration: 1/32 note
@@ -116,11 +133,33 @@ make_grace_note(Current, Next, Style) = GraceNote =>
         GraceVelocity
     ).
 
-% Calculate grace note pitch based on ornament type
-grace_pitch(MainPitch, acciaccatura) = max(0, MainPitch - 1).  % Chromatic lower neighbor
-grace_pitch(MainPitch, appoggiatura) = max(0, MainPitch - 2).  % Diatonic lower neighbor
-grace_pitch(MainPitch, upper_neighbor) = min(127, MainPitch + 1). % Upper chromatic neighbor
-grace_pitch(MainPitch, _) = max(0, MainPitch - 1).             % Default: chromatic lower
+% Key in effect at a bar; outside every span (or with no plan) assume C major
+key_for_bar([], _Bar) = (60, major).
+key_for_bar([(FromBar, ToBar, Root, Mode) | Rest], Bar) = Key =>
+    if Bar >= FromBar, Bar =< ToBar then
+        Key = (Root, Mode)
+    else
+        Key = key_for_bar(Rest, Bar)
+    end.
+
+% Calculate grace note pitch based on ornament type — diatonic in (Root, Mode)
+grace_pitch(MainPitch, upper_neighbor, Root, Mode) = min(127, diatonic_upper(MainPitch, Root, Mode)).
+grace_pitch(MainPitch, _, Root, Mode) = max(0, diatonic_lower(MainPitch, Root, Mode)).
+
+% Nearest scale tone strictly below/above. In minor, the tone below the tonic
+% is raised to the leading tone (standard practice for ornaments/cadences).
+diatonic_lower(P, Root, Mode) = G =>
+    if (Mode == minor ; Mode == natural_minor ; Mode == aeolian),
+       (P - Root) mod 12 == 0 then
+        G = P - 1
+    else
+        Cands = scale_utils.scale_notes_in_range(Root, Mode, P - 3, P - 1),
+        if Cands != [] then G = last(Cands) else G = P - 1 end
+    end.
+
+diatonic_upper(P, Root, Mode) = G =>
+    Cands = scale_utils.scale_notes_in_range(Root, Mode, P + 1, P + 3),
+    if Cands != [] then G = head(Cands) else G = P + 1 end.
 
 % ==============================================================================
 % GENRE-SPECIFIC ORNAMENT STYLES
@@ -167,11 +206,11 @@ ornament_max_interval(_) = 12.
 % MORDENT (ALTERNATION ORNAMENT)
 % ==============================================================================
 
-% Add a mordent to a note: rapid alternation with upper/lower neighbor
+% Add a mordent to a note: rapid alternation with the diatonic upper neighbor
 % Returns [MainNote, UpperNeighbor, MainNote] with very short durations
-make_mordent(Note) = Mordent =>
+make_mordent(Note, Root, Mode) = Mordent =>
     Note = $note($pitch(midi, P, Oct), _Dur, TimePos, VoiceId, Vel),
-    NeighborPitch = min(127, P + 1),
+    NeighborPitch = min(127, diatonic_upper(P, Root, Mode)),
     GraceVel = min(127, round(Vel * 0.8)),
     Mordent = [
         $note($pitch(midi, P, Oct), $duration(1, 32), TimePos, VoiceId, Vel),
@@ -184,11 +223,11 @@ make_mordent(Note) = Mordent =>
 % TURN ORNAMENT
 % ==============================================================================
 
-% Add a turn: upper-main-lower-main
-make_turn(Note) = Turn =>
+% Add a turn: upper-main-lower-main with diatonic neighbors
+make_turn(Note, Root, Mode) = Turn =>
     Note = $note($pitch(midi, P, _), _Dur, TimePos, VoiceId, Vel),
-    Upper = min(127, P + 1),
-    Lower = max(0, P - 1),
+    Upper = min(127, diatonic_upper(P, Root, Mode)),
+    Lower = max(0, diatonic_lower(P, Root, Mode)),
     Oct = P // 12 - 1,
     GraceVel = min(127, round(Vel * 0.75)),
     Turn = [

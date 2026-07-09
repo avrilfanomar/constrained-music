@@ -283,12 +283,17 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
 
     % Apply humanization
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
-    HumanizedNotes = humanize.humanize_notes(PlannedNotes, HumanizeIntensity),
+    HumanizedNotes0 = humanize.humanize_notes(PlannedNotes, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
 
-    % Add ornaments (genre-appropriate grace notes)
+    % Phrase breathing: release each phrase-final note early (audible rests
+    % between phrases; accompaniment sustains through the gap)
+    HumanizedNotes = humanize.add_phrase_breathing(HumanizedNotes0, ChordPlan),
+
+    % Add ornaments (genre-appropriate grace notes, diatonic in each bar's key)
     OrnamentDensity = get_ornament_density(Preferences),
-    FinalMelody = ornaments.add_ornaments(HumanizedNotes, Genre, OrnamentDensity),
+    OrnMeter = get_meter_from_preferences(Preferences),
+    FinalMelody = ornaments.add_ornaments(HumanizedNotes, Genre, OrnamentDensity, ChordPlan, OrnMeter),
     if OrnamentDensity > 0.0 then
         OrnCount = length(FinalMelody) - length(HumanizedNotes),
         if OrnCount > 0 then
@@ -421,7 +426,7 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
     % Plan the segment's chord progression up front (single source of harmonic
     % truth: melody solve and accompaniment both use this exact progression)
     SegMode = get_mode(Params),
-    SegDegrees = chord_generator.plan_progression(NumBars, SegMode, Genre),
+    SegDegrees = chord_generator.plan_progression(NumBars, SegMode, Genre, get_randomness(Params)),
     ChordSpan = $chord_span(CurrentBar, NumBars, KeyRoot, SegMode, SegDegrees),
 
     % Check if rhythm mode is active
@@ -494,6 +499,16 @@ generate_segments_genre_helper([Seg | Rest], KeyRoot, Genre, Preferences, SegInd
                SegIndex, CurrentBar + 1, CurrentBar + NumBars,
                get_tempo(Params), Genre)
     end,
+    % Register diagnostic: the piece should have ONE top — every non-climax
+    % segment stays at/below ceiling, the climax segment reaches its target
+    if SegmentMelody != [] then
+        SegMaxP = max(refiner.extract_pitches(SegmentMelody)),
+        if SegIndex == ClimaxIdx then
+            printf("    register: seg max=%d, CLIMAX target=%d%n", SegMaxP, PieceClimax)
+        else
+            printf("    register: seg max=%d, ceiling=%d%n", SegMaxP, PieceClimax - 2)
+        end
+    end,
     if melody.is_periodic_progression(SegDegrees, NumBars) then
         PeriodTag = " (period: A A')"
     else
@@ -523,7 +538,7 @@ try_genre_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs, UseRhythm, PrevLas
         elseif once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, MoodPrefs, M2)) then
             SegmentMelody = M2
         else
-            SegmentMelody = []
+            SegmentMelody = last_resort_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs)
         end
     else
         % Connect to previous segment with motif reference
@@ -542,9 +557,37 @@ try_genre_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs, UseRhythm, PrevLas
             % Fallback: generate without connection
             SegmentMelody = M7
         else
+            SegmentMelody = last_resort_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs)
+        end
+    end.
+
+% Last-resort net: a segment must NEVER come back empty (an empty melody
+% renders as bars of accompaniment playing alone). Stage 1 (climax segments
+% only): keep the climax target but drop the top-band cap (climax_topcount=off)
+% — the piece still rises to its designed high point, it may just touch it
+% more than 3 times. Stage 2: strip climax/ceiling/recall entirely — the
+% harmonic plan (progression=) and register center are kept, so the segment
+% still fits the piece; it just gives up the special climax/recall duties.
+last_resort_segment(Params, KeyRoot, NumBars, Genre, MoodPrefs) = SegmentMelody =>
+    if find_first_key(MoodPrefs, climax_target, _),
+       once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, [climax_topcount = off | MoodPrefs], MC)) then
+        printf("    [warn] all segment shapes failed; retried without climax top-band cap%n"),
+        SegmentMelody = MC
+    else
+        RelaxedPrefs = [P : P in MoodPrefs, not strippable_pref(P)],
+        if once(melody.generate_segment_melody_with_genre(Params, KeyRoot, NumBars, Genre, RelaxedPrefs, MR)) then
+            printf("    [warn] all segment shapes failed; used relaxed constraints (no climax/recall)%n"),
+            SegmentMelody = MR
+        else
+            printf("    [warn] segment unsolvable even relaxed; melody left empty%n"),
             SegmentMelody = []
         end
     end.
+
+strippable_pref(climax_target = _) => true.
+strippable_pref(register_ceiling = _) => true.
+strippable_pref(recall_pitches = _) => true.
+strippable_pref(_) => fail.
 
 % ==============================================================================
 % FORM-BASED COMPANION
@@ -630,13 +673,18 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
 
     % Apply humanization
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
-    HumanizedNotesForm = humanize.humanize_notes(PlannedNotesForm, HumanizeIntensity),
+    HumanizedNotesForm0 = humanize.humanize_notes(PlannedNotesForm, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
 
-    % Add ornaments (genre-appropriate grace notes)
+    % Phrase breathing: release each phrase-final note early (audible rests
+    % between phrases; accompaniment sustains through the gap)
+    HumanizedNotesForm = humanize.add_phrase_breathing(HumanizedNotesForm0, ChordPlanForm),
+
+    % Add ornaments (genre-appropriate grace notes, diatonic in each bar's key)
     if Genre != none then
         OrnamentDensityForm = get_ornament_density(Preferences),
-        FinalMelody = ornaments.add_ornaments(HumanizedNotesForm, Genre, OrnamentDensityForm),
+        OrnMeterForm = get_meter_from_preferences(Preferences),
+        FinalMelody = ornaments.add_ornaments(HumanizedNotesForm, Genre, OrnamentDensityForm, ChordPlanForm, OrnMeterForm),
         OrnCountForm = length(FinalMelody) - length(HumanizedNotesForm),
         if OrnCountForm > 0 then
             printf("  Ornaments: %d grace notes added%n", OrnCountForm)
@@ -856,7 +904,7 @@ generate_form_segments_helper([Seg | Rest], FormSections, KeyRoot, Genre, Prefer
     if SectionChordMap.has_key(SectionLabel), SectionChordMap.get(SectionLabel) = (NumBars, StoredDegreesF) then
         SegDegreesF = StoredDegreesF
     else
-        SegDegreesF = chord_generator.plan_progression(NumBars, SegModeF, GenreForProgF)
+        SegDegreesF = chord_generator.plan_progression(NumBars, SegModeF, GenreForProgF, get_randomness(Params))
     end,
     if not SectionChordMap.has_key(SectionLabel) then
         SectionChordMap.put(SectionLabel, (NumBars, SegDegreesF))
@@ -1221,7 +1269,10 @@ collect_tempo_simple([Seg | Rest], CurrentBar, Acc) = Result =>
     Change = $tempo_change(CurrentBar, Tempo),
     Result = collect_tempo_simple(Rest, CurrentBar + NumBars, [Change | Acc]).
 
-% With ritardando: adds cadential slowdown in last 2 bars of segments >= 4 bars
+% With ritardando: adds cadential slowdown in the last bars of segments >=4
+% bars. Only the FINAL segment gets the full 2-bar 20% ritardando; interior
+% segments get a gentle 1-bar easing — a deep mid-piece rit followed by a
+% jump to the next (often faster) segment tempo lurches audibly.
 collect_tempo_with_rit([], _, Acc) = reverse(Acc).
 collect_tempo_with_rit([Seg | Rest], CurrentBar, Acc) = Result =>
     Params = get_segment_params(Seg),
@@ -1230,7 +1281,11 @@ collect_tempo_with_rit([Seg | Rest], CurrentBar, Acc) = Result =>
     BaseChange = $tempo_change(CurrentBar, Tempo),
     if NumBars >= 4 then
         SectionEndBar = CurrentBar + NumBars - 1,
-        RitChanges = temporal.cadential_ritardando(Tempo, SectionEndBar, 2, 0.8),
+        if Rest == [] then
+            RitChanges = temporal.cadential_ritardando(Tempo, SectionEndBar, 2, 0.8)
+        else
+            RitChanges = temporal.cadential_ritardando(Tempo, SectionEndBar, 1, 0.92)
+        end,
         AllChanges = [BaseChange | RitChanges]
     else
         AllChanges = [BaseChange]

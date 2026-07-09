@@ -122,13 +122,18 @@ apply_dynamics_plan(Notes, Plan) = Result =>
         Result = [apply_plan_to_note(Note, Plan) : Note in Notes]
     end.
 
-% Apply the plan to a single note based on its bar position
+% Apply the plan to a single note based on its bar position.
+% The plan OWNS the piece-level arc; the incoming velocity (mood base +
+% phrase accents) contributes only as a bounded offset around the default
+% of 80. The old 70/30 blend let high-arousal segments (mood velocity near
+% 127) saturate the whole piece at fff — no audible dynamics left.
+% Ceiling 118 leaves headroom for humanization jitter (+8) without clipping.
 apply_plan_to_note(Note, Plan) = NewNote =>
     Note = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, Velocity),
     TargetVelocity = plan_velocity_at_bar(Bar, Plan),
-    % Blend: 70% from plan, 30% from original (preserves phrase accents)
-    BlendedVelocity = max(30, min(127, round(TargetVelocity * 0.7 + Velocity * 0.3))),
-    NewNote = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, BlendedVelocity).
+    Offset = max(-18, min(18, Velocity - 80)),
+    NewVelocity = max(30, min(118, TargetVelocity + Offset)),
+    NewNote = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, NewVelocity).
 
 % Compute target velocity at a given bar from the plan
 plan_velocity_at_bar(Bar, Plan) = Velocity =>
@@ -223,6 +228,62 @@ humanize_with_plan(Notes, DynamicsPlan, VelBase, VelVar, HumanizeIntensity) = Re
     CurvedNotes = apply_velocity_curves(PlannedNotes, VelBase, VelVar),
     % Step 3: Micro-humanization
     Result = humanize_notes(CurvedNotes, HumanizeIntensity).
+
+% ==============================================================================
+% PHRASE BREATHING
+% ==============================================================================
+
+% Shorten the sounding length of each phrase-final melody note to 75% and
+% soften it slightly, leaving a silent gap (a breath) before the next phrase
+% begins. Performance-level articulation only: note starts, the notated
+% rhythm grid, and the accompaniment (which sustains through the gap) are
+% untouched. Phrase ends come from the chord plan — each segment's final bar
+% and, for parallel periods, the half-cadence bar. The piece-final note is
+% left ringing at full length.
+add_phrase_breathing(Notes, ChordPlan) = Result =>
+    Ends0 = phrase_end_bars(ChordPlan),
+    if Notes == [] ; Ends0 == [] then
+        Result = Notes
+    else
+        PieceEnd = max(Ends0),
+        EndsMap = new_map([B=true : B in Ends0, B != PieceEnd]),
+        % Last note-start position within each breath bar
+        LastMap = new_map(),
+        foreach($note(_, _, $time_pos(Bar, Beat, Sub), _, _) in Notes)
+            if EndsMap.has_key(Bar) then
+                Pos = Beat + Sub,
+                if not LastMap.has_key(Bar) then
+                    LastMap.put(Bar, Pos)
+                elseif LastMap.get(Bar) < Pos then
+                    LastMap.put(Bar, Pos)
+                end
+            end
+        end,
+        Result = [shorten_phrase_end(N, LastMap) : N in Notes]
+    end.
+
+% Phrase-end bars of one segment: its final bar, plus the half-cadence bar
+% when the segment is an (even, >=4 bar) parallel period
+phrase_end_bars(Spans) = sort_remove_dups(flatten([span_phrase_ends(S) : S in Spans])).
+
+span_phrase_ends(chord_span(StartBar, NumBars, _, _, _)) = Ends =>
+    if NumBars >= 4, NumBars mod 2 == 0 then
+        Ends = [StartBar + NumBars // 2, StartBar + NumBars]
+    else
+        Ends = [StartBar + NumBars]
+    end.
+
+shorten_phrase_end(Note, LastMap) = N2 =>
+    Note = $note(P, $duration(Num, Den), $time_pos(Bar, Beat, Sub), V, Vel),
+    if LastMap.has_key(Bar), abs(LastMap.get(Bar) - (Beat + Sub)) < 0.001 then
+        % Evaluate outside the $-quoted struct ($ would store `Num*3` unevaluated)
+        ShortNum = Num * 3,
+        ShortDen = Den * 4,
+        ShortVel = max(30, Vel - 5),
+        N2 = $note(P, $duration(ShortNum, ShortDen), $time_pos(Bar, Beat, Sub), V, ShortVel)
+    else
+        N2 = Note
+    end.
 
 % ==============================================================================
 % UTILITY FUNCTIONS

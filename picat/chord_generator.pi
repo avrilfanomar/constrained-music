@@ -19,11 +19,17 @@ import harmonic.
 % it and closing V-I); the final V bar is split into I6/4 -> V where idiomatic.
 % Entries in the result are chord degrees, except split bars which are
 % (DegA, DegB) pairs (first/second half of the bar).
-plan_progression(NumBars, Mode, Genre) = Degrees =>
+plan_progression(NumBars, Mode, Genre) = plan_progression(NumBars, Mode, Genre, 0.0).
+
+% With Randomness >= 0.05 (the rand_val threshold), the cadence approach and
+% one interior bar are randomly pinned to weighted idiomatic choices before
+% the min-cost solve — otherwise every segment of the same length gets the
+% one deterministic cost-optimal progression, piece after piece.
+plan_progression(NumBars, Mode, Genre, Randomness) = Degrees =>
     if NumBars >= 4, NumBars mod 2 == 0 then
-        Degrees0 = generate_period_progression(NumBars, Mode, Genre)
+        Degrees0 = generate_period_progression(NumBars, Mode, Genre, Randomness)
     else
-        Degrees0 = generate_progression(NumBars, Mode, Genre)
+        Degrees0 = generate_progression(NumBars, Mode, Genre, Randomness)
     end,
     Degrees = apply_cadential_split(Degrees0, Genre).
 
@@ -66,7 +72,9 @@ roman_numeral(Deg, Mode) = S =>
 % Mode: major, minor, dorian, etc.
 % Genre: genre atom for cadence style preferences
 % Returns: list of chord degrees [1..7], one per bar
-generate_progression(NumBars, Mode, Genre) = Degrees =>
+generate_progression(NumBars, Mode, Genre) = generate_progression(NumBars, Mode, Genre, 0.0).
+
+generate_progression(NumBars, Mode, Genre, Randomness) = Degrees =>
     if NumBars < 1 then
         Degrees = []
     elseif NumBars == 1 then
@@ -74,11 +82,11 @@ generate_progression(NumBars, Mode, Genre) = Degrees =>
     elseif NumBars == 2 then
         Degrees = [1, 1]  % I-I for very short
     else
-        Degrees = generate_cp_progression(NumBars, Mode, Genre)
+        Degrees = generate_cp_progression(NumBars, Mode, Genre, Randomness)
     end.
 
 % CP-based chord progression generation
-generate_cp_progression(NumBars, Mode, Genre) = Degrees =>
+generate_cp_progression(NumBars, Mode, Genre, Randomness) = Degrees =>
     Degrees = new_list(NumBars),
     MaxDeg = max_chord_degree(Genre),
     Degrees :: 1..MaxDeg,
@@ -92,6 +100,11 @@ generate_cp_progression(NumBars, Mode, Genre) = Degrees =>
     % Hard constraint: penultimate chord is V (authentic cadence)
     if NumBars >= 3 then
         Degrees[NumBars - 1] #= 5
+    end,
+
+    % Randomized (but idiomatic) pre-dominant before the cadential V
+    if Randomness >= 0.05, NumBars >= 4 then
+        Degrees[NumBars - 2] #= random_predominant()
     end,
 
     % Half cadence at midpoint for 4+ bar segments
@@ -169,9 +182,12 @@ generate_cp_progression(NumBars, Mode, Genre) = Degrees =>
 % (half cadence); the consequent restates the antecedent bar-for-bar but
 % replaces its last two bars with an authentic V-I cadence. The repeated bars
 % let the melody solver restate the antecedent's pitches over identical harmony.
-generate_period_progression(NumBars, Mode, Genre) = Degrees =>
+generate_period_progression(NumBars, Mode, Genre) =
+    generate_period_progression(NumBars, Mode, Genre, 0.0).
+
+generate_period_progression(NumBars, Mode, Genre, Randomness) = Degrees =>
     Half = NumBars // 2,
-    Ant = generate_half_cadence_progression(Half, Mode, Genre),
+    Ant = generate_half_cadence_progression(Half, Mode, Genre, Randomness),
     Cons = copy_term(Ant),
     Cons[Half] := 1,
     if Half >= 2 then
@@ -182,7 +198,7 @@ generate_period_progression(NumBars, Mode, Genre) = Degrees =>
 % Antecedent progression: starts on I, ends on V (half cadence),
 % approached from a pre-dominant. Diatonic only (periods restate harmony
 % literally, so chromatic color is left to non-period segments).
-generate_half_cadence_progression(NumBars, Mode, Genre) = Degrees =>
+generate_half_cadence_progression(NumBars, Mode, Genre, Randomness) = Degrees =>
     if NumBars < 1 then
         Degrees = []
     elseif NumBars == 1 then
@@ -190,10 +206,10 @@ generate_half_cadence_progression(NumBars, Mode, Genre) = Degrees =>
     elseif NumBars == 2 then
         Degrees = [1, 5]
     else
-        Degrees = generate_half_cadence_cp(NumBars, Mode, Genre)
+        Degrees = generate_half_cadence_cp(NumBars, Mode, Genre, Randomness)
     end.
 
-generate_half_cadence_cp(NumBars, _Mode, _Genre) = Degrees =>
+generate_half_cadence_cp(NumBars, _Mode, _Genre, Randomness) = Degrees =>
     Degrees = new_list(NumBars),
     Degrees :: 1..6,
     Degrees[1] #= 1,
@@ -202,6 +218,16 @@ generate_half_cadence_cp(NumBars, _Mode, _Genre) = Degrees =>
     PreDom #= Degrees[NumBars - 1],
     PreDom #!= 3,
     PreDom #!= 5,
+
+    % Variety: randomly pin the pre-dominant, and usually one interior bar,
+    % to weighted idiomatic degrees; the min-cost solve fills the rest
+    if Randomness >= 0.05 then
+        PreDom #= random_predominant(),
+        if NumBars >= 4, random2() mod 10 < 6 then
+            ColorBar = 2 + (random2() mod (NumBars - 3)),
+            Degrees[ColorBar] #= random_color_degree()
+        end
+    end,
 
     ProgressionCosts = new_list(NumBars - 1),
     ProgressionCosts :: 0..10,
@@ -219,6 +245,26 @@ generate_half_cadence_cp(NumBars, _Mode, _Genre) = Degrees =>
         true
     else
         Degrees := template_half_cadence(NumBars)
+    end.
+
+% Weighted random pre-dominant: IV and ii are the classical workhorses,
+% vi appears occasionally
+random_predominant() = D =>
+    R = random2() mod 10,
+    if R < 4 then D = 4
+    elseif R < 8 then D = 2
+    else D = 6
+    end.
+
+% Weighted random interior "color" chord (antecedent variety): subdominant
+% and submediant lead, tonic prolongation and mediant appear occasionally
+random_color_degree() = D =>
+    R = random2() mod 20,
+    if R < 5 then D = 4
+    elseif R < 10 then D = 6
+    elseif R < 14 then D = 2
+    elseif R < 17 then D = 1
+    else D = 3
     end.
 
 % Template antecedent fallback: I-IV-... ending pre-dominant -> V

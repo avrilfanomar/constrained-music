@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import os
+import signal
 import sys
 import tempfile
 import uuid
@@ -468,6 +469,47 @@ class GenerateRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Subprocess runner
+# ---------------------------------------------------------------------------
+
+async def run_picat_bounded(cmd: list[str], timeout_sec: float) -> str:
+    """Run a picat command with a hard wall-clock bound.
+
+    run_picat.sh spawns picat as a child, so the subprocess is started in its
+    own process group and the WHOLE group is SIGKILLed on timeout — otherwise
+    a stalled CP solve outlives the HTTP 504 and spins forever.
+    Returns combined stdout/stderr; raises HTTPException on timeout/failure.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=str(PROJECT_ROOT),
+        start_new_session=True,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
+    except asyncio.TimeoutError:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        await proc.wait()
+        raise HTTPException(
+            status_code=504,
+            detail=f"Generation timed out ({int(timeout_sec)}s); solver process was terminated",
+        )
+
+    picat_output = stdout.decode("utf-8", errors="replace")
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail={
+            "error": "Picat generation failed",
+            "output": picat_output,
+        })
+    return picat_output
+
+
+# ---------------------------------------------------------------------------
 # API endpoints
 # ---------------------------------------------------------------------------
 
@@ -537,24 +579,12 @@ async def generate(req: GenerateRequest):
     companion_path = "picat/companion.pi"
     cmd = [script_path, companion_path] + args
 
-    # Timeout: base 120s + extra for refinement rounds
-    timeout_sec = 120 + (req.refine - 1) * 30 + (req.refine_piece - 1) * 120
+    # Timeout: base 300s + extra for refinement rounds
+    timeout_sec = 300 + (req.refine - 1) * 30 + (req.refine_piece - 1) * 120
 
+    tmp_midi = tmp_json.replace(".json", ".mid")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT),
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec)
-        picat_output = stdout.decode("utf-8", errors="replace")
-
-        if proc.returncode != 0:
-            raise HTTPException(status_code=500, detail={
-                "error": "Picat generation failed",
-                "output": picat_output,
-            })
+        picat_output = await run_picat_bounded(cmd, timeout_sec)
 
         # Read JSON output
         if not os.path.exists(tmp_json):
@@ -567,7 +597,6 @@ async def generate(req: GenerateRequest):
             data = json.load(f)
 
         # Generate MIDI
-        tmp_midi = tmp_json.replace(".json", ".mid")
         try:
             json_to_midi(tmp_json, tmp_midi)
             with open(tmp_midi, "rb") as f:
@@ -575,13 +604,6 @@ async def generate(req: GenerateRequest):
         except Exception as e:
             midi_base64 = None
             picat_output += f"\nMIDI conversion error: {e}"
-
-        # Clean up temp files
-        for p in [tmp_json, tmp_midi]:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
 
         return {
             "notes": data.get("notes", []),
@@ -591,12 +613,16 @@ async def generate(req: GenerateRequest):
             "picat_output": picat_output,
         }
 
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail=f"Generation timed out ({timeout_sec}s)")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for p in [tmp_json, tmp_midi]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 @app.post("/api/variation")
@@ -627,21 +653,9 @@ async def variation_generate(req: VariationRequest):
     script_path = str(PROJECT_ROOT / "scripts" / "run_picat.sh")
     cmd = [script_path, "picat/variation.pi"] + args
 
+    tmp_midi = tmp_json.replace(".json", ".mid")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT),
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=90)
-        picat_output = stdout.decode("utf-8", errors="replace")
-
-        if proc.returncode != 0:
-            raise HTTPException(status_code=500, detail={
-                "error": "Variation generation failed",
-                "output": picat_output,
-            })
+        picat_output = await run_picat_bounded(cmd, 90)
 
         if not os.path.exists(tmp_json):
             raise HTTPException(status_code=500, detail={
@@ -652,7 +666,6 @@ async def variation_generate(req: VariationRequest):
         with open(tmp_json, "r") as f:
             data = json.load(f)
 
-        tmp_midi = tmp_json.replace(".json", ".mid")
         try:
             json_to_midi(tmp_json, tmp_midi)
             with open(tmp_midi, "rb") as f:
@@ -660,12 +673,6 @@ async def variation_generate(req: VariationRequest):
         except Exception as e:
             midi_base64 = None
             picat_output += f"\nMIDI conversion error: {e}"
-
-        for p in [tmp_json, tmp_midi]:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
 
         return {
             "notes": data.get("notes", []),
@@ -675,12 +682,16 @@ async def variation_generate(req: VariationRequest):
             "picat_output": picat_output,
         }
 
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Variation timed out (90s)")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for p in [tmp_json, tmp_midi]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
