@@ -124,14 +124,26 @@ build_melody(Pitches, _NumBars, NotesPerBar, _BeatsPerBar, VoiceId) = Melody =>
 build_note(MidiPitch, Index, NotesPerBar, VoiceId) = Note =>
     Octave = MidiPitch // 12 - 1,
     Bar = ((Index - 1) // NotesPerBar) + 1,
-    Beat = ((Index - 1) mod NotesPerBar) + 1,
+    Slot = (Index - 1) mod NotesPerBar,
+    (Beat, Sub) = slot_time_in_bar(Slot, NotesPerBar),
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
         $duration(1, NotesPerBar),
-        $time_pos(Bar, Beat, 0),
+        $time_pos(Bar, Beat, Sub),
         VoiceId,
         80
     ).
+
+% Map a 0-based slot within a bar of NotesPerBar equal notes to a real
+% (Beat, Sub) position in 4/4. The old slot-as-beat encoding (Beat = Slot+1,
+% Sub = 0) is only correct at exactly 4 notes/bar: at density 8 each eighth
+% note landed a full quarter apart, so the segment played at half speed and
+% spilled over its bars, overlapping the next bar's notes and the
+% accompaniment (heard as doubled melody notes and flams).
+slot_time_in_bar(Slot, NotesPerBar) = (Beat, Sub) =>
+    BeatPos = Slot * 4.0 / NotesPerBar,
+    Beat = floor(BeatPos) + 1,
+    Sub = BeatPos - floor(BeatPos).
 
 % ==============================================================================
 % MULTIPLE SOLUTION GENERATION
@@ -526,17 +538,18 @@ solve_with_timeout(Opts, Vars, TimeoutMs) =>
 build_mood_note(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar) = Note =>
     Octave = MidiPitch // 12 - 1,
     Bar = ((Index - 1) // NotesPerBar) + 1,
-    Beat = ((Index - 1) mod NotesPerBar) + 1,
+    Slot = (Index - 1) mod NotesPerBar,
+    (Beat, Sub) = slot_time_in_bar(Slot, NotesPerBar),
 
     % Add slight velocity variation for expressiveness
-    % Downbeats slightly stronger, offbeats slightly softer
-    VelOffset = cond(Beat == 1, VelVar // 2, -VelVar // 4),
+    % Downbeats (bar start) slightly stronger, offbeats slightly softer
+    VelOffset = cond(Slot == 0, VelVar // 2, -VelVar // 4),
     Velocity = max(40, min(127, VelBase + VelOffset)),
 
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
         $duration(1, NotesPerBar),
-        $time_pos(Bar, Beat, 0),
+        $time_pos(Bar, Beat, Sub),
         VoiceId,
         Velocity
     ).
@@ -546,10 +559,11 @@ build_mood_note(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar) = Note 
 build_mood_note_with_randomness(MidiPitch, Index, NotesPerBar, VoiceId, VelBase, VelVar, Randomness) = Note =>
     Octave = MidiPitch // 12 - 1,
     Bar = ((Index - 1) // NotesPerBar) + 1,
-    Beat = ((Index - 1) mod NotesPerBar) + 1,
+    Slot = (Index - 1) mod NotesPerBar,
+    (Beat, Sub) = slot_time_in_bar(Slot, NotesPerBar),
 
     % Beat-based velocity variation (deterministic part)
-    VelOffset = cond(Beat == 1, VelVar // 2, -VelVar // 4),
+    VelOffset = cond(Slot == 0, VelVar // 2, -VelVar // 4),
 
     % Random perturbation scaled by randomness factor
     % At full randomness, adds up to +/- 15 velocity units
@@ -560,7 +574,7 @@ build_mood_note_with_randomness(MidiPitch, Index, NotesPerBar, VoiceId, VelBase,
     Note = $note(
         $pitch(midi, MidiPitch, Octave),
         $duration(1, NotesPerBar),
-        $time_pos(Bar, Beat, 0),
+        $time_pos(Bar, Beat, Sub),
         VoiceId,
         Velocity
     ).

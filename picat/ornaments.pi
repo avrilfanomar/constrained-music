@@ -241,6 +241,7 @@ make_turn(Note, Root, Mode) = Turn =>
 % UTILITY
 % ==============================================================================
 
-% Random float 0.0-1.0
+% Random float in [0, 1). random2() is 31-bit; the old /2^28-1 gave [0, 8),
+% which cut the effective ornament probability to 1/8 of the documented value.
 rand01() = R =>
-    R = random2() / 268435455.
+    R = (random2() mod 1000000) / 1000000.0.

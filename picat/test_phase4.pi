@@ -26,8 +26,12 @@ main =>
      ; printf("  FAIL: humanize_notes modifies velocity%n"), Failed := Failed + 1),
     (test_humanize_velocity_range() -> printf("  PASS: humanize_notes keeps velocity in range%n"), Passed := Passed + 1
      ; printf("  FAIL: humanize_notes keeps velocity in range%n"), Failed := Failed + 1),
-    (test_humanize_sub_range() -> printf("  PASS: humanize_notes keeps sub in range%n"), Passed := Passed + 1
-     ; printf("  FAIL: humanize_notes keeps sub in range%n"), Failed := Failed + 1),
+    (test_humanize_sub_range() -> printf("  PASS: humanize_notes leaves timing untouched%n"), Passed := Passed + 1
+     ; printf("  FAIL: humanize_notes leaves timing untouched%n"), Failed := Failed + 1),
+    (test_ensemble_timing_alignment() -> printf("  PASS: ensemble timing keeps shared onsets aligned%n"), Passed := Passed + 1
+     ; printf("  FAIL: ensemble timing keeps shared onsets aligned%n"), Failed := Failed + 1),
+    (test_ensemble_timing_bounded() -> printf("  PASS: ensemble timing offsets bounded%n"), Passed := Passed + 1
+     ; printf("  FAIL: ensemble timing offsets bounded%n"), Failed := Failed + 1),
 
     % Velocity curve tests
     (test_curves_count() -> printf("  PASS: velocity_curves preserves note count%n"), Passed := Passed + 1
@@ -104,11 +108,33 @@ test_humanize_velocity_range =>
     Vels = [V : $note(_, _, _, _, V) in Humanized],
     min(Vels) >= 30, max(Vels) =< 127.
 
+% humanize_notes is velocity-only: timing must pass through unchanged
+% (micro-timing is humanize_ensemble_timing's job, on the merged voices)
 test_humanize_sub_range =>
     Notes = make_test_notes(32),
     Humanized = humanize.humanize_notes(Notes, 1.0),
-    Subs = [S : $note(_, _, $time_pos(_, _, S), _, _) in Humanized],
-    min(Subs) >= 0.0, max(Subs) =< 0.95.
+    OrigPos = [(B, Bt, S) : $note(_, _, $time_pos(B, Bt, S), _, _) in Notes],
+    NewPos = [(B, Bt, S) : $note(_, _, $time_pos(B, Bt, S), _, _) in Humanized],
+    OrigPos == NewPos.
+
+% Two voices playing the same grid positions must stay simultaneous
+% after ensemble micro-timing (one shared offset per onset)
+test_ensemble_timing_alignment =>
+    Melody = make_test_notes(16),
+    Accomp = [$note($pitch(midi, 40 + (I mod 5), 2), $duration(1, 4),
+                    $time_pos(((I-1) // 4) + 1, ((I-1) mod 4) + 1, 0.0), 10, 70)
+              : I in 1..16],
+    Jittered = humanize.humanize_ensemble_timing(Melody ++ Accomp, 1.0),
+    MSubs = [S : $note(_, _, $time_pos(_, _, S), V, _) in Jittered, V == 1],
+    ASubs = [S : $note(_, _, $time_pos(_, _, S), V, _) in Jittered, V == 10],
+    MSubs == ASubs.
+
+% Offsets stay within the documented ±0.03-beat ceiling at full intensity
+test_ensemble_timing_bounded =>
+    Notes = make_test_notes(32),
+    Jittered = humanize.humanize_ensemble_timing(Notes, 1.0),
+    Subs = [S : $note(_, _, $time_pos(_, _, S), _, _) in Jittered],
+    min(Subs) >= 0.0, max(Subs) =< 0.031.
 
 % ==============================================================================
 % VELOCITY CURVE TESTS

@@ -14,38 +14,58 @@ import music_types.
 
 % Humanize a list of notes with given intensity (0.0 to 1.0)
 % Intensity 0.0 = no change, 1.0 = maximum humanization
+% Velocity-only: micro-timing lives in humanize_ensemble_timing/2, which runs
+% once over the MERGED melody+accompaniment stream — per-part per-note timing
+% jitter desynchronized notes sharing an onset (audible flams between hands).
 humanize_notes(Notes, Intensity) = HumanizedNotes =>
     if Intensity =< 0.0 then
         HumanizedNotes = Notes
     else
-        HumanizedNotes = [humanize_note(Note, Intensity, I, length(Notes)) : {Note, I} in zip(Notes, 1..length(Notes))]
+        HumanizedNotes = [humanize_note(Note, Intensity) : Note in Notes]
     end.
 
-% Humanize a single note
-humanize_note(Note, Intensity, NoteIndex, TotalNotes) = HNote =>
-    Note = $note(Pitch, Duration, $time_pos(Bar, Beat, Sub), VoiceId, Velocity),
-
-    % Timing humanization: slight offset in subdivision
-    % Downbeats (beat 1) get less jitter than offbeats
-    % Max jitter: ±0.03 beats at full intensity (about ±10ms at 120bpm)
-    MaxTimingJitter = 0.03 * Intensity,
-    BeatFactor = cond(Beat == 1, 0.3, 1.0),  % Less jitter on downbeats
-    TimingOffset = (rand01() - 0.5) * 2.0 * MaxTimingJitter * BeatFactor,
-    NewSub = max(0.0, min(0.95, Sub + TimingOffset)),
-
-    % Velocity humanization: ±velocity variation
-    % Max: ±8 velocity units at full intensity
+% Humanize a single note's velocity: ±8 units at full intensity
+humanize_note(Note, Intensity) = HNote =>
+    Note = $note(Pitch, Duration, TimePos, VoiceId, Velocity),
     MaxVelJitter = round(8.0 * Intensity),
     VelOffset = round((rand01() - 0.5) * 2.0 * MaxVelJitter),
     NewVelocity = max(30, min(127, Velocity + VelOffset)),
+    HNote = $note(Pitch, Duration, TimePos, VoiceId, NewVelocity).
 
-    % Duration humanization: slightly shorten or lengthen
-    % Applied as a tiny subdivision offset to create micro-articulations
-    % We modify duration fraction slightly by adjusting numerator scaling
-    % For simplicity, we keep the duration fraction unchanged but could
-    % add a "duration_offset" field in the future
+% ==============================================================================
+% ENSEMBLE MICRO-TIMING
+% ==============================================================================
 
-    HNote = $note(Pitch, Duration, $time_pos(Bar, Beat, NewSub), VoiceId, NewVelocity).
+% Timing jitter is a property of the onset MOMENT, not of each note: all notes
+% (any voice) starting at the same (Bar, Beat, Sub) share one offset, so the
+% hands land together while the grid still breathes. Apply exactly once, to
+% the merged melody+accompaniment list, after ornaments/breathing.
+% Max offset: ±0.03 beats at full intensity (~±15ms at 120bpm); downbeats
+% (beat 1) get less jitter than offbeats.
+humanize_ensemble_timing(Notes, Intensity) = Result =>
+    if Intensity =< 0.0 ; Notes == [] then
+        Result = Notes
+    else
+        OffsetMap = new_map(),
+        foreach($note(_, _, $time_pos(Bar, Beat, Sub), _, _) in Notes)
+            Key = onset_key(Bar, Beat, Sub),
+            if not OffsetMap.has_key(Key) then
+                BeatFactor = cond(Beat == 1, 0.3, 1.0),  % Less jitter on downbeats
+                Offset = (rand01() - 0.5) * 2.0 * 0.03 * Intensity * BeatFactor,
+                OffsetMap.put(Key, Offset)
+            end
+        end,
+        Result = [shift_note_onset(N, OffsetMap) : N in Notes]
+    end.
+
+% Onset identity: exact grid position, rounded to absorb float noise
+onset_key(Bar, Beat, Sub) = (Bar, Beat, round(Sub * 1000)).
+
+shift_note_onset(Note, OffsetMap) = N2 =>
+    Note = $note(P, D, $time_pos(Bar, Beat, Sub), V, Vel),
+    Offset = OffsetMap.get(onset_key(Bar, Beat, Sub)),
+    NewSub = max(0.0, min(0.95, Sub + Offset)),
+    N2 = $note(P, D, $time_pos(Bar, Beat, NewSub), V, Vel).
 
 % ==============================================================================
 % PHRASE-AWARE VELOCITY CURVES (D1)
@@ -212,12 +232,12 @@ section_transition(_) = crescendo.
 % COMBINED HUMANIZATION + DYNAMICS
 % ==============================================================================
 
-% Apply both velocity curves and timing humanization
-% This is the main entry point for full expressiveness
+% Apply velocity curves + velocity jitter (timing is NOT touched here;
+% use humanize_ensemble_timing on the merged voices for micro-timing)
 humanize_with_dynamics(Notes, VelBase, VelVar, HumanizeIntensity) = Result =>
     % First apply velocity curves (phrase-level shaping)
     CurvedNotes = apply_velocity_curves(Notes, VelBase, VelVar),
-    % Then apply micro-humanization (note-level jitter)
+    % Then apply micro-humanization (note-level velocity jitter)
     Result = humanize_notes(CurvedNotes, HumanizeIntensity).
 
 % Apply dynamics plan + humanization (full pipeline)
@@ -297,6 +317,9 @@ find_first_index_helper([], _Value, Default) = Default.
 find_first_index_helper([X|_Rest], Value, I) = I, X == Value => true.
 find_first_index_helper([_|Rest], Value, I) = find_first_index_helper(Rest, Value, I + 1).
 
-% Random float between 0.0 and 1.0
+% Random float in [0, 1) using auto-seeded random2().
+% NOTE: random2() returns 31-bit values — dividing by 2^28-1 (the old code)
+% yields [0, 8) with mean 4.0, which made timing jitter 8x the documented
+% max and biased every note late. Same idiom as mood_mapping.rand01().
 rand01() = R =>
-    R = random2() / 268435455.  % 2^28 - 1
+    R = (random2() mod 1000000) / 1000000.0.

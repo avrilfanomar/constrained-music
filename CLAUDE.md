@@ -98,6 +98,7 @@ $meter(3, 4)               % Beats, beat unit
 - `apply_soft` dispatch clauses must come BEFORE the catch-all clause
 - New soft constraints need: (1) `apply_soft` dispatch, (2) `reify_*` impl, (3) `supported_soft_constraints()` entry, (4) genre profile weights
 - Static scorers in `test_constraint_validation.pi` mirror reified CP constraints in `soft_constraints.pi`
+- `random2()` returns 31-bit values — normalize with `(random2() mod 1000000) / 1000000.0`. Dividing by 2^28−1 (an old bug in humanize/ornaments) gives [0, 8) with mean 4.0, not [0, 1)
 
 ### PICATPATH
 
@@ -199,6 +200,12 @@ Post-processing: `ornaments.add_ornaments(Notes, Genre, Density)`. Grace notes f
 
 ### Phrase-Level Dynamic Arcs
 `humanize.make_standard_plan(NumBars, VelBase)` → `apply_dynamics_plan()`. Transition types: `crescendo`, `diminuendo`, `subito`, `sforzando`. Auto-applied in `run_companion_with_genre` and `run_companion_with_form` (ornaments too).
+
+### Ensemble Micro-Timing (shared onset jitter)
+`humanize.humanize_notes` is velocity-only. Micro-timing is applied exactly once per piece by `humanize.humanize_ensemble_timing(FinalMelody ++ AccompNotes, Intensity)` at the three merge points in `companion.pi`: one random offset per distinct onset `(Bar, Beat, Sub)`, shared by every note starting there, so melody and accompaniment land together while the grid still breathes (±0.03 beats max, downbeats damped ×0.3). Per-part per-note timing jitter — the old design — flammed the hands apart on every shared onset.
+
+### Uniform-Rhythm Slot Placement (`melody.slot_time_in_bar`)
+The legacy fixed-rhythm note builders (`build_note`, `build_mood_note*` — used when `rhythm=off` or when the rhythm solve falls back) map a bar's K-th of NotesPerBar equal notes to a real `(Beat, Sub)` via `slot_time_in_bar`. The old slot-as-beat encoding (`Beat = Slot+1`) was only correct at density 4: density 8 rendered eighth notes a full quarter apart — half speed, spilling past the bar and overlapping the next bar's notes and the accompaniment.
 
 ### Thematic Recall (ABA/rondo)
 `motif.apply_thematic_recall(OrigPitches, NewPitches, 0.8)` — ≥80% exact pitch match for returning sections. `companion.py` maintains `SectionPitchMap`; injects `recall_pitches=Pitches` into preferences automatically.

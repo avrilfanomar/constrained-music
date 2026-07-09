@@ -88,14 +88,15 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
     println("Applying expression..."),
     ExpressiveNotes = apply_segment_expression(AllNotes, Segments),
 
-    % Apply humanization (micro-timing and velocity jitter)
+    % Apply humanization (velocity jitter; micro-timing is added after the
+    % accompaniment merge so both hands share one offset per onset)
     HumanizeIntensity = cond(Randomness > 0.0, min(1.0, Randomness * 1.5), 0.3),
     FinalMelody = humanize.humanize_notes(ExpressiveNotes, HumanizeIntensity),
     printf("  Humanization: %.0f%%%n%n", HumanizeIntensity * 100),
 
     % Generate accompaniment
     AccompNotes = generate_accompaniment_for_melody(AllNotes, KeyRoot, Segments, none, none),
-    FinalNotes = FinalMelody ++ AccompNotes,
+    FinalNotes = humanize.humanize_ensemble_timing(FinalMelody ++ AccompNotes, HumanizeIntensity),
 
     % Collect tempo changes for MIDI export
     TempoChanges = collect_tempo_changes(Segments),
@@ -304,7 +305,9 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
     % Generate accompaniment from the same chord plan the melody used
     AccompPattern = get_accomp_preference(Preferences),
     AccompNotes = generate_accompaniment_from_plan(AllNotes, ChordPlan, Genre, AccompPattern),
-    FinalNotes = FinalMelody ++ AccompNotes,
+    % Shared micro-timing over the merged stream: one offset per onset, so
+    % melody and accompaniment land together (per-part jitter caused flams)
+    FinalNotes = humanize.humanize_ensemble_timing(FinalMelody ++ AccompNotes, HumanizeIntensity),
 
     % Collect tempo changes
     TempoChanges = collect_tempo_changes(Segments, Preferences),
@@ -697,7 +700,9 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
     % (uses each section's transposed key, so accompaniment follows modulations)
     AccompPattern = cond(Genre != none, get_accomp_preference(Preferences), none),
     AccompNotes = generate_accompaniment_from_plan(AllNotes, ChordPlanForm, Genre, AccompPattern),
-    FinalNotes = FinalMelody ++ AccompNotes,
+    % Shared micro-timing over the merged stream: one offset per onset, so
+    % melody and accompaniment land together (per-part jitter caused flams)
+    FinalNotes = humanize.humanize_ensemble_timing(FinalMelody ++ AccompNotes, HumanizeIntensity),
 
     % Collect tempo changes
     TempoChanges = collect_tempo_changes(Segments, Preferences),
@@ -1148,7 +1153,8 @@ render_accompaniment(ChordProg, MelodyNotes, Genre, Pattern) = AccompNotes =>
         AccompNotes0 = accompaniment.generate_accompaniment(ChordProg, Pattern, Genre, AvgVel)
     end,
 
-    % Light humanization for accompaniment
+    % Light velocity humanization for accompaniment (micro-timing is applied
+    % later on the merged melody+accompaniment stream so onsets stay aligned)
     AccompNotes = humanize.humanize_notes(AccompNotes0, 0.15),
     printf("  Generated %d accompaniment notes%n%n", length(AccompNotes)).
 
