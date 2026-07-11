@@ -168,9 +168,54 @@ smooth_tempo_helper([S1, S2 | Rest], MaxJump, Acc) = Result =>
 update_tempo(music_params(_, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand), NewTempo) =
     $music_params(NewTempo, Mode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand).
 
+% Helper to update mode in params
+update_mode(music_params(Tempo, _, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand), NewMode) =
+    $music_params(Tempo, NewMode, Density, Interval, Voice, VelBase, VelVar, Legato, Diss, Rand).
+
 % Helper to update params in segment
 update_segment_params(segment(I, T, D, M, _, N), NewParams) =
     $segment(I, T, D, M, NewParams, N).
+
+% ==============================================================================
+% ARTIST PARAMETER OVERRIDES (key= / tempo= CLI options)
+% ==============================================================================
+% Force tempo and/or mode onto already-planned segments. A forced tempo
+% changes how many bars fit into a segment's wall-clock length, so NumBars
+% is recomputed with the same even-snapping rule as create_segment — unless
+% RecomputeBars=false (form mode, where bar counts are locked to sections).
+
+apply_param_overrides(Segments, ForcedTempo, ForcedMode) =
+    apply_param_overrides(Segments, ForcedTempo, ForcedMode, true).
+
+apply_param_overrides(Segments, none, none, _) = Segments.
+apply_param_overrides(Segments, ForcedTempo, ForcedMode, RecomputeBars) =
+    [override_segment(S, ForcedTempo, ForcedMode, RecomputeBars) : S in Segments].
+
+override_segment(segment(I, T, D, M, Params, N), ForcedTempo, ForcedMode, RecomputeBars) = NewSegment =>
+    if ForcedTempo == none then
+        P1 = Params, N1 = N
+    else
+        P1 = update_tempo(Params, ForcedTempo),
+        if RecomputeBars then
+            % Same sizing rule as create_segment: snap 3+ bar segments to an
+            % even count >=4 so parallel-period structure keeps working
+            RawBars = D * ForcedTempo / 240.0,
+            NumBars0 = max(1, round(RawBars)),
+            if NumBars0 >= 3 then
+                N1 = max(4, 2 * round(RawBars / 2.0))
+            else
+                N1 = NumBars0
+            end
+        else
+            N1 = N
+        end
+    end,
+    if ForcedMode == none then
+        P2 = P1
+    else
+        P2 = update_mode(P1, ForcedMode)
+    end,
+    NewSegment = $segment(I, T, D, M, P2, N1).
 
 % ==============================================================================
 % MODE TRANSITION PLANNING

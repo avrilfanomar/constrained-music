@@ -27,6 +27,7 @@ import refiner.
 import chord_generator.
 import ornaments.
 import scale_utils.
+import rng.
 
 % ==============================================================================
 % MAIN ENTRY POINTS
@@ -56,6 +57,10 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath) =>
 % Main companion function with mood structures and randomness
 % Randomness: 0.0 = deterministic, 1.0 = maximum variation
 run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
+    run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness, []).
+
+% Legacy path with preferences (key=/tempo= overrides still honored)
+run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness, Preferences) =>
     println("=== Music Companion ==="),
     nl,
 
@@ -75,12 +80,13 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
 
     % Plan the transition with randomness
     println("Planning transition path..."),
-    Segments = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out, Randomness),
+    Segments0 = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out, Randomness),
+    Segments = apply_musical_overrides(Segments0, Preferences, true),
     printf("  Created %d segments%n%n", length(Segments)),
 
     % Generate melodies for each segment
     println("Generating music for each segment..."),
-    KeyRoot = 60,  % C4
+    KeyRoot = get_key_root_from_preferences(Preferences),
     AllNotes = generate_all_segments(Segments, KeyRoot),
     printf("  Generated %d total notes%n%n", length(AllNotes)),
 
@@ -107,7 +113,8 @@ run_companion(StartMood, EndMood, DurationSecs, OutputPath, Randomness) =>
 
     % Export to JSON (for Python MIDI writer)
     println("Exporting to JSON..."),
-    export_session_json_with_pedal(FinalNotes, TempoChanges, $meter(4, 4), PedalEventsBasic, OutputPath),
+    MetaBasic = build_export_metadata(KeyRoot, Segments, none, StartMood, EndMood, Preferences),
+    export_session_json_with_pedal(FinalNotes, TempoChanges, $meter(4, 4), PedalEventsBasic, MetaBasic, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     println("Done! Run midi_writer.py to convert to MIDI."),
@@ -158,7 +165,7 @@ run_companion_multiple(StartMood, EndMood, DurationSecs, OutputPath, Randomness,
         elseif Genre != none then
             run_companion_with_genre(StartMood, EndMood, DurationSecs, NumberedPath, IterRandomness, Genre, Preferences)
         else
-            run_companion(StartMood, EndMood, DurationSecs, NumberedPath, IterRandomness)
+            run_companion(StartMood, EndMood, DurationSecs, NumberedPath, IterRandomness, Preferences)
         end,
 
         if I < Count then nl end
@@ -194,9 +201,11 @@ describe_output_files(BasePath, Count) = Description =>
 
 % Advance random state by consuming N random values
 % This ensures different CP solver results for each iteration
+% (rng-aware: consumes the seeded stream when seed= is active, so
+% count=N variations stay reproducible under a fixed seed)
 advance_random_state(N) =>
     foreach(_ in 1..N)
-        _ = random2()
+        _ = rng.rand_int()
     end.
 
 % ==============================================================================
@@ -232,12 +241,13 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
 
     % Plan the transition
     println("Planning transition path..."),
-    Segments = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out, Randomness),
+    Segments0 = plan_transition(StartMood, EndMood, DurationSecs, ease_in_out, Randomness),
+    Segments = apply_musical_overrides(Segments0, Preferences, true),
     printf("  Created %d segments%n%n", length(Segments)),
 
     % Generate melodies with genre constraints
     println("Generating music with genre constraints..."),
-    KeyRoot = 60,  % C4
+    KeyRoot = get_key_root_from_preferences(Preferences),
 
     % Per-piece refinement: generate entire piece N times, keep best
     PieceRounds = refiner.get_refine_piece_rounds(Preferences),
@@ -321,7 +331,8 @@ run_companion_with_genre(StartMood, EndMood, DurationSecs, OutputPath, Randomnes
 
     % Export to JSON
     println("Exporting to JSON..."),
-    export_session_json_with_pedal(FinalNotes, TempoChanges, ExportMeter, PedalEvents, OutputPath),
+    MetaGenre = build_export_metadata(KeyRoot, Segments, Genre, StartMood, EndMood, Preferences),
+    export_session_json_with_pedal(FinalNotes, TempoChanges, ExportMeter, PedalEvents, MetaGenre, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     % Print constraint violation report
@@ -638,16 +649,26 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
     nl,
 
     % Calculate approximate number of bars from average tempo
-    AvgMood = mood_lerp(StartMood, EndMood, 0.5),
-    AvgParams = mood_to_params(AvgMood),
-    AvgTempo = get_tempo(AvgParams),
+    % (a forced tempo= drives section sizing so total duration stays right)
+    if find_first_key(Preferences, force_tempo, TempoOverrideForm) then
+        AvgTempo = TempoOverrideForm
+    else
+        TempoOverrideForm = none,
+        AvgMood = mood_lerp(StartMood, EndMood, 0.5),
+        AvgParams = mood_to_params(AvgMood),
+        AvgTempo = get_tempo(AvgParams)
+    end,
     SecondsPerBar = 240.0 / AvgTempo,  % 4 beats per bar
     TotalBars = max(8, round(DurationSecs / SecondsPerBar)),
 
-    % Get key root and mode from initial mood
-    KeyRoot = 60,  % C4
-    InitialParams = mood_to_params(StartMood),
-    InitialMode = get_mode(InitialParams),
+    % Get key root and mode (artist overrides win over mood defaults)
+    KeyRoot = get_key_root_from_preferences(Preferences),
+    if find_first_key(Preferences, force_mode, ForcedModeForm) then
+        InitialMode = ForcedModeForm
+    else
+        InitialParams = mood_to_params(StartMood),
+        InitialMode = get_mode(InitialParams)
+    end,
 
     % Get form sections
     FormSections = form.get_form_sections(FormType, TotalBars, KeyRoot mod 12, InitialMode),
@@ -657,7 +678,9 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
 
     % Plan transition within form sections
     println("Planning transition within form sections..."),
-    Segments = plan_transition_within_form(StartMood, EndMood, DurationSecs, ease_in_out, Randomness, FormSections),
+    SegmentsF0 = plan_transition_within_form(StartMood, EndMood, DurationSecs, ease_in_out, Randomness, FormSections, TempoOverrideForm),
+    % Bar counts are locked to form sections: force tempo/mode without resizing
+    Segments = apply_musical_overrides(SegmentsF0, Preferences, false),
     printf("  Created %d segments across %d sections%n%n", length(Segments), length(FormSections)),
 
     % Generate melodies with form awareness
@@ -716,7 +739,8 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
 
     % Export to JSON
     println("Exporting to JSON..."),
-    export_session_json_with_pedal(FinalNotes, TempoChanges, ExportMeter2, PedalEventsForm, OutputPath),
+    MetaForm = build_export_metadata(KeyRoot, Segments, Genre, StartMood, EndMood, Preferences),
+    export_session_json_with_pedal(FinalNotes, TempoChanges, ExportMeter2, PedalEventsForm, MetaForm, OutputPath),
     printf("  Saved to: %s%n%n", OutputPath),
 
     println("Done! Run midi_writer.py to convert to MIDI."),
@@ -724,13 +748,20 @@ run_companion_with_form(StartMood, EndMood, DurationSecs, OutputPath, Randomness
 
 % Plan transition aligned to form section boundaries
 plan_transition_within_form(StartMood, EndMood, DurationSecs, EasingType, Randomness, FormSections) = AllSegments =>
+    AllSegments = plan_transition_within_form(StartMood, EndMood, DurationSecs, EasingType, Randomness, FormSections, none).
+
+plan_transition_within_form(StartMood, EndMood, DurationSecs, EasingType, Randomness, FormSections, TempoOverride) = AllSegments =>
     % Calculate total bars from form sections
     TotalBars = sum([form.section_bars(S) : S in FormSections]),
 
-    % Calculate seconds per bar based on average tempo
-    AvgMood = mood_lerp(StartMood, EndMood, 0.5),
-    AvgParams = mood_to_params(AvgMood),
-    AvgTempo = get_tempo(AvgParams),
+    % Calculate seconds per bar based on average tempo (or forced tempo=)
+    if TempoOverride != none then
+        AvgTempo = TempoOverride
+    else
+        AvgMood = mood_lerp(StartMood, EndMood, 0.5),
+        AvgParams = mood_to_params(AvgMood),
+        AvgTempo = get_tempo(AvgParams)
+    end,
     SecondsPerBar = 240.0 / AvgTempo,
 
     % Generate segments for each form section
@@ -1329,21 +1360,19 @@ main(Args) =>
     elseif FirstArg == "demo" then
         % Parse additional options for demo (genre, accomp, randomness, etc.)
         ParsedOpts = parse_args(RestArgs),
+        maybe_seed_rng(ParsedOpts),
         % Default 0.2: rand_val labeling varies output run-to-run without
         % weakening optimization; deterministic solves over-repeat 4-gram
         % patterns vs the masterpiece corpus (randomness=0.0 restores)
         Randomness = get_arg(ParsedOpts, randomness, 0.2),
         % Quality path by default; genre=none / rhythm=off restore legacy behavior
         Genre = get_arg(ParsedOpts, genre, classical_period),
-        Accomp = get_arg(ParsedOpts, accomp, auto),
-        Rhythm = get_arg(ParsedOpts, rhythm, on),
-        Refine = get_arg(ParsedOpts, refine, 1),
-        RefinePiece = get_arg(ParsedOpts, refine_piece, 1),
-        MeterOpt = get_arg(ParsedOpts, meter, none),
-        RitOpt = get_arg(ParsedOpts, rit, on),
         DemoOutput = get_arg(ParsedOpts, output, "session.json"),
         DemoCount = get_arg(ParsedOpts, count, 1),
-        demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece, MeterOpt, RitOpt, DemoOutput, DemoCount),
+        % All remaining options (accomp/rhythm/refine/meter/rit/key/tempo/...)
+        % flow through the shared preference builder
+        DemoPrefs = build_preferences(ParsedOpts),
+        demo_with_prefs(Randomness, Genre, DemoPrefs, DemoOutput, DemoCount),
         halt
     elseif FirstArg == "path" then
         demo_path(),
@@ -1363,6 +1392,7 @@ main(Args) =>
 
     % Parse key=value arguments
     ParsedArgs = parse_args(Args),
+    maybe_seed_rng(ParsedArgs),
 
     % Extract options
     Duration = get_arg(ParsedArgs, duration, 300),
@@ -1411,7 +1441,7 @@ main(Args) =>
         run_companion_with_genre(StartMood, EndMood, Duration, Output, Randomness, Genre, Preferences)
     else
         % Standard generation
-        run_companion(StartMood, EndMood, Duration, Output, Randomness)
+        run_companion(StartMood, EndMood, Duration, Output, Randomness, Preferences)
     end.
 
 % Parse meter string like "3/4", "6/8", "3/8", "2/2"
@@ -1522,6 +1552,13 @@ set_arg(Map, "ornaments", Value) = Map =>
     else
         Map.put(ornaments, to_float(Value))
     end.
+set_arg(Map, "key", Value) = Map =>
+    % Raw lowercased string; parsed by parse_key in build_preferences
+    Map.put(key, to_lowercase(Value)).
+set_arg(Map, "tempo", Value) = Map =>
+    Map.put(tempo, to_integer(Value)).
+set_arg(Map, "seed", Value) = Map =>
+    Map.put(seed, to_integer(Value)).
 set_arg(Map, Key, Value) = Map =>
     % Check for weight:constraint=value pattern
     if append("weight:", ConstraintStr, Key) then
@@ -1555,6 +1592,149 @@ join([X|Rest], Sep) = X ++ Sep ++ join(Rest, Sep).
 find_first_key([], _Key, _Value) => fail.
 find_first_key([K=V|_Rest], Key, Value) ?=> K == Key, Value = V.
 find_first_key([_|Rest], Key, Value) => find_first_key(Rest, Key, Value).
+
+% ==============================================================================
+% ARTIST MUSICAL OVERRIDES (key= / tempo= / seed=)
+% ==============================================================================
+
+% Seed the RNG once per process if seed= was given (reproducible takes).
+% Reproducibility is best-effort: the anytime optimizer keeps the best
+% solution found within a wall-clock budget, so heavy machine load can
+% still change which solution wins.
+maybe_seed_rng(ParsedArgs) =>
+    SeedVal = get_arg(ParsedArgs, seed, none),
+    if SeedVal != none then
+        printf("Seed: %d (reproducible mode)%n", SeedVal),
+        rng.seed_rng(SeedVal)
+    end.
+
+% Key root from preferences (default: middle C)
+get_key_root_from_preferences(Preferences) = KeyRoot =>
+    if find_first_key(Preferences, key_root, KR) then
+        KeyRoot = KR
+    else
+        KeyRoot = 60
+    end.
+
+% Apply force_tempo/force_mode preferences to planned segments.
+% RecomputeBars: true for free-form paths (bar counts follow the tempo);
+% false for form mode (bar counts are locked to sections).
+apply_musical_overrides(Segments, Preferences, RecomputeBars) = NewSegments =>
+    if find_first_key(Preferences, force_tempo, FT) then TempoO = FT else TempoO = none end,
+    if find_first_key(Preferences, force_mode, FM) then ModeO = FM else ModeO = none end,
+    if TempoO != none then printf("  Tempo: %d BPM (fixed)%n", TempoO) end,
+    if ModeO != none then printf("  Mode: %w (fixed)%n", ModeO) end,
+    NewSegments = transition.apply_param_overrides(Segments, TempoO, ModeO, RecomputeBars).
+
+% Parse a key name like "d_minor", "eb", "f#_dorian", "bb_major" into
+% (RootMidi, ModeOrNone). Roots land within a fourth of middle C so the
+% melody register stays comparable across keys. Returns (none, none) with
+% a warning for unknown tonics.
+parse_key(KeyStr) = (RootMidi, Mode) =>
+    Parts = split(KeyStr, "_"),
+    TonicStr = head(Parts),
+    PC = tonic_pitch_class(TonicStr),
+    if PC == none then
+        printf("Warning: Unknown key '%s' (expected e.g. key=d_minor, key=eb, key=f#_dorian). Ignoring.%n", KeyStr),
+        RootMidi = none,
+        Mode = none
+    else
+        % Keys C..F# sit above middle C, G..B below (max distance a tritone)
+        if PC <= 6 then RootMidi = 60 + PC else RootMidi = 48 + PC end,
+        if length(Parts) >= 2 then
+            ModeStr = join([Parts[I] : I in 2..length(Parts)], "_"),
+            Mode0 = parse_mode_name(ModeStr),
+            if Mode0 == none then
+                printf("Warning: Unknown mode '%s' in key '%s' — using mood-driven mode.%n", ModeStr, KeyStr),
+                Mode = none
+            else
+                Mode = Mode0
+            end
+        else
+            Mode = none
+        end
+    end.
+
+% Tonic name -> pitch class (accepts sharps as c#/cs and flats as db)
+tonic_pitch_class("c")  = 0.
+tonic_pitch_class("c#") = 1.
+tonic_pitch_class("cs") = 1.
+tonic_pitch_class("db") = 1.
+tonic_pitch_class("d")  = 2.
+tonic_pitch_class("d#") = 3.
+tonic_pitch_class("ds") = 3.
+tonic_pitch_class("eb") = 3.
+tonic_pitch_class("e")  = 4.
+tonic_pitch_class("f")  = 5.
+tonic_pitch_class("f#") = 6.
+tonic_pitch_class("fs") = 6.
+tonic_pitch_class("gb") = 6.
+tonic_pitch_class("g")  = 7.
+tonic_pitch_class("g#") = 8.
+tonic_pitch_class("gs") = 8.
+tonic_pitch_class("ab") = 8.
+tonic_pitch_class("a")  = 9.
+tonic_pitch_class("a#") = 10.
+tonic_pitch_class("as") = 10.
+tonic_pitch_class("bb") = 10.
+tonic_pitch_class("b")  = 11.
+tonic_pitch_class(_)    = none.
+
+% Mode name string -> scale_utils mode atom ("minor" = natural minor)
+parse_mode_name(S) = lookup_mode_name(mode_name_table(), S).
+
+mode_name_table() = [
+    ("major", major), ("minor", natural_minor),
+    ("natural_minor", natural_minor), ("harmonic_minor", harmonic_minor),
+    ("melodic_minor", melodic_minor), ("dorian", dorian),
+    ("phrygian", phrygian), ("lydian", lydian),
+    ("mixolydian", mixolydian), ("aeolian", aeolian),
+    ("ionian", ionian), ("locrian", locrian)].
+
+lookup_mode_name([], _) = none.
+lookup_mode_name([(Name, Atom) | Rest], S) = Mode =>
+    if Name == S then
+        Mode = Atom
+    else
+        Mode = lookup_mode_name(Rest, S)
+    end.
+
+% Human-readable key name, e.g. "D minor", "F# dorian"
+key_name_string(KeyRoot, Mode) = Name =>
+    NoteNames = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"],
+    NN = NoteNames[(KeyRoot mod 12) + 1],
+    if Mode == natural_minor ; Mode == minor ; Mode == aeolian then
+        MStr = "minor"
+    elseif Mode == major ; Mode == ionian then
+        MStr = "major"
+    else
+        MStr = to_fstring("%w", Mode)
+    end,
+    Name = NN ++ " " ++ MStr.
+
+% Extra metadata pairs for the JSON export: key/mode/tempo/genre/mood info
+% used by the MusicXML exporter, audio renderer, and the piece library.
+build_export_metadata(KeyRoot, Segments, Genre, StartMood, EndMood, Preferences) = Meta =>
+    if Segments != [] then
+        FirstParams = get_segment_params(head(Segments)),
+        Mode = get_mode(FirstParams),
+        BaseTempo = get_tempo(FirstParams)
+    else
+        Mode = major,
+        BaseTempo = 120
+    end,
+    Meta0 = [(key_root, KeyRoot), (mode, Mode),
+             (key_name, key_name_string(KeyRoot, Mode)),
+             (base_tempo, BaseTempo), (genre, Genre),
+             (from_valence, get_valence(StartMood)),
+             (from_arousal, get_arousal(StartMood)),
+             (to_valence, get_valence(EndMood)),
+             (to_arousal, get_arousal(EndMood))],
+    if find_first_key(Preferences, seed, SeedM) then
+        Meta = Meta0 ++ [(seed, SeedM)]
+    else
+        Meta = Meta0
+    end.
 
 % Extract meter from preferences list, defaulting to 4/4
 get_meter_from_preferences(Preferences) = Meter =>
@@ -1617,6 +1797,16 @@ print_usage() =>
     println("                   Supported: 3/4, 6/8, 3/8, 2/2, 2/4"),
     println("  rit=off          Disable cadential ritardando (default: on)"),
     println("                   When on, last 2 bars of segments >= 4 bars slow to 80% tempo"),
+    nl,
+    println("Musical Options (artist overrides; default: derived from mood):"),
+    println("  key=NAME         Fix the key, e.g. key=d_minor, key=eb, key=f#_dorian"),
+    println("                   Tonic: c, c#/db, d, ..., b. Mode (optional): major, minor,"),
+    println("                   harmonic_minor, melodic_minor, dorian, phrygian, lydian,"),
+    println("                   mixolydian, aeolian, locrian. Tonic alone keeps mood-driven mode."),
+    println("  tempo=BPM        Fix the tempo for the whole piece (40-220);"),
+    println("                   cadential ritardando still applies within segments"),
+    println("  seed=N           Reproducible generation (same seed = same piece, best effort:"),
+    println("                   heavy machine load can change anytime-optimizer results)"),
     nl,
     println("Genre Options (for weighted constraint optimization):"),
     println("  genre=GENRE      Genre-based constraint selection (default: classical_period)"),
@@ -1716,6 +1906,31 @@ build_preferences(ParsedArgs) = Preferences =>
     if OrnVal != none then
         Prefs := Prefs ++ [ornaments=OrnVal]
     end,
+    % Add key override (key=d_minor -> key_root + force_mode)
+    KeyVal = get_arg(ParsedArgs, key, none),
+    if KeyVal != none, KeyVal != "auto" then
+        (KRoot, KMode) = parse_key(KeyVal),
+        if KRoot != none then
+            Prefs := Prefs ++ [key_root=KRoot]
+        end,
+        if KMode != none then
+            Prefs := Prefs ++ [force_mode=KMode]
+        end
+    end,
+    % Add tempo override (fixed BPM for the whole piece)
+    TempoVal = get_arg(ParsedArgs, tempo, none),
+    if TempoVal != none then
+        if TempoVal >= 40, TempoVal =< 220 then
+            Prefs := Prefs ++ [force_tempo=TempoVal]
+        else
+            printf("Warning: tempo=%d out of range 40..220, ignoring%n", TempoVal)
+        end
+    end,
+    % Record seed (consumed at startup by maybe_seed_rng) for metadata
+    SeedPref = get_arg(ParsedArgs, seed, none),
+    if SeedPref != none then
+        Prefs := Prefs ++ [seed=SeedPref]
+    end,
     Preferences = Prefs.
 
 % Print all available genres
@@ -1766,6 +1981,11 @@ demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece, MeterO
     if RitOpt == off then
         Prefs := Prefs ++ [rit=off]
     end,
+    demo_with_prefs(Randomness, Genre, Prefs, OutputPath, Count).
+
+% Demo driver over an already-built preferences list (the main demo branch
+% builds it with build_preferences, so key=/tempo=/seed=/ornaments= all work)
+demo_with_prefs(Randomness, Genre, Prefs, OutputPath, Count) =>
     % count=N routes through the multi-variation generator (numbered outputs)
     if Count > 1 then
         run_companion_multiple(mood_preset(sad_depressed), mood_preset(energized), 60,
@@ -1773,7 +1993,7 @@ demo_with_options(Randomness, Genre, Accomp, Rhythm, Refine, RefinePiece, MeterO
     elseif Genre != none then
         run_companion_with_genre(mood_preset(sad_depressed), mood_preset(energized), 60, OutputPath, Randomness, Genre, Prefs)
     else
-        run_companion_presets(sad_depressed, energized, 60, OutputPath, Randomness)
+        run_companion(mood_preset(sad_depressed), mood_preset(energized), 60, OutputPath, Randomness, Prefs)
     end.
 
 % Demo showing transition path only (no generation)

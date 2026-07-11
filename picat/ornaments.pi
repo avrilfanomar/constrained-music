@@ -12,6 +12,7 @@ module ornaments.
 
 import music_types.
 import scale_utils.
+import rng.
 
 % ==============================================================================
 % MAIN ENTRY POINT
@@ -241,7 +242,7 @@ make_turn(Note, Root, Mode) = Turn =>
 % UTILITY
 % ==============================================================================
 
-% Random float in [0, 1). random2() is 31-bit; the old /2^28-1 gave [0, 8),
+% Random float in [0, 1); seedable via rng (seed= CLI option).
+% NOTE: raw 31-bit ints need mod 1000000 / 1e6 — the old /2^28-1 gave [0, 8),
 % which cut the effective ornament probability to 1/8 of the documented value.
-rand01() = R =>
-    R = (random2() mod 1000000) / 1000000.0.
+rand01() = rng.rand_unit().

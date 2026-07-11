@@ -1,0 +1,33 @@
+% rng.pi - Seedable randomness shim
+%
+% Picat has two RNG streams: random2() is auto-seeded from the clock and
+% cannot be re-seeded, while random(Seed)/random() is seedable — and seeding
+% it ALSO makes CP solve([rand_val], ...) labeling reproducible (verified:
+% same seed => same labeling order). seed=N routes all project randomness
+% through the seedable stream; without a seed, random2() keeps the legacy
+% clock-seeded behavior.
+%
+% Reproducibility caveat: the anytime optimizer keeps the best solution
+% found within a wall-clock budget, so under different machine load the
+% same seed can still yield a different (better/worse-optimized) piece.
+
+module rng.
+
+% Activate seeded mode for the rest of the process
+seed_rng(Seed) =>
+    get_global_map().put(rng_seed_active, true),
+    _ = random(Seed).
+
+% Whether a seed was set this run
+rng_seeded() => get_global_map().has_key(rng_seed_active).
+
+% Non-negative random int (same contract as random2())
+rand_int() = R =>
+    if get_global_map().has_key(rng_seed_active) then
+        R = abs(random())
+    else
+        R = random2()
+    end.
+
+% Uniform float in [0, 1)
+rand_unit() = (rand_int() mod 1000000) / 1000000.0.

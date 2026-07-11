@@ -130,16 +130,23 @@ generate_pedal_events(NumBars) = Events =>
 
 % Export session with pedal events
 export_session_json_with_pedal(Notes, TempoChanges, Meter, PedalEvents, FilePath) =>
+    export_session_json_with_pedal(Notes, TempoChanges, Meter, PedalEvents, [], FilePath).
+
+% Export session with pedal events and extra metadata pairs [(key, value), ...]
+% (key/mode/tempo/genre/mood info for exporters and the piece library)
+export_session_json_with_pedal(Notes, TempoChanges, Meter, PedalEvents, Metadata, FilePath) =>
     FD = open(FilePath, write),
     println(FD, "{"),
     % metadata
     println(FD, "  \"metadata\": {"),
     println(FD, "    \"generator\": \"Music Companion\","),
-    println(FD, "    \"version\": \"1.2\","),
+    println(FD, "    \"version\": \"1.3\","),
     printf(FD, "    \"num_notes\": %d,%n", length(Notes)),
     printf(FD, "    \"num_tempo_changes\": %d,%n", length(TempoChanges)),
     Meter = $meter(Beats, BeatUnit),
-    printf(FD, "    \"time_signature\": {\"beats\": %d, \"beat_unit\": %d}%n", Beats, BeatUnit),
+    printf(FD, "    \"time_signature\": {\"beats\": %d, \"beat_unit\": %d}", Beats, BeatUnit),
+    write_metadata_fields(FD, Metadata),
+    nl(FD),
     println(FD, "  },"),
     % tempo changes
     println(FD, "  \"tempo_changes\": ["),

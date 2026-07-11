@@ -7,6 +7,7 @@
 module humanize.
 
 import music_types.
+import rng.
 
 % ==============================================================================
 % MAIN HUMANIZATION FUNCTION
@@ -317,9 +318,8 @@ find_first_index_helper([], _Value, Default) = Default.
 find_first_index_helper([X|_Rest], Value, I) = I, X == Value => true.
 find_first_index_helper([_|Rest], Value, I) = find_first_index_helper(Rest, Value, I + 1).
 
-% Random float in [0, 1) using auto-seeded random2().
-% NOTE: random2() returns 31-bit values — dividing by 2^28-1 (the old code)
-% yields [0, 8) with mean 4.0, which made timing jitter 8x the documented
-% max and biased every note late. Same idiom as mood_mapping.rand01().
-rand01() = R =>
-    R = (random2() mod 1000000) / 1000000.0.
+% Random float in [0, 1); seedable via rng (seed= CLI option).
+% NOTE: raw 31-bit ints must be normalized with mod 1000000 / 1e6 —
+% dividing by 2^28-1 (the old code) yields [0, 8) with mean 4.0, which
+% made timing jitter 8x the documented max and biased every note late.
+rand01() = rng.rand_unit().

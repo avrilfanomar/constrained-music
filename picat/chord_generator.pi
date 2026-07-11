@@ -9,6 +9,7 @@ module chord_generator.
 import cp.
 import scale_utils.
 import harmonic.
+import rng.
 
 % ==============================================================================
 % MAIN INTERFACE
@@ -223,8 +224,8 @@ generate_half_cadence_cp(NumBars, _Mode, _Genre, Randomness) = Degrees =>
     % to weighted idiomatic degrees; the min-cost solve fills the rest
     if Randomness >= 0.05 then
         PreDom #= random_predominant(),
-        if NumBars >= 4, random2() mod 10 < 6 then
-            ColorBar = 2 + (random2() mod (NumBars - 3)),
+        if NumBars >= 4, rng.rand_int() mod 10 < 6 then
+            ColorBar = 2 + (rng.rand_int() mod (NumBars - 3)),
             Degrees[ColorBar] #= random_color_degree()
         end
     end,
@@ -250,7 +251,7 @@ generate_half_cadence_cp(NumBars, _Mode, _Genre, Randomness) = Degrees =>
 % Weighted random pre-dominant: IV and ii are the classical workhorses,
 % vi appears occasionally
 random_predominant() = D =>
-    R = random2() mod 10,
+    R = rng.rand_int() mod 10,
     if R < 4 then D = 4
     elseif R < 8 then D = 2
     else D = 6
@@ -259,7 +260,7 @@ random_predominant() = D =>
 % Weighted random interior "color" chord (antecedent variety): subdominant
 % and submediant lead, tonic prolongation and mediant appear occasionally
 random_color_degree() = D =>
-    R = random2() mod 20,
+    R = rng.rand_int() mod 20,
     if R < 5 then D = 4
     elseif R < 10 then D = 6
     elseif R < 14 then D = 2

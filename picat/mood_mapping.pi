@@ -7,6 +7,7 @@ module mood_mapping.
 
 import mood.
 import music_types.
+import rng.
 
 % ==============================================================================
 % MUSIC PARAMETERS STRUCTURE
@@ -142,16 +143,15 @@ modes_for_valence(V) = Modes =>
 random_mode_from_va(V, _A) = Mode =>
     Modes = modes_for_valence(V),
     Len = length(Modes),
-    Index = (random2() mod Len) + 1,
+    Index = (rng.rand_int() mod Len) + 1,
     Mode = Modes[Index].
 
 % ==============================================================================
 % RANDOM UTILITIES
 % ==============================================================================
 
-% Generate a random float in [0, 1) using auto-seeded random2()
-rand01() = R =>
-    R = (random2() mod 1000000) / 1000000.0.
+% Random float in [0, 1); seedable via rng (seed= CLI option)
+rand01() = rng.rand_unit().
 
 % ==============================================================================
 % NOTE DENSITY (Notes per bar)
