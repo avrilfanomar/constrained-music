@@ -21,6 +21,7 @@
         <div class="tab-bar">
             <button class="tab-btn active" data-tab="compose">Compose</button>
             <button class="tab-btn" data-tab="vary">Vary a Piece</button>
+            <button class="tab-btn" data-tab="library">Library</button>
         </div>
 
         <!-- ================================================================
@@ -61,6 +62,24 @@
                             <button data-value="strict">Strict</button>
                         </div>
                     </div>
+
+                    <div class="ornament">&#x2767;</div>
+
+                    <div class="musical-row">
+                        <div class="select-group">
+                            <label class="select-label">Key</label>
+                            <select id="key-select" class="styled-select"></select>
+                        </div>
+                        <div class="select-group">
+                            <label class="select-label">Tempo</label>
+                            <input type="number" id="tempo-input" class="styled-select tempo-input"
+                                   placeholder="Auto" min="40" max="220" step="1">
+                        </div>
+                        <div class="select-group">
+                            <label class="select-label">Meter</label>
+                            <select id="meter-select" class="styled-select"></select>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Right Column: Genre & Advanced -->
@@ -87,7 +106,7 @@
                             </div>
                             <div class="select-group">
                                 <label class="checkbox-label">
-                                    <input type="checkbox" id="rhythm-toggle">
+                                    <input type="checkbox" id="rhythm-toggle" checked>
                                     <span>Variable rhythm</span>
                                 </label>
                             </div>
@@ -109,6 +128,23 @@
                                     <option value="2">2 rounds</option>
                                     <option value="3">3 rounds</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div class="form-accomp-row">
+                            <div class="select-group ornaments-group">
+                                <label class="slider-label">
+                                    <span>Ornaments</span>
+                                    <span id="ornaments-value" class="slider-value">0.30</span>
+                                </label>
+                                <input type="range" id="ornaments-slider" min="0" max="100" value="30" class="styled-slider">
+                            </div>
+                            <div class="select-group">
+                                <label class="select-label">Seed <span class="label-hint">(blank = random)</span></label>
+                                <div class="seed-row">
+                                    <input type="number" id="seed-input" class="styled-select seed-input"
+                                           placeholder="Random" min="0" step="1">
+                                    <button id="seed-dice" class="btn-small" title="Roll a random seed">&#127922;</button>
+                                </div>
                             </div>
                         </div>
 
@@ -221,10 +257,25 @@
         </div>
 
         <!-- ================================================================
-             OUTPUT (shared between both tabs)
+             LIBRARY TAB
+             ================================================================ -->
+        <div id="tab-library" class="tab-content" style="display:none;">
+            <section class="panel library-section">
+                <div class="library-header">
+                    <h2 class="panel-title">Your Pieces</h2>
+                    <span class="library-hint">Every take is saved here automatically. Star the keepers.</span>
+                </div>
+                <div id="library-list" class="library-list">
+                    <p class="library-empty">Nothing here yet — compose something first.</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- ================================================================
+             OUTPUT (shared between tabs)
              ================================================================ -->
         <section class="panel piano-roll-section" id="output-section" style="display:none;">
-            <h2 class="panel-title">Output</h2>
+            <h2 class="panel-title">Output <span id="output-piece-name" class="output-piece-name"></span></h2>
             <div class="piano-roll-container">
                 <canvas id="piano-roll" width="900" height="200"></canvas>
             </div>
@@ -236,7 +287,12 @@
                     <div class="progress-bar" id="progress-bar"></div>
                 </div>
                 <span id="time-display" class="time-display">0:00 / 0:00</span>
-                <button id="download-midi" class="btn-small btn-download" title="Download MIDI">&#11015; MIDI</button>
+                <div class="export-group" id="export-group">
+                    <button id="download-midi" class="btn-small btn-download" title="Download MIDI for your DAW">&#11015; MIDI</button>
+                    <button id="download-musicxml" class="btn-small btn-download" title="Download MusicXML for MuseScore / Sibelius / Dorico / Finale">&#11015; MusicXML</button>
+                    <button id="download-wav" class="btn-small btn-download" title="Download rendered WAV audio">&#11015; WAV</button>
+                    <button id="download-mp3" class="btn-small btn-download" title="Download rendered MP3 audio">&#11015; MP3</button>
+                </div>
             </div>
             <details class="generation-log">
                 <summary>Generation Log</summary>
@@ -261,6 +317,7 @@
     <script type="module" src="/static/js/piano-roll.js"></script>
     <script type="module" src="/static/js/playback.js"></script>
     <script type="module" src="/static/js/variation.js"></script>
+    <script type="module" src="/static/js/library.js"></script>
     <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

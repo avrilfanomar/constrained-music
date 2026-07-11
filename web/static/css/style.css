@@ -1259,3 +1259,203 @@ body::before {
         font-size: 1.4rem;
     }
 }
+
+/* ===========================================================================
+   Musical controls (key / tempo / meter / seed)
+   =========================================================================== */
+
+.musical-row {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.tempo-input,
+.seed-input {
+    width: 100%;
+    font-family: var(--font-ui);
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+
+.tempo-input::-webkit-inner-spin-button,
+.seed-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+}
+
+.tempo-input::placeholder,
+.seed-input::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.label-hint {
+    color: var(--text-muted);
+    font-size: 0.78em;
+    font-weight: 400;
+}
+
+.seed-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+}
+
+.seed-row .btn-small {
+    flex: 0 0 auto;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.ornaments-group {
+    min-width: 0;
+}
+
+/* ===========================================================================
+   Export buttons
+   =========================================================================== */
+
+.export-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.output-piece-name {
+    font-family: var(--font-ui);
+    font-size: 0.72em;
+    font-weight: 400;
+    color: var(--text-soft);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* ===========================================================================
+   Library tab
+   =========================================================================== */
+
+.library-section {
+    width: 100%;
+}
+
+.library-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.library-hint {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.library-empty {
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 24px 0;
+    text-align: center;
+}
+
+.library-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.library-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: background var(--transition), border-color var(--transition);
+}
+
+.library-row:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-focus);
+}
+
+.library-row.starred {
+    border-color: rgba(212, 168, 67, 0.35);
+    box-shadow: var(--shadow-inset), 0 0 12px rgba(212, 168, 67, 0.06);
+}
+
+.lib-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 220px;
+    flex: 1 1 auto;
+}
+
+.lib-name-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lib-star {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.05rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: color var(--transition), transform var(--transition);
+}
+
+.lib-star:hover { transform: scale(1.2); color: var(--gold-bright); }
+.lib-star.on { color: var(--gold); }
+
+.lib-name {
+    font-family: var(--font-display);
+    font-size: 1.02rem;
+    color: var(--text-bright);
+    cursor: text;
+    border-bottom: 1px dashed transparent;
+}
+
+.lib-name:hover { border-bottom-color: var(--text-muted); }
+
+.lib-rename-input {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--text-bright);
+    background: var(--bg-raised);
+    border: 1px solid var(--border-focus);
+    border-radius: 6px;
+    padding: 2px 8px;
+    min-width: 240px;
+}
+
+.lib-details {
+    color: var(--text-soft);
+    font-size: 0.82rem;
+}
+
+.lib-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.lib-action { white-space: nowrap; }
+
+.lib-delete { color: var(--burgundy-light); }
+
+.lib-delete.armed {
+    background: var(--burgundy-glow);
+    border-color: var(--burgundy);
+    color: var(--text-bright);
+}

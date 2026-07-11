@@ -8,6 +8,7 @@ import { ConstraintPanel } from './constraint-panel.js';
 import { PianoRoll } from './piano-roll.js';
 import { Playback } from './playback.js';
 import { VarySection } from './variation.js';
+import { Library } from './library.js';
 
 // --- Components ---
 const moodPad = new MoodPad('mood-pad');
@@ -16,6 +17,7 @@ const constraintPanel = new ConstraintPanel('constraint-panel');
 const pianoRoll = new PianoRoll('piano-roll');
 const playback = new Playback();
 const varySection = new VarySection();
+const library = new Library('library-list');
 
 // --- DOM refs ---
 const durationSlider = document.getElementById('duration-slider');
@@ -40,15 +42,27 @@ const stopBtn = document.getElementById('stop-btn');
 const progressBar = document.getElementById('progress-bar');
 const timeDisplay = document.getElementById('time-display');
 const downloadMidi = document.getElementById('download-midi');
+const downloadMusicXml = document.getElementById('download-musicxml');
+const downloadWav = document.getElementById('download-wav');
+const downloadMp3 = document.getElementById('download-mp3');
 const picatOutput = document.getElementById('picat-output');
 const resetConstraints = document.getElementById('reset-constraints');
 const advancedToggle = document.getElementById('advanced-toggle');
 const advancedSection = document.getElementById('advanced-section');
 const loadingText = document.getElementById('loading-text');
+const keySelect = document.getElementById('key-select');
+const tempoInput = document.getElementById('tempo-input');
+const meterSelect = document.getElementById('meter-select');
+const ornamentsSlider = document.getElementById('ornaments-slider');
+const ornamentsValue = document.getElementById('ornaments-value');
+const seedInput = document.getElementById('seed-input');
+const seedDice = document.getElementById('seed-dice');
+const outputPieceName = document.getElementById('output-piece-name');
 
 let config = null;
 let currentIntensity = 'standard';
 let loadingInterval = null;
+let currentLibraryId = null;   // library id of the piece in the player
 
 const LOADING_MESSAGES = [
     'Composing your piece...',
@@ -100,12 +114,41 @@ async function init() {
     }
     accompSelect.value = 'auto';
 
+    // Key select
+    for (const k of (config.keys || [])) {
+        const opt = document.createElement('option');
+        opt.value = k.id;
+        opt.textContent = k.name;
+        keySelect.appendChild(opt);
+    }
+    keySelect.value = 'auto';
+
+    // Meter select
+    for (const m of (config.meters || [{ id: '4/4', name: '4/4' }])) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        meterSelect.appendChild(opt);
+    }
+    meterSelect.value = '4/4';
+
+    // Hide audio export buttons the server can't render
+    const exports = config.exports || {};
+    downloadWav.style.display = exports.wav ? '' : 'none';
+    downloadMp3.style.display = exports.mp3 ? '' : 'none';
+
     // Constraint panel
     constraintPanel.init(config.constraints, config.constraint_categories, config.genre_weights);
     constraintPanel.setGenre('classical_period');
 
     // Vary section
     varySection.init(config.pieces, config.genres);
+
+    // Library
+    library.setExports(exports);
+    library.onload = loadLibraryPiece;
+    library.onregenerate = regenerateLibraryPiece;
+    library.refresh();
 
     // Wire events
     wireEvents();
@@ -120,6 +163,8 @@ function wireEvents() {
             btn.classList.add('active');
             document.getElementById('tab-compose').style.display = tab === 'compose' ? '' : 'none';
             document.getElementById('tab-vary').style.display = tab === 'vary' ? '' : 'none';
+            document.getElementById('tab-library').style.display = tab === 'library' ? '' : 'none';
+            if (tab === 'library') library.refresh();
         });
     });
 
@@ -184,8 +229,34 @@ function wireEvents() {
         pianoRoll.setCursor(-1);
     });
 
-    // Download MIDI
-    downloadMidi.addEventListener('click', () => playback.downloadMidi());
+    // Ornaments slider
+    ornamentsSlider.addEventListener('input', () => {
+        ornamentsValue.textContent = (ornamentsSlider.value / 100).toFixed(2);
+    });
+
+    // Seed dice
+    seedDice.addEventListener('click', () => {
+        seedInput.value = Math.floor(Math.random() * 1000000);
+    });
+
+    // Exports: server-side files with proper names when the take is in the
+    // library; MIDI falls back to the in-memory base64 blob otherwise
+    downloadMidi.addEventListener('click', () => {
+        if (currentLibraryId) {
+            window.location.href = `/api/library/${currentLibraryId}/export/midi`;
+        } else {
+            playback.downloadMidi();
+        }
+    });
+    downloadMusicXml.addEventListener('click', () => {
+        if (currentLibraryId) window.location.href = `/api/library/${currentLibraryId}/export/musicxml`;
+    });
+    downloadWav.addEventListener('click', () => {
+        if (currentLibraryId) window.location.href = `/api/library/${currentLibraryId}/export/wav`;
+    });
+    downloadMp3.addEventListener('click', () => {
+        if (currentLibraryId) window.location.href = `/api/library/${currentLibraryId}/export/mp3`;
+    });
 
     // Playback callbacks
     playback.onprogress = (cur, total, beat) => {
@@ -231,6 +302,9 @@ async function doGenerate() {
     const end = moodPad.getEnd();
     const overrides = constraintPanel.getOverrides();
 
+    const tempoVal = parseInt(tempoInput.value);
+    const seedVal = parseInt(seedInput.value);
+
     const body = {
         from_valence: start.v,
         from_arousal: start.a,
@@ -247,6 +321,11 @@ async function doGenerate() {
         refine_piece: parseInt(refinePieceSelect.value),
         disabled_constraints: overrides.disabled_constraints,
         weight_overrides: overrides.weight_overrides,
+        key: keySelect.value === 'auto' ? '' : keySelect.value,
+        tempo: Number.isFinite(tempoVal) ? Math.min(220, Math.max(40, tempoVal)) : null,
+        meter: meterSelect.value,
+        ornaments: parseInt(ornamentsSlider.value) / 100,
+        seed: Number.isFinite(seedVal) && seedVal >= 0 ? seedVal : null,
     };
 
     await runRequest('/api/generate', body, LOADING_MESSAGES, generateBtn);
@@ -298,20 +377,8 @@ async function runRequest(endpoint, body, messages, triggerBtn) {
         }
 
         const data = await resp.json();
-
-        outputSection.style.display = 'block';
-        pianoRoll.setNotes(data.notes, data.tempo_changes);
-        playback.setNotes(data.notes, data.tempo_changes, data.midi_base64);
-        picatOutput.textContent = data.picat_output || '';
-        timeDisplay.textContent = `0:00 / ${fmtTime(playback.totalDurationSec)}`;
-        progressBar.style.width = '0%';
-
-        playBtn.disabled = false;
-        pauseBtn.disabled = true;
-        stopBtn.disabled = true;
-        downloadMidi.style.display = data.midi_base64 ? '' : 'none';
-
-        outputSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showPiece(data, data.library || null);
+        library.refresh();
 
     } catch (e) {
         alert('Error: ' + e.message);
@@ -319,6 +386,68 @@ async function runRequest(endpoint, body, messages, triggerBtn) {
         clearInterval(loadingInterval);
         loadingOverlay.style.display = 'none';
         triggerBtn.disabled = false;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Player loading (shared by generate, vary, and the library)
+// -------------------------------------------------------------------------
+
+function showPiece(data, libraryMeta) {
+    currentLibraryId = libraryMeta ? libraryMeta.id : null;
+    outputPieceName.textContent = libraryMeta ? `— ${libraryMeta.name}` : '';
+
+    outputSection.style.display = 'block';
+    pianoRoll.setNotes(data.notes, data.tempo_changes);
+    playback.setNotes(data.notes, data.tempo_changes, data.midi_base64);
+    picatOutput.textContent = data.picat_output || '';
+    timeDisplay.textContent = `0:00 / ${fmtTime(playback.totalDurationSec)}`;
+    progressBar.style.width = '0%';
+
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+    stopBtn.disabled = true;
+    downloadMidi.style.display = (data.midi_base64 || currentLibraryId) ? '' : 'none';
+    downloadMusicXml.style.display = currentLibraryId ? '' : 'none';
+    const exports = (config && config.exports) || {};
+    downloadWav.style.display = (currentLibraryId && exports.wav) ? '' : 'none';
+    downloadMp3.style.display = (currentLibraryId && exports.mp3) ? '' : 'none';
+
+    outputSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function loadLibraryPiece(data, meta) {
+    playback.stop();
+    showPiece(data, data.meta || meta);
+}
+
+async function regenerateLibraryPiece(id) {
+    playback.stop();
+    const fakeBtn = generateBtn;   // reuse the loading UX
+    loadingOverlay.style.display = 'flex';
+    let msgIdx = 0;
+    loadingText.textContent = LOADING_MESSAGES[0];
+    loadingInterval = setInterval(() => {
+        msgIdx = (msgIdx + 1) % LOADING_MESSAGES.length;
+        loadingText.textContent = LOADING_MESSAGES[msgIdx];
+    }, 3000);
+    try {
+        const resp = await fetch(`/api/library/${id}/regenerate`, { method: 'POST' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
+            const msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+            alert('Regeneration failed: ' + msg);
+            return;
+        }
+        const data = await resp.json();
+        showPiece(data, data.library || null);
+        await library.refresh();
+    } catch (e) {
+        alert('Error: ' + e.message);
+    } finally {
+        clearInterval(loadingInterval);
+        loadingOverlay.style.display = 'none';
+        fakeBtn.disabled = false;
     }
 }
 

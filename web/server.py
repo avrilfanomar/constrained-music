@@ -10,10 +10,13 @@ import asyncio
 import base64
 import json
 import os
+import re
 import signal
 import sys
 import tempfile
+import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -21,17 +24,25 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-# Add scripts/ to path so we can import midi_writer
+# Add scripts/ to path so we can import the writers
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from midi_writer import json_to_midi
+from musicxml_writer import data_to_musicxml
+import audio_render
 
 app = FastAPI(title="Constrained Music Studio")
 
 # Serve static files
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Piece library: every successful generation is saved here
+LIBRARY_DIR = PROJECT_ROOT / "out" / "library"
+LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+
+LIBRARY_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +386,23 @@ ACCOMP_PATTERNS = [
     {"id": "none", "name": "No accompaniment"},
 ]
 
+# Keys the UI offers; ids are passed straight to the Picat key= option
+_TONICS = [("c", "C"), ("db", "D♭"), ("d", "D"), ("eb", "E♭"), ("e", "E"),
+           ("f", "F"), ("f#", "F♯"), ("g", "G"), ("ab", "A♭"), ("a", "A"),
+           ("bb", "B♭"), ("b", "B")]
+KEYS = ([{"id": "auto", "name": "Auto (from mood)"}]
+        + [{"id": f"{tid}_major", "name": f"{tname} major"} for tid, tname in _TONICS]
+        + [{"id": f"{tid}_minor", "name": f"{tname} minor"} for tid, tname in _TONICS])
+
+METERS = [
+    {"id": "4/4", "name": "4/4"},
+    {"id": "3/4", "name": "3/4"},
+    {"id": "2/4", "name": "2/4"},
+    {"id": "6/8", "name": "6/8"},
+    {"id": "3/8", "name": "3/8"},
+    {"id": "2/2", "name": "2/2"},
+]
+
 PIECES = {
     "folk": {
         "name": "Folk & Traditional",
@@ -463,9 +491,101 @@ class GenerateRequest(BaseModel):
     intensity: str = Field("standard")
     disabled_constraints: list[str] = Field(default_factory=list)
     weight_overrides: dict[str, int] = Field(default_factory=dict)
-    rhythm: bool = Field(False)
+    rhythm: bool = Field(True)
     refine: int = Field(1, ge=1, le=10)
     refine_piece: int = Field(1, ge=1, le=5)
+    # Artist musical controls (empty/None = derived from mood)
+    key: str = Field("", max_length=24)
+    tempo: int | None = Field(None, ge=40, le=220)
+    meter: str = Field("", max_length=8)
+    ornaments: float | None = Field(None, ge=0.0, le=1.0)
+    seed: int | None = Field(None, ge=0, le=2**31 - 1)
+
+
+class LibraryUpdateRequest(BaseModel):
+    name: str | None = Field(None, max_length=120)
+    starred: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# Piece library
+# ---------------------------------------------------------------------------
+# Every successful generation is persisted to out/library/{id}/ so artists
+# can iterate (generate many takes, keep the good ones) and export later:
+#   piece.json  - generator output (notes/tempo/pedal/metadata)
+#   piece.mid   - rendered MIDI
+#   meta.json   - name, created, starred, kind, and the original request
+# Audio/MusicXML exports are rendered on demand and cached alongside.
+
+KEY_LABELS = {k["id"]: k["name"].replace("♭", "b").replace("♯", "#") for k in KEYS}
+
+
+def _pretty_genre(genre: str) -> str:
+    return (genre or "").replace("_", " ").title() if genre and genre != "none" else ""
+
+
+def _auto_name(kind: str, request: dict, piece_meta: dict) -> str:
+    # Count completed entries only (the new entry's meta.json isn't written yet)
+    take = 1 + sum(1 for d in LIBRARY_DIR.iterdir() if (d / "meta.json").is_file())
+    if kind == "variation":
+        base = request.get("piece", "piece").replace("_", " ").title()
+        what = request.get("technique") or ("extension" if request.get("mode") == "continue" else "rework")
+        return f"Take {take} — {base} {what}"
+    key_name = piece_meta.get("key_name") or "Auto key"
+    genre = _pretty_genre(request.get("genre", ""))
+    bits = [b for b in (key_name, genre) if b]
+    return f"Take {take} — " + ", ".join(bits)
+
+
+def save_to_library(kind: str, request: dict, data: dict, midi_bytes: bytes | None) -> dict:
+    """Persist a generated piece; returns its library meta entry."""
+    piece_id = uuid.uuid4().hex[:12]
+    entry_dir = LIBRARY_DIR / piece_id
+    entry_dir.mkdir(parents=True, exist_ok=True)
+
+    piece_meta = data.get("metadata", {})
+    meta = {
+        "id": piece_id,
+        "name": _auto_name(kind, request, piece_meta),
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "starred": False,
+        "kind": kind,               # "generate" | "variation"
+        "request": request,          # original params, for "another take"
+        "num_notes": len(data.get("notes", [])),
+        "key_name": piece_meta.get("key_name"),
+        "genre": piece_meta.get("genre"),
+        "base_tempo": piece_meta.get("base_tempo"),
+        "seed": piece_meta.get("seed"),
+        "duration": request.get("duration"),
+    }
+    with open(entry_dir / "piece.json", "w") as f:
+        json.dump(data, f)
+    if midi_bytes:
+        with open(entry_dir / "piece.mid", "wb") as f:
+            f.write(midi_bytes)
+    with open(entry_dir / "meta.json", "w") as f:
+        json.dump(meta, f, indent=1)
+    return meta
+
+
+def library_entry_dir(piece_id: str) -> Path:
+    """Validated path to a library entry (404 on bad/unknown id)."""
+    if not LIBRARY_ID_RE.match(piece_id):
+        raise HTTPException(status_code=400, detail="Invalid library id")
+    entry_dir = LIBRARY_DIR / piece_id
+    if not (entry_dir / "meta.json").is_file():
+        raise HTTPException(status_code=404, detail="Piece not found")
+    return entry_dir
+
+
+def read_library_meta(entry_dir: Path) -> dict:
+    with open(entry_dir / "meta.json") as f:
+        return json.load(f)
+
+
+def slugify(name: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower()
+    return slug[:60] or "piece"
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +640,7 @@ async def index():
 
 @app.get("/api/config")
 async def get_config():
+    audio_caps = audio_render.capabilities()
     return {
         "genres": GENRES,
         "genre_weights": GENRE_WEIGHTS,
@@ -529,12 +650,18 @@ async def get_config():
         "forms": FORMS,
         "accompaniment_patterns": ACCOMP_PATTERNS,
         "pieces": PIECES,
+        "keys": KEYS,
+        "meters": METERS,
+        "exports": {
+            "midi": True,
+            "musicxml": True,
+            "wav": audio_caps["wav"],
+            "mp3": audio_caps["mp3"],
+        },
     }
 
 
-@app.post("/api/generate")
-async def generate(req: GenerateRequest):
-    # Build CLI args
+def build_generate_args(req: GenerateRequest) -> list[str]:
     args = [
         f"from_va={req.from_valence},{req.from_arousal}",
         f"to_va={req.to_valence},{req.to_arousal}",
@@ -563,11 +690,38 @@ async def generate(req: GenerateRequest):
     if req.refine_piece > 1:
         args.append(f"refine_piece={req.refine_piece}")
 
+    # Artist musical controls
+    if req.key and req.key != "auto":
+        if not re.match(r"^[a-gA-G][#b]?(_[a-z_]{1,16})?$", req.key):
+            raise HTTPException(status_code=400, detail=f"Invalid key: {req.key}")
+        args.append(f"key={req.key}")
+
+    if req.tempo is not None:
+        args.append(f"tempo={req.tempo}")
+
+    if req.meter and req.meter != "4/4":
+        if not re.match(r"^\d{1,2}/\d{1,2}$", req.meter):
+            raise HTTPException(status_code=400, detail=f"Invalid meter: {req.meter}")
+        args.append(f"meter={req.meter}")
+
+    if req.ornaments is not None:
+        args.append(f"ornaments={req.ornaments}")
+
+    if req.seed is not None:
+        args.append(f"seed={req.seed}")
+
     for c in req.disabled_constraints:
         args.append(f"disable={c}")
 
     for constraint_id, weight in req.weight_overrides.items():
         args.append(f"weight:{constraint_id}={weight}")
+
+    return args
+
+
+async def run_generation(req: GenerateRequest) -> dict:
+    """Run companion.pi for a GenerateRequest, save the take, build response."""
+    args = build_generate_args(req)
 
     # Temp output file
     tmp_id = uuid.uuid4().hex[:12]
@@ -597,13 +751,17 @@ async def generate(req: GenerateRequest):
             data = json.load(f)
 
         # Generate MIDI
+        midi_bytes = None
         try:
             json_to_midi(tmp_json, tmp_midi)
             with open(tmp_midi, "rb") as f:
-                midi_base64 = base64.b64encode(f.read()).decode("ascii")
+                midi_bytes = f.read()
+            midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
         except Exception as e:
             midi_base64 = None
             picat_output += f"\nMIDI conversion error: {e}"
+
+        library_meta = save_to_library("generate", req.model_dump(), data, midi_bytes)
 
         return {
             "notes": data.get("notes", []),
@@ -611,6 +769,7 @@ async def generate(req: GenerateRequest):
             "metadata": data.get("metadata", {}),
             "midi_base64": midi_base64,
             "picat_output": picat_output,
+            "library": library_meta,
         }
 
     except HTTPException:
@@ -623,6 +782,11 @@ async def generate(req: GenerateRequest):
                 os.unlink(p)
             except OSError:
                 pass
+
+
+@app.post("/api/generate")
+async def generate(req: GenerateRequest):
+    return await run_generation(req)
 
 
 @app.post("/api/variation")
@@ -666,13 +830,17 @@ async def variation_generate(req: VariationRequest):
         with open(tmp_json, "r") as f:
             data = json.load(f)
 
+        midi_bytes = None
         try:
             json_to_midi(tmp_json, tmp_midi)
             with open(tmp_midi, "rb") as f:
-                midi_base64 = base64.b64encode(f.read()).decode("ascii")
+                midi_bytes = f.read()
+            midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
         except Exception as e:
             midi_base64 = None
             picat_output += f"\nMIDI conversion error: {e}"
+
+        library_meta = save_to_library("variation", req.model_dump(), data, midi_bytes)
 
         return {
             "notes": data.get("notes", []),
@@ -680,6 +848,7 @@ async def variation_generate(req: VariationRequest):
             "metadata": data.get("metadata", {}),
             "midi_base64": midi_base64,
             "picat_output": picat_output,
+            "library": library_meta,
         }
 
     except HTTPException:
@@ -695,9 +864,145 @@ async def variation_generate(req: VariationRequest):
 
 
 # ---------------------------------------------------------------------------
+# Library endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/library")
+async def library_list():
+    entries = []
+    for entry_dir in LIBRARY_DIR.iterdir():
+        meta_path = entry_dir / "meta.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            with open(meta_path) as f:
+                entries.append(json.load(f))
+        except (json.JSONDecodeError, OSError):
+            continue
+    entries.sort(key=lambda m: m.get("created", ""), reverse=True)
+    return {"pieces": entries}
+
+
+@app.get("/api/library/{piece_id}")
+async def library_get(piece_id: str):
+    entry_dir = library_entry_dir(piece_id)
+    meta = read_library_meta(entry_dir)
+    with open(entry_dir / "piece.json") as f:
+        data = json.load(f)
+    midi_base64 = None
+    midi_path = entry_dir / "piece.mid"
+    if midi_path.is_file():
+        midi_base64 = base64.b64encode(midi_path.read_bytes()).decode("ascii")
+    return {
+        "meta": meta,
+        "notes": data.get("notes", []),
+        "tempo_changes": data.get("tempo_changes", []),
+        "metadata": data.get("metadata", {}),
+        "midi_base64": midi_base64,
+    }
+
+
+@app.patch("/api/library/{piece_id}")
+async def library_update(piece_id: str, req: LibraryUpdateRequest):
+    entry_dir = library_entry_dir(piece_id)
+    meta = read_library_meta(entry_dir)
+    if req.name is not None:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty")
+        meta["name"] = name
+    if req.starred is not None:
+        meta["starred"] = req.starred
+    with open(entry_dir / "meta.json", "w") as f:
+        json.dump(meta, f, indent=1)
+    return meta
+
+
+@app.delete("/api/library/{piece_id}")
+async def library_delete(piece_id: str):
+    entry_dir = library_entry_dir(piece_id)
+    for child in entry_dir.iterdir():
+        child.unlink()
+    entry_dir.rmdir()
+    return {"deleted": piece_id}
+
+
+@app.post("/api/library/{piece_id}/regenerate")
+async def library_regenerate(piece_id: str):
+    """Another take: rerun with the piece's original settings (fresh seed)."""
+    entry_dir = library_entry_dir(piece_id)
+    meta = read_library_meta(entry_dir)
+    if meta.get("kind") != "generate":
+        raise HTTPException(status_code=400,
+                            detail="Only composed pieces can be regenerated")
+    request = dict(meta.get("request", {}))
+    request["seed"] = None  # a new take should differ
+    try:
+        req = GenerateRequest(**request)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Stored request invalid: {e}")
+    return await run_generation(req)
+
+
+# ---------------------------------------------------------------------------
+# Export endpoints (MIDI / MusicXML / WAV / MP3), rendered on demand + cached
+# ---------------------------------------------------------------------------
+
+EXPORT_MEDIA_TYPES = {
+    "midi": ("piece.mid", "audio/midi", ".mid"),
+    "musicxml": ("piece.musicxml", "application/vnd.recordare.musicxml+xml", ".musicxml"),
+    "wav": ("piece.wav", "audio/wav", ".wav"),
+    "mp3": ("piece.mp3", "audio/mpeg", ".mp3"),
+}
+
+
+@app.get("/api/library/{piece_id}/export/{fmt}")
+async def library_export(piece_id: str, fmt: str):
+    if fmt not in EXPORT_MEDIA_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown format: {fmt}")
+    entry_dir = library_entry_dir(piece_id)
+    meta = read_library_meta(entry_dir)
+    filename, media_type, ext = EXPORT_MEDIA_TYPES[fmt]
+    target = entry_dir / filename
+    midi_path = entry_dir / "piece.mid"
+
+    if not target.is_file():
+        try:
+            if fmt == "midi":
+                raise HTTPException(status_code=404, detail="No MIDI for this piece")
+            elif fmt == "musicxml":
+                with open(entry_dir / "piece.json") as f:
+                    data = json.load(f)
+                target.write_text(data_to_musicxml(data))
+            elif fmt in ("wav", "mp3"):
+                caps = audio_render.capabilities()
+                if not caps.get(fmt):
+                    raise HTTPException(
+                        status_code=501,
+                        detail=f"{fmt.upper()} rendering unavailable on this machine "
+                               "(install fluidsynth + a GM soundfont"
+                               + (" + ffmpeg" if fmt == "mp3" else "") + ")")
+                if not midi_path.is_file():
+                    raise HTTPException(status_code=404, detail="No MIDI for this piece")
+                # Render in a worker thread; fluidsynth is CPU-bound
+                await asyncio.to_thread(
+                    audio_render.midi_to_audio, str(midi_path), str(target))
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Export failed: {e}")
+
+    download_name = slugify(meta.get("name", piece_id)) + ext
+    return FileResponse(str(target), media_type=media_type, filename=download_name)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    # Auto-reload restarts the worker on any .py edit, orphaning in-flight
+    # solver processes (they run in their own session) — dev only.
+    dev = "--dev" in sys.argv or os.environ.get("CMS_DEV") == "1"
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=dev)

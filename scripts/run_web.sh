@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/run_web.sh              # Start on port 8000
 #   ./scripts/run_web.sh --port 3000  # Custom port
+#   ./scripts/run_web.sh --dev        # Auto-reload on code changes (dev only)
 
 set -euo pipefail
 
@@ -12,9 +13,11 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 WEB_DIR="$PROJECT_ROOT/web"
 
 PORT=8000
+RELOAD_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --port) PORT="$2"; shift 2 ;;
+        --dev)  RELOAD_ARGS=(--reload); shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -47,5 +50,7 @@ echo "  URL: http://localhost:$PORT"
 echo "  Press Ctrl+C to stop"
 echo ""
 
+# --reload restarts the worker on any .py edit, orphaning in-flight solver
+# processes — opt in with --dev while developing.
 cd "$PROJECT_ROOT"
-"$VENV_DIR/bin/uvicorn" web.server:app --host 0.0.0.0 --port "$PORT" --reload
+"$VENV_DIR/bin/uvicorn" web.server:app --host 0.0.0.0 --port "$PORT" ${RELOAD_ARGS[@]+"${RELOAD_ARGS[@]}"}
