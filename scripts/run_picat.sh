@@ -23,6 +23,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 export PICATPATH="$PROJECT_ROOT/picat"
 
+# Python for the converter scripts: project venv if present, else system
+PYTHON="$PROJECT_ROOT/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
+
 # Parse options
 CONVERT_MIDI=false
 PLAY_MIDI=false
@@ -132,7 +136,7 @@ if [ -n "$IMPORT_MIDI" ]; then
         OUT_JSON="${OUT_JSON%.midi}.json"
     fi
     echo "Importing MIDI: $IMPORT_MIDI -> $OUT_JSON"
-    "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/midi_reader.py" "$IMPORT_MIDI" "$OUT_JSON"
+    "$PYTHON" "$PROJECT_ROOT/scripts/midi_reader.py" "$IMPORT_MIDI" "$OUT_JSON"
     exit $?
 fi
 
@@ -285,7 +289,7 @@ run_converter() {
     fi
     for json_file in "${JSON_FILES[@]}"; do
         echo "Converting $json_file..."
-        "$PROJECT_ROOT/.venv/bin/python3" "$PROJECT_ROOT/scripts/$script" "$json_file" "$@"
+        "$PYTHON" "$PROJECT_ROOT/scripts/$script" "$json_file" "$@"
     done
 }
 

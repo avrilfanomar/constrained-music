@@ -6,3 +6,7 @@
 *.json
 *.pyc
 out/
+
+# Data files the repo must ship despite the broad globs above
+!data/masterpieces.json
+!midi/fur-elise.mid
