@@ -68,6 +68,8 @@ const errorClose = document.getElementById('error-close');
 const volumeSlider = document.getElementById('volume-slider');
 const melodyMuteBtn = document.getElementById('melody-mute-btn');
 const accompMuteBtn = document.getElementById('accomp-mute-btn');
+const rerollBtn = document.getElementById('reroll-btn');
+const selectionHint = document.getElementById('selection-hint');
 const progressContainer = document.getElementById('progress-container');
 
 let config = null;
@@ -326,6 +328,31 @@ function wireEvents() {
         if (currentLibraryId) window.location.href = `/api/library/${currentLibraryId}/export/stem/accomp`;
     });
 
+    // Reroll selection
+    pianoRoll.onSelectionChange = (selection) => {
+        if (selection && currentLibraryId) {
+            rerollBtn.style.display = 'inline-block';
+            selectionHint.style.display = 'none';
+        } else {
+            rerollBtn.style.display = 'none';
+            selectionHint.style.display = currentLibraryId ? 'block' : 'none';
+        }
+    };
+
+    rerollBtn.addEventListener('click', async () => {
+        const selection = pianoRoll.getSelection();
+        if (!selection || !currentLibraryId) return;
+
+        playback.stop();
+        const body = {
+            bar_start: selection.bar_start,
+            bar_end: selection.bar_end,
+        };
+
+        await runRequest(`/api/library/${currentLibraryId}/reroll`, body, LOADING_MESSAGES, rerollBtn);
+        pianoRoll.clearSelection();
+    });
+
     // Playback callbacks
     playback.onprogress = (cur, total, beat) => {
         const pct = total > 0 ? (cur / total) * 100 : 0;
@@ -582,6 +609,7 @@ function showPiece(data, libraryMeta) {
         ? `/api/library/${currentLibraryId}/export/wav`
         : null;
     pianoRoll.setNotes(data.notes, data.tempo_changes, data.metadata);
+    pianoRoll.clearSelection();
     playback.setNotes(data.notes, data.tempo_changes, data.midi_base64, data.metadata, wavUrl);
     picatOutput.textContent = data.picat_output || '';
     timeDisplay.textContent = `0:00 / ${fmtTime(playback.totalDurationSec)}`;
@@ -590,6 +618,10 @@ function showPiece(data, libraryMeta) {
     playBtn.disabled = false;
     pauseBtn.disabled = true;
     stopBtn.disabled = true;
+
+    // Show selection hint for library pieces
+    selectionHint.style.display = currentLibraryId ? 'block' : 'none';
+    rerollBtn.style.display = 'none';
     downloadMidi.style.display = (data.midi_base64 || currentLibraryId) ? '' : 'none';
     downloadMusicXml.style.display = currentLibraryId ? '' : 'none';
     downloadWav.style.display = (currentLibraryId && exports.wav) ? '' : 'none';

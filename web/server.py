@@ -509,6 +509,11 @@ class LibraryUpdateRequest(BaseModel):
     starred: bool | None = None
 
 
+class RerollRequest(BaseModel):
+    bar_start: int = Field(ge=1)
+    bar_end: int = Field(ge=1)
+
+
 # ---------------------------------------------------------------------------
 # Piece library
 # ---------------------------------------------------------------------------
@@ -533,6 +538,11 @@ def _auto_name(kind: str, request: dict, piece_meta: dict) -> str:
         base = request.get("piece", "piece").replace("_", " ").title()
         what = request.get("technique") or ("extension" if request.get("mode") == "continue" else "rework")
         return f"Take {take} — {base} {what}"
+    if kind == "reroll":
+        key_name = piece_meta.get("key_name") or "Auto key"
+        genre = _pretty_genre(request.get("genre", ""))
+        bits = [b for b in (key_name, genre) if b]
+        return f"Take {take} — " + ", ".join(bits) + " (reroll)"
     key_name = piece_meta.get("key_name") or "Auto key"
     genre = _pretty_genre(request.get("genre", ""))
     bits = [b for b in (key_name, genre) if b]
@@ -1273,6 +1283,125 @@ async def library_regenerate(piece_id: str):
 
     asyncio.create_task(_solve_job(job, cmd, timeout, finish))
     return JSONResponse(content={"job_id": job.id}, status_code=202)
+
+
+@app.post("/api/library/{piece_id}/reroll")
+async def library_reroll(piece_id: str, req: RerollRequest):
+    """Reroll (regenerate) a bar range while keeping the rest intact."""
+    entry_dir = library_entry_dir(piece_id)
+    meta = read_library_meta(entry_dir)
+    if meta.get("kind") != "generate":
+        raise HTTPException(status_code=400,
+                            detail="Only composed pieces can be rerolled")
+
+    # Load original piece data
+    with open(entry_dir / "piece.json") as f:
+        original_data = json.load(f)
+    original_notes = original_data.get("notes", [])
+    if not original_notes:
+        raise HTTPException(status_code=400, detail="Piece has no notes")
+
+    # Validate bar range
+    max_bar = max(n["bar"] for n in original_notes)
+    if req.bar_start > req.bar_end or req.bar_end > max_bar:
+        raise HTTPException(status_code=400,
+                            detail=f"Invalid bar range: {req.bar_start}-{req.bar_end} (piece has {max_bar} bars)")
+
+    # Prepare regeneration request (same params as original, different seed)
+    request = dict(meta.get("request", {}))
+    request["seed"] = None  # fresh seed for different output
+    request["count"] = 1    # only need one take
+    try:
+        gen_req = GenerateRequest(**request)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Stored request invalid: {e}")
+
+    _gc_jobs()
+    job = _new_job("reroll")
+    try:
+        cmd, timeout, tmp_json, tmp_midi = prepare_generate(gen_req)
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+        return JSONResponse(content={"job_id": job.id}, status_code=400)
+
+    # Post-process: splice rerolled bars into original
+    def finish(picat_output: str) -> dict:
+        return finish_reroll(tmp_json, tmp_midi, picat_output, gen_req, original_data,
+                            req.bar_start, req.bar_end)
+
+    asyncio.create_task(_solve_job(job, cmd, timeout, finish))
+    return JSONResponse(content={"job_id": job.id}, status_code=202)
+
+
+def finish_reroll(tmp_json: str, tmp_midi: str, picat_output: str, req: GenerateRequest,
+                  original_data: dict, bar_start: int, bar_end: int) -> dict:
+    """Post-process reroll: splice new bars into original piece."""
+    try:
+        if not os.path.exists(tmp_json):
+            raise ValueError("No output JSON produced")
+
+        with open(tmp_json, "r") as f:
+            new_data = json.load(f)
+        new_notes = new_data.get("notes", [])
+
+        # Separate original notes into kept vs replaced
+        kept_notes = [n for n in original_data["notes"] if n["bar"] < bar_start or n["bar"] > bar_end]
+        reroll_notes = [n for n in new_notes if bar_start <= n["bar"] <= bar_end]
+
+        if not reroll_notes:
+            raise ValueError(f"Generated piece has no notes in bars {bar_start}-{bar_end}")
+
+        # Combine: kept notes + rerolled notes
+        spliced_notes = sorted(kept_notes + reroll_notes,
+                              key=lambda n: (n["bar"], n["beat"], n.get("sub", 0.0)))
+
+        # Build result data (use original tempo/metadata, just replace notes)
+        result_data = {
+            "notes": spliced_notes,
+            "tempo_changes": original_data.get("tempo_changes", []),
+            "metadata": original_data.get("metadata", {}),
+        }
+
+        # Generate MIDI
+        midi_bytes = None
+        midi_base64 = None
+        tmp_spliced_json = tmp_json.replace(".json", "_spliced.json")
+        tmp_spliced_midi = tmp_spliced_json.replace(".json", ".mid")
+        try:
+            with open(tmp_spliced_json, "w") as f:
+                json.dump(result_data, f)
+            json_to_midi(tmp_spliced_json, tmp_spliced_midi)
+            with open(tmp_spliced_midi, "rb") as f:
+                midi_bytes = f.read()
+            midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
+        except Exception as e:
+            picat_output += f"\nMIDI conversion error: {e}"
+        finally:
+            for p in [tmp_spliced_json, tmp_spliced_midi]:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+        # Save to library (no score for rerolls)
+        library_meta = save_to_library("reroll", req.model_dump(), result_data, midi_bytes, score=None)
+
+        return {
+            "notes": result_data["notes"],
+            "tempo_changes": result_data["tempo_changes"],
+            "metadata": result_data["metadata"],
+            "midi_base64": midi_base64,
+            "picat_output": picat_output,
+            "library": library_meta,
+        }
+
+    finally:
+        for p in [tmp_json, tmp_midi]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------

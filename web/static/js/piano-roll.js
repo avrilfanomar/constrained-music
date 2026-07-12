@@ -16,6 +16,17 @@ export class PianoRoll {
         this.totalBeats = 0;
         this.cursorBeat = -1;
         this._animFrame = null;
+
+        // Selection state (for reroll)
+        this.selection = null; // { bar_start, bar_end }
+        this._dragStart = null;
+        this.onSelectionChange = null; // callback(selection)
+
+        // Wire drag-select
+        this.canvas.addEventListener('mousedown', (e) => this._onMouseDown(e));
+        this.canvas.addEventListener('mousemove', (e) => this._onMouseMove(e));
+        this.canvas.addEventListener('mouseup', (e) => this._onMouseUp(e));
+        this.canvas.addEventListener('mouseleave', () => this._cancelDrag());
     }
 
     setNotes(notes, tempoChanges, metadata) {
@@ -260,5 +271,69 @@ export class PianoRoll {
             ctx.closePath();
             ctx.fill();
         }
+
+        // Draw selection overlay (for reroll)
+        if (this.selection) {
+            const { bar_start, bar_end } = this.selection;
+            const qpb = quarterBeatsPerBar(this.ts);
+            const startBeat = (bar_start - 1) * qpb;
+            const endBeat = bar_end * qpb;
+            const x1 = margin.left + (startBeat / this.totalBeats) * plotW;
+            const x2 = margin.left + (endBeat / this.totalBeats) * plotW;
+            ctx.fillStyle = 'rgba(102, 187, 106, 0.15)';
+            ctx.fillRect(x1, margin.top, x2 - x1, plotH);
+            ctx.strokeStyle = 'rgba(102, 187, 106, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x1, margin.top, x2 - x1, plotH);
+        }
+    }
+
+    _onMouseDown(e) {
+        if (this.notes.length === 0) return;
+        const rect = this.canvas.getBoundingClientRect();
+        this._dragStart = e.clientX - rect.left;
+        e.preventDefault();
+    }
+
+    _onMouseMove(e) {
+        if (!this._dragStart) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        this._updateSelection(this._dragStart, x);
+    }
+
+    _onMouseUp(e) {
+        if (!this._dragStart) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        this._updateSelection(this._dragStart, x);
+        this._dragStart = null;
+    }
+
+    _cancelDrag() {
+        this._dragStart = null;
+    }
+
+    _updateSelection(x1, x2) {
+        const margin = { left: 36 };
+        const plotW = this.canvas.clientWidth - margin.left - 12;
+        const beat1 = ((x1 - margin.left) / plotW) * this.totalBeats;
+        const beat2 = ((x2 - margin.left) / plotW) * this.totalBeats;
+        const qpb = quarterBeatsPerBar(this.ts);
+        const bar1 = Math.max(1, Math.floor(Math.min(beat1, beat2) / qpb) + 1);
+        const bar2 = Math.max(bar1, Math.floor(Math.max(beat1, beat2) / qpb) + 1);
+        this.selection = { bar_start: bar1, bar_end: bar2 };
+        this.draw();
+        if (this.onSelectionChange) this.onSelectionChange(this.selection);
+    }
+
+    clearSelection() {
+        this.selection = null;
+        this.draw();
+        if (this.onSelectionChange) this.onSelectionChange(null);
+    }
+
+    getSelection() {
+        return this.selection;
     }
 }

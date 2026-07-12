@@ -794,6 +794,7 @@ body::before {
 }
 
 .piano-roll-container {
+    position: relative;
     width: 100%;
     overflow-x: auto;
     margin-bottom: 16px;
@@ -992,6 +993,30 @@ body::before {
 .btn-download {
     color: var(--gold);
     font-weight: 600;
+}
+
+.btn-reroll {
+    margin-left: 12px;
+    background: rgba(102, 187, 106, 0.1);
+    border-color: rgba(102, 187, 106, 0.3);
+    color: #66bb6a;
+}
+
+.btn-reroll:hover {
+    background: rgba(102, 187, 106, 0.2);
+    border-color: #66bb6a;
+}
+
+.selection-hint {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    background: rgba(0, 0, 0, 0.6);
+    padding: 4px 10px;
+    border-radius: 4px;
+    pointer-events: none;
 }
 
 /* --- Generation Log --- */

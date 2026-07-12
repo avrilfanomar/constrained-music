@@ -283,9 +283,17 @@
              OUTPUT (shared between tabs)
              ================================================================ -->
         <section class="panel piano-roll-section" id="output-section" style="display:none;">
-            <h2 class="panel-title">Output <span id="output-piece-name" class="output-piece-name"></span></h2>
+            <h2 class="panel-title">
+                Output <span id="output-piece-name" class="output-piece-name"></span>
+                <button id="reroll-btn" class="btn-small btn-reroll" style="display:none;" title="Regenerate selected bars">
+                    &#x21bb; Reroll Selection
+                </button>
+            </h2>
             <div class="piano-roll-container">
                 <canvas id="piano-roll" width="900" height="200"></canvas>
+                <div id="selection-hint" class="selection-hint" style="display:none;">
+                    Drag to select bars &rarr; click Reroll to regenerate that range
+                </div>
             </div>
             <div class="transport-bar">
                 <button id="play-btn" class="btn-transport" title="Play">&#9654;</button>
