@@ -33,7 +33,7 @@ WORKDIR /app
 
 # Copy Python requirements and install
 COPY pyproject.toml ./
-RUN pip3 install --no-cache-dir .
+RUN pip3 install --no-cache-dir fastapi>=0.104.0 uvicorn>=0.24.0 midiutil>=1.2.1 mido>=1.2.10
 
 # Copy application files
 COPY picat/ ./picat/
