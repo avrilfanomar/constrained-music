@@ -350,7 +350,7 @@ function wireEvents() {
         };
 
         await runRequest(`/api/library/${currentLibraryId}/reroll`, body, LOADING_MESSAGES, rerollBtn);
-        pianoRoll.clearSelection();
+        // clearSelection() is already called inside showPiece() (via runRequest → pollJob → showPiece)
     });
 
     // Playback callbacks
@@ -609,7 +609,9 @@ function showPiece(data, libraryMeta) {
         ? `/api/library/${currentLibraryId}/export/wav`
         : null;
     pianoRoll.setNotes(data.notes, data.tempo_changes, data.metadata);
-    pianoRoll.clearSelection();
+    if (typeof pianoRoll.clearSelection === 'function') {
+        pianoRoll.clearSelection();
+    }
     playback.setNotes(data.notes, data.tempo_changes, data.midi_base64, data.metadata, wavUrl);
     picatOutput.textContent = data.picat_output || '';
     timeDisplay.textContent = `0:00 / ${fmtTime(playback.totalDurationSec)}`;
