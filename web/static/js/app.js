@@ -58,6 +58,10 @@ const ornamentsValue = document.getElementById('ornaments-value');
 const seedInput = document.getElementById('seed-input');
 const seedDice = document.getElementById('seed-dice');
 const outputPieceName = document.getElementById('output-piece-name');
+const errorPanel = document.getElementById('error-panel');
+const errorMessage = document.getElementById('error-message');
+const errorOutput = document.getElementById('error-output');
+const errorClose = document.getElementById('error-close');
 
 let config = null;
 let currentIntensity = 'standard';
@@ -82,6 +86,19 @@ const VARY_LOADING_MESSAGES = [
     'Fitting constraints...',
     'Almost there...',
 ];
+
+// --- Error Panel ---
+function showErrorPanel(message, outputTail = []) {
+    errorMessage.textContent = message;
+    errorOutput.textContent = outputTail.length > 0
+        ? outputTail.join('\n')
+        : '(No Picat output available)';
+    errorPanel.style.display = 'block';
+}
+
+function hideErrorPanel() {
+    errorPanel.style.display = 'none';
+}
 
 // --- Init ---
 async function init() {
@@ -226,6 +243,9 @@ function wireEvents() {
     if (cancelBtn) {
         cancelBtn.addEventListener('click', cancelCurrentJob);
     }
+
+    // Error panel close
+    errorClose.addEventListener('click', hideErrorPanel);
 
     // Vary
     varyBtn.addEventListener('click', doVary);
@@ -408,9 +428,13 @@ async function runRequest(endpoint, body, messages, triggerBtn) {
         await pollJob(jobId);
 
     } catch (e) {
-        loadingText.textContent = 'Error: ' + e.message;
-        loadingText.style.color = '#ff4444';
-        await new Promise(r => setTimeout(r, 3000));
+        // Check if it's an error with output_tail from pollJob
+        if (e && e.error) {
+            showErrorPanel(e.error, e.output_tail);
+        } else {
+            // Generic error (network, etc.)
+            showErrorPanel(e.message || String(e), []);
+        }
     } finally {
         currentJobId = null;
         if (pollInterval) {
@@ -436,7 +460,13 @@ async function pollJob(jobId) {
 
                 const job = await resp.json();
                 const progress = Math.round(job.progress * 100);
-                loadingText.textContent = `${progress}% — ${job.stage}`;
+
+                // Show queued status
+                if (job.status === 'queued') {
+                    loadingText.textContent = 'Queued behind current render…';
+                } else {
+                    loadingText.textContent = `${progress}% — ${job.stage}`;
+                }
 
                 if (job.status === 'done') {
                     if (pollInterval) clearInterval(pollInterval);
@@ -447,7 +477,8 @@ async function pollJob(jobId) {
                 } else if (job.status === 'error') {
                     if (pollInterval) clearInterval(pollInterval);
                     pollInterval = null;
-                    reject(new Error(job.error || 'Generation failed'));
+                    // Show persistent error panel with output_tail
+                    reject({ error: job.error || 'Generation failed', output_tail: job.output_tail || [] });
                 } else if (job.status === 'cancelled') {
                     if (pollInterval) clearInterval(pollInterval);
                     pollInterval = null;
@@ -542,9 +573,13 @@ async function regenerateLibraryPiece(id) {
         await pollJob(jobId);
 
     } catch (e) {
-        loadingText.textContent = 'Error: ' + e.message;
-        loadingText.style.color = '#ff4444';
-        await new Promise(r => setTimeout(r, 3000));
+        // Check if it's an error with output_tail from pollJob
+        if (e && e.error) {
+            showErrorPanel(e.error, e.output_tail);
+        } else {
+            // Generic error (network, etc.)
+            showErrorPanel(e.message || String(e), []);
+        }
     } finally {
         currentJobId = null;
         if (pollInterval) {
@@ -553,7 +588,6 @@ async function regenerateLibraryPiece(id) {
         }
         if (cancelBtn) cancelBtn.style.display = 'none';
         loadingOverlay.style.display = 'none';
-        loadingText.style.color = '';
         fakeBtn.disabled = false;
     }
 }

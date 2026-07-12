@@ -309,6 +309,20 @@
                 <button id="cancel-btn" class="cancel-btn" style="display:none;">Cancel</button>
             </div>
         </div>
+
+        <!-- Error Panel -->
+        <div id="error-panel" class="error-panel" style="display:none;">
+            <div class="error-header">
+                <span class="error-icon">⚠</span>
+                <h3 class="error-title">Generation Error</h3>
+                <button id="error-close" class="error-close" title="Close">&times;</button>
+            </div>
+            <p id="error-message" class="error-message"></p>
+            <details class="error-details">
+                <summary>Show Picat output</summary>
+                <pre id="error-output" class="error-output"></pre>
+            </details>
+        </div>
     </main>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>

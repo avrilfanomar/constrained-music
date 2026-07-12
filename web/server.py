@@ -654,9 +654,9 @@ class SolveError(Exception):
 class Job:
     id: str
     kind: str                               # generate | variation | regenerate
-    status: str = "running"                 # running | done | error | cancelled
+    status: str = "queued"                  # queued | running | done | error | cancelled
     progress: float = 0.0                   # 0..1
-    stage: str = "Starting…"
+    stage: str = "Queued…"
     result: dict | None = None
     error: str | None = None
     output_tail: list = field(default_factory=list)
@@ -802,6 +802,9 @@ async def _solve_job(job: Job, cmd: list[str], timeout_sec: float, finish) -> No
             job.status = "cancelled"
             job.stage = "Cancelled"
             return
+        # Transition from queued to running when we acquire the semaphore
+        job.status = "running"
+        job.stage = "Starting…"
         try:
             output = await run_picat_streaming(job, cmd, timeout_sec)
         except SolveCancelled:

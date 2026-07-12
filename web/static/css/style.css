@@ -1073,6 +1073,138 @@ body::before {
     cursor: not-allowed;
 }
 
+/* --- Error Panel --- */
+.error-panel {
+    position: fixed;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 600px;
+    width: calc(100% - 40px);
+    background: rgba(40, 20, 20, 0.95);
+    border: 1px solid rgba(255, 68, 68, 0.3);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    z-index: 1001;
+    box-shadow: var(--shadow-lifted), 0 0 30px rgba(255, 68, 68, 0.15);
+    backdrop-filter: blur(12px);
+    animation: error-slide-in 0.3s ease-out;
+}
+
+@keyframes error-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.error-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.error-icon {
+    font-size: 1.5rem;
+    color: #ff6b6b;
+}
+
+.error-title {
+    font-family: var(--font-body);
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #ff8888;
+    flex: 1;
+    margin: 0;
+}
+
+.error-close {
+    background: transparent;
+    border: none;
+    color: var(--text-soft);
+    font-size: 1.8rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.error-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-bright);
+}
+
+.error-message {
+    font-family: var(--font-ui);
+    font-size: 0.95rem;
+    color: var(--text);
+    line-height: 1.5;
+    margin-bottom: 12px;
+}
+
+.error-details {
+    margin-top: 12px;
+}
+
+.error-details summary {
+    font-family: var(--font-ui);
+    font-size: 0.9rem;
+    color: var(--text-soft);
+    cursor: pointer;
+    padding: 8px 0;
+    user-select: none;
+    transition: color 0.2s ease;
+}
+
+.error-details summary:hover {
+    color: var(--text);
+}
+
+.error-output {
+    font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text-soft);
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-top: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.error-output::-webkit-scrollbar {
+    width: 8px;
+}
+
+.error-output::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.error-output::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}
+
+.error-output::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
 /* --- Mood Coordinate Badges --- */
 .mood-coordinates span {
     background: var(--bg-surface);
