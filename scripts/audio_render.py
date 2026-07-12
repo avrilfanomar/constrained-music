@@ -45,6 +45,12 @@ def find_soundfont():
 
 def capabilities():
     """What audio formats can this machine render?"""
+    # Kill-switch: force the browser onto the Tone.js sampler fallback and
+    # let tests exercise the "no server audio" path on a machine that has
+    # fluidsynth installed.
+    if os.environ.get("CMS_NO_AUDIO"):
+        return {"wav": False, "mp3": False,
+                "fluidsynth": None, "ffmpeg": None, "soundfont": None}
     fluidsynth = shutil.which("fluidsynth")
     ffmpeg = shutil.which("ffmpeg")
     soundfont = find_soundfont()
