@@ -2,27 +2,33 @@
  * piano-roll.js - Canvas note visualization with velocity-based colors and playback cursor
  */
 
+import {
+    timeSig, quartersPerBeat, quarterBeatsPerBar, noteStartBeat, noteDurBeats,
+} from './timeline.js';
+
 export class PianoRoll {
     constructor(canvasId) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
         this.notes = [];
         this.tempoChanges = [];
+        this.ts = { beats: 4, beat_unit: 4 };
         this.totalBeats = 0;
         this.cursorBeat = -1;
         this._animFrame = null;
     }
 
-    setNotes(notes, tempoChanges) {
+    setNotes(notes, tempoChanges, metadata) {
         this.notes = notes;
         this.tempoChanges = tempoChanges;
+        this.ts = timeSig(metadata);
         if (notes.length === 0) return;
 
-        // Calculate total beats
+        // Calculate total beats (quarter-beats)
         let maxBeat = 0;
         for (const n of notes) {
-            const startBeat = (n.bar - 1) * 4 + (n.beat - 1) + (n.sub || 0);
-            const durBeats = (n.dur_num * 4) / n.dur_den;
+            const startBeat = noteStartBeat(n, this.ts);
+            const durBeats = noteDurBeats(n);
             maxBeat = Math.max(maxBeat, startBeat + durBeats);
         }
         this.totalBeats = maxBeat;
@@ -124,19 +130,21 @@ export class PianoRoll {
             }
         }
 
-        // Vertical bar lines
-        const totalBars = Math.ceil(this.totalBeats / 4);
+        // Vertical bar lines (meter-aware: bars span quarterBeatsPerBar quarters)
+        const qpBar = quarterBeatsPerBar(this.ts);
+        const qpBeat = quartersPerBeat(this.ts);
+        const totalBars = Math.ceil(this.totalBeats / qpBar);
         for (let bar = 0; bar <= totalBars; bar++) {
-            const x = margin.left + bar * 4 * beatW;
+            const x = margin.left + bar * qpBar * beatW;
             const isMajor = bar % 4 === 0;
             ctx.strokeStyle = isMajor ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.02)';
             ctx.lineWidth = isMajor ? 0.8 : 0.4;
             ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, h - margin.bottom); ctx.stroke();
 
-            // Beat subdivisions (quarter note lines)
+            // Beat subdivisions (one line per meter beat)
             if (bar < totalBars) {
-                for (let beat = 1; beat < 4; beat++) {
-                    const bx = x + beat * beatW;
+                for (let beat = 1; beat < this.ts.beats; beat++) {
+                    const bx = x + beat * qpBeat * beatW;
                     ctx.strokeStyle = 'rgba(255, 255, 255, 0.015)';
                     ctx.lineWidth = 0.3;
                     ctx.beginPath(); ctx.moveTo(bx, margin.top); ctx.lineTo(bx, h - margin.bottom); ctx.stroke();
@@ -150,8 +158,8 @@ export class PianoRoll {
         // Pass 1: Glow layer
         ctx.save();
         for (const n of this.notes) {
-            const startBeat = (n.bar - 1) * 4 + (n.beat - 1) + (n.sub || 0);
-            const durBeats = (n.dur_num * 4) / n.dur_den;
+            const startBeat = noteStartBeat(n, this.ts);
+            const durBeats = noteDurBeats(n);
             const voice = n.voice || 1;
             const vel = (n.velocity || 80) / 127;
 
@@ -176,8 +184,8 @@ export class PianoRoll {
 
         // Pass 2: Note bodies
         for (const n of this.notes) {
-            const startBeat = (n.bar - 1) * 4 + (n.beat - 1) + (n.sub || 0);
-            const durBeats = (n.dur_num * 4) / n.dur_den;
+            const startBeat = noteStartBeat(n, this.ts);
+            const durBeats = noteDurBeats(n);
             const voice = n.voice || 1;
             const vel = (n.velocity || 80) / 127;
 

@@ -1,6 +1,17 @@
 /**
- * playback.js - Tone.js sampler + transport controls + MIDI download
+ * playback.js - Two playback engines behind one interface:
+ *   - 'server'  : plays the exact fluidsynth-rendered WAV the export produces
+ *                 (preview == export, works offline, correct for any meter)
+ *   - 'sampler' : Tone.js Salamander piano, CDN-streamed — fallback when the
+ *                 machine can't render server audio (no fluidsynth/soundfont)
+ * app.js picks the engine by passing a wavUrl (server) or null (sampler).
  */
+
+import {
+    timeSig, buildTempoMap, beatToSec, secToBeat, noteStartBeat, noteDurBeats,
+} from './timeline.js';
+
+const ACCOMP_VOICE = 10;
 
 export class Playback {
     constructor() {
@@ -8,15 +19,25 @@ export class Playback {
         this.samplerReady = false;
         this.notes = [];
         this.tempoChanges = [];
+        this.ts = { beats: 4, beat_unit: 4 };
         this.totalDurationSec = 0;
         this.playing = false;
         this.midiBase64 = null;
         this._scheduledEvents = [];
+        this._tempoMap = [{ beat: 0, bpm: 120 }];
         this._rafId = null;
         this._part = null; // Tone.Part for schedulable/cancellable playback
 
-        this.onprogress = null; // (currentSec, totalSec, currentBeat) => {}
+        // Server-audio engine
+        this.engine = 'sampler';       // 'server' | 'sampler'
+        this.wavUrl = null;
+        this._audio = null;            // HTMLAudioElement, created lazily
+        this._audioSrc = null;         // currently-loaded src
+        this.buffering = false;
+
+        this.onprogress = null;    // (currentSec, totalSec, currentBeat) => {}
         this.onstatechange = null; // (playing) => {}
+        this.onbuffering = null;   // (isBuffering) => {}  (server engine only)
     }
 
     async init() {
@@ -39,54 +60,36 @@ export class Playback {
         }).toDestination();
     }
 
-    setNotes(notes, tempoChanges, midiBase64) {
+    setNotes(notes, tempoChanges, midiBase64, metadata, wavUrl) {
+        // Loading a new piece: silence whatever the previous one left running.
+        this._resetEngines();
         this.notes = notes;
         this.tempoChanges = tempoChanges;
         this.midiBase64 = midiBase64;
+        this.ts = timeSig(metadata);
+        this.wavUrl = wavUrl || null;
+        this.engine = this.wavUrl ? 'server' : 'sampler';
         this._buildTimeline();
     }
 
     /** Build absolute time positions for each note using the tempo map */
     _buildTimeline() {
+        this._tempoMap = buildTempoMap(this.tempoChanges, this.ts);
         if (this.notes.length === 0) {
             this.totalDurationSec = 0;
             this._scheduledEvents = [];
             return;
         }
 
-        // Build tempo map: sorted list of { beat, bpm }
-        const tempoMap = (this.tempoChanges || [])
-            .map(tc => ({ beat: (tc.bar - 1) * 4, bpm: tc.bpm }))
-            .sort((a, b) => a.beat - b.beat);
-
-        if (tempoMap.length === 0) tempoMap.push({ beat: 0, bpm: 120 });
-
-        // Convert beat position to absolute seconds
-        const beatToSec = (targetBeat) => {
-            let sec = 0;
-            let prevBeat = 0;
-            let bpm = tempoMap[0].bpm;
-            for (const tc of tempoMap) {
-                if (tc.beat >= targetBeat) break;
-                if (tc.beat > prevBeat) {
-                    sec += (tc.beat - prevBeat) * (60 / bpm);
-                    prevBeat = tc.beat;
-                }
-                bpm = tc.bpm;
-            }
-            sec += (targetBeat - prevBeat) * (60 / bpm);
-            return sec;
-        };
-
-        const ACCOMP_VOICE = 10;
+        const tempoMap = this._tempoMap;
         this._scheduledEvents = this.notes.map(n => {
-            const startBeat = (n.bar - 1) * 4 + (n.beat - 1) + (n.sub || 0);
-            const durBeats = (n.dur_num * 4) / n.dur_den;
+            const startBeat = noteStartBeat(n, this.ts);
+            const durBeats = noteDurBeats(n);
             const voice = n.voice || 1;
             return {
-                time: beatToSec(startBeat),
+                time: beatToSec(tempoMap, startBeat),
                 beat: startBeat,
-                duration: beatToSec(startBeat + durBeats) - beatToSec(startBeat),
+                duration: beatToSec(tempoMap, startBeat + durBeats) - beatToSec(tempoMap, startBeat),
                 pitch: n.pitch,
                 velocity: (n.velocity || 80) / 127,
                 gain: voice >= ACCOMP_VOICE ? 0.55 : 1.0,
@@ -107,11 +110,98 @@ export class Playback {
         return names[midi % 12] + octave;
     }
 
+    // --- Public transport ---------------------------------------------------
+
     async play() {
         if (this.playing) return;
+        if (this.engine === 'server') return this._playServer();
+        return this._playSampler();
+    }
+
+    pause() {
+        if (!this.playing) return;
+        this.playing = false;
+        cancelAnimationFrame(this._rafId);
+        if (this.engine === 'server') {
+            this._audio?.pause();
+        } else {
+            Tone.Transport.pause();
+            this.sampler?.releaseAll();
+        }
+        if (this.onstatechange) this.onstatechange(false);
+    }
+
+    stop() {
+        const wasPlaying = this.playing;
+        this.playing = false;
+        cancelAnimationFrame(this._rafId);
+        this._setBuffering(false);
+        if (this._audio) {
+            this._audio.pause();
+            try { this._audio.currentTime = 0; } catch (e) { /* not seekable yet */ }
+        }
+        if (this._part || wasPlaying) {
+            Tone.Transport.stop();
+            Tone.Transport.cancel();
+            this._disposePart();
+            this.sampler?.releaseAll();
+            Tone.Transport.position = 0;
+        }
+        if (this.onprogress) this.onprogress(0, this.totalDurationSec, -1);
+        if (this.onstatechange) this.onstatechange(false);
+    }
+
+    // --- Server (WAV) engine ------------------------------------------------
+
+    async _playServer() {
+        if (!this._audio) {
+            this._audio = new Audio();
+            this._audio.preload = 'auto';
+            this._audio.addEventListener('waiting', () => this._setBuffering(true));
+            this._audio.addEventListener('playing', () => this._setBuffering(false));
+            this._audio.addEventListener('ended', () => this.stop());
+        }
+        // Lazily point at the render endpoint; first request triggers the
+        // server-side fluidsynth render, so show a buffering state.
+        if (this._audioSrc !== this.wavUrl) {
+            this._audio.src = this.wavUrl;
+            this._audioSrc = this.wavUrl;
+        }
+        this.playing = true;
+        this._setBuffering(true);
+        if (this.onstatechange) this.onstatechange(true);
+        try {
+            await this._audio.play();
+        } catch (e) {
+            // Autoplay blocked or render failed — surface as stopped.
+            this.playing = false;
+            this._setBuffering(false);
+            if (this.onstatechange) this.onstatechange(false);
+            return;
+        }
+        this._trackProgressServer();
+    }
+
+    _trackProgressServer() {
+        if (!this.playing || this.engine !== 'server') return;
+        const sec = this._audio.currentTime;
+        const total = this._audio.duration || this.totalDurationSec;
+        const beat = secToBeat(this._tempoMap, sec);
+        if (this.onprogress) this.onprogress(sec, total, beat);
+        this._rafId = requestAnimationFrame(() => this._trackProgressServer());
+    }
+
+    _setBuffering(on) {
+        if (this.buffering === on) return;
+        this.buffering = on;
+        if (this.onbuffering) this.onbuffering(on);
+    }
+
+    // --- Sampler (Tone.js) engine ------------------------------------------
+
+    async _playSampler() {
         if (!this.samplerReady) {
             await this.init();
-            // Wait for sampler to load
             await new Promise(resolve => {
                 const check = () => {
                     if (this.samplerReady) resolve();
@@ -125,10 +215,8 @@ export class Playback {
         this.playing = true;
         if (this.onstatechange) this.onstatechange(true);
 
-        // Dispose previous Part if any
         this._disposePart();
 
-        // Build Tone.Part events — Transport-scheduled so they can be cancelled
         const partEvents = this._scheduledEvents.map(evt => ({
             time: evt.time,
             note: this._midiToNoteName(evt.pitch),
@@ -142,28 +230,24 @@ export class Playback {
         }, partEvents);
         this._part.start(0);
 
-        // Start transport from current position (handles resume after pause)
         Tone.Transport.start();
-
-        // Progress loop
-        this._trackProgress();
+        this._trackProgressSampler();
     }
 
-    _trackProgress() {
-        if (!this.playing) return;
+    _trackProgressSampler() {
+        if (!this.playing || this.engine !== 'sampler') return;
         const elapsed = Tone.Transport.seconds;
         if (elapsed >= this.totalDurationSec) {
             this.stop();
             return;
         }
-        // Find current beat for piano roll cursor
         let currentBeat = 0;
         for (const evt of this._scheduledEvents) {
             if (evt.time <= elapsed) currentBeat = evt.beat;
             else break;
         }
         if (this.onprogress) this.onprogress(elapsed, this.totalDurationSec, currentBeat);
-        this._rafId = requestAnimationFrame(() => this._trackProgress());
+        this._rafId = requestAnimationFrame(() => this._trackProgressSampler());
     }
 
     _disposePart() {
@@ -174,27 +258,24 @@ export class Playback {
         }
     }
 
-    pause() {
-        if (!this.playing) return;
+    /** Halt and reset BOTH engines so a piece switch never double-plays. */
+    _resetEngines() {
         this.playing = false;
-        Tone.Transport.pause();
-        this.sampler.releaseAll();
         cancelAnimationFrame(this._rafId);
-        if (this.onstatechange) this.onstatechange(false);
-    }
-
-    stop() {
-        this.playing = false;
-        // Stop transport and cancel all scheduled events
-        Tone.Transport.stop();
-        Tone.Transport.cancel();
+        this._setBuffering(false);
+        if (this._audio) {
+            this._audio.pause();
+            this._audio.removeAttribute('src');
+            this._audio.load();
+            this._audioSrc = null;
+        }
         this._disposePart();
-        this.sampler?.releaseAll();
-        // Reset transport position to beginning
-        Tone.Transport.position = 0;
-        cancelAnimationFrame(this._rafId);
-        if (this.onprogress) this.onprogress(0, this.totalDurationSec, -1);
-        if (this.onstatechange) this.onstatechange(false);
+        if (this.sampler) {
+            Tone.Transport.stop();
+            Tone.Transport.cancel();
+            Tone.Transport.position = 0;
+            this.sampler.releaseAll();
+        }
     }
 
     downloadMidi() {
