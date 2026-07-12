@@ -17,11 +17,16 @@ Constraint-based music generation system using Picat. Generates melodies using c
 ./scripts/run_picat.sh picat/companion.pi demo
 ./scripts/run_picat.sh picat/companion.pi from=sad_depressed to=energized duration=300
 ./scripts/run_picat.sh picat/companion.pi genre=classical_period randomness=0.3 rhythm=on meter=3/4
+./scripts/run_picat.sh picat/companion.pi demo genre=baroque          # Harpsichord + cello
+./scripts/run_picat.sh picat/companion.pi demo instrument=73 accomp_instrument=48  # Flute + strings
 
-# MIDI output
+# MIDI & Audio output
 ./scripts/run_picat.sh --midi picat/companion.pi demo       # Creates demo.mid
 ./scripts/run_picat.sh --play picat/companion.pi demo       # Creates and plays
 ./scripts/run_picat.sh --import song.mid                    # Creates song.json + song.dat
+python3 scripts/midi_writer.py session.json session.mid     # JSON → MIDI (auto-called by --midi)
+python3 scripts/audio_render.py session.mid session.wav     # MIDI → WAV (FluidSynth + reverb)
+python3 scripts/audio_render.py session.mid session.mp3     # MIDI → MP3 (normalized)
 
 # Variations
 ./scripts/run_picat.sh picat/variation.pi continue piece=mozart_k545_theme split=50
@@ -191,6 +196,30 @@ CLI default `randomness=0.2`; any randomness ≥0.05 turns on `rand_val` labelin
 ### Piano Accompaniment (`accomp=pattern`)
 Patterns: `alberti` (classical), `arpeggiated` (baroque/romantic), `stride` (jazz), `block` (folk/sacred), `none`. Multi-track MIDI: voices ≤9 = Track 0 (melody), voice ≥10 = Track 1 (accompaniment).
 Voice leading is stateful: `accompaniment.get_chord_voicing` picks the close-position inversion minimizing movement from the previous bar's voicing (common tones stay put), tracked in the global map and reset by `reset_voice_leading` at each `generate_accompaniment` call. Voicings are returned ASCENDING and renderers address them by register (Alberti = low-high-mid-high of whatever inversion voice leading chose), not by chord function.
+
+### Per-Genre Instrumentation (`instrument=`, `accomp_instrument=`)
+Each genre has default GM (General MIDI) instrument assignments for melody and accompaniment tracks, making genres sound distinct:
+- `baroque` → harpsichord (6) + cello (42)
+- `traditional_jazz` → piano (0) + acoustic bass (32)
+- `folk_traditional` → nylon guitar (24)
+- `sacred_chant` → church organ (19)
+- `blues` → honky-tonk piano (3)
+- `modal` → flute (73) + strings (48)
+- `children_songs` → music box (10) + piano (0)
+- `minimalist` → electric piano (4)
+- `contemporary` → bright piano (1)
+- `galant` → harpsichord (6)
+- Classical genres (classical_period, high_classical, sturm_und_drang, romantic, romantic_piano) → piano (0)
+
+CLI overrides: `instrument=N` (melody, 0-127) and `accomp_instrument=N` (accompaniment, 0-127). Assignments flow through `genre_profiles.pi` → `build_export_metadata` → JSON metadata → `midi_writer.py` `addProgramChange`. Multi-track MIDI: voices ≤9 → Track 0 (melody instrument), voices ≥10 → Track 1 (accompaniment instrument).
+
+### Audio Rendering (WAV/MP3)
+`scripts/audio_render.py` renders MIDI to audio via **FluidSynth** (WAV) + **ffmpeg** (MP3). Professional-quality output with reverb and normalization:
+- **FluidSynth reverb** (medium room): `synth.reverb.room-size=0.6`, `damp=0.5`, `width=5.0`, `level=0.3` — studio sound, not raw synthesis.
+- **WAV**: 44.1kHz, peak-normalized via ffmpeg `loudnorm` filter (EBU R128: -16 LUFS, -1.0 dBTP).
+- **MP3**: VBR ~190kbps (`-qscale:a 2`), loudness-normalized (EBU R128: -16 LUFS, -1.5 dBTP, LRA 11) — broadcast-ready.
+- Soundfont resolution: `$CMS_SOUNDFONT` env var, then `/usr/share/sounds/sf2/FluidR3_GM.sf2` (preferred), other common locations. Kill-switch: `CMS_NO_AUDIO=1` disables server audio (forces web UI to Tone.js sampler).
+- Dependencies: `fluidsynth`, `ffmpeg`, a GM soundfont. `python audio_render.py --check` reports capabilities.
 
 ### Pedal Markings (CC64)
 Auto-applied: `midi_export.generate_pedal_events()` creates pedal-down-per-bar events. Written as CC64 by `midi_writer.py`.
