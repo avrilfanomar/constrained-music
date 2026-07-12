@@ -62,21 +62,21 @@ jobs:
         python3 scripts/evaluate.py smoke_test.json --json > eval_result.json
 
         # Check that evaluation produced valid output
-        python3 -c "
-import json
-import sys
-with open('eval_result.json') as f:
-    data = json.load(f)
-if not isinstance(data, list) or len(data) == 0:
-    print('Invalid evaluation output')
-    sys.exit(1)
-result = data[0]
-distance = result.get('distance')
-if distance is None or distance < 0:
-    print(f'Invalid distance score: {distance}')
-    sys.exit(1)
-print(f'✓ Smoke test passed - distance: {distance:.2f}')
-"
+        python3 << 'PYEOF'
+        import json
+        import sys
+        with open('eval_result.json') as f:
+            data = json.load(f)
+        if not isinstance(data, list) or len(data) == 0:
+            print('Invalid evaluation output')
+            sys.exit(1)
+        result = data[0]
+        distance = result.get('distance')
+        if distance is None or distance < 0:
+            print(f'Invalid distance score: {distance}')
+            sys.exit(1)
+        print(f'✓ Smoke test passed - distance: {distance:.2f}')
+        PYEOF
 
         # Render to WAV (check audio pipeline)
         python3 scripts/audio_render.py smoke_test.mid smoke_test.wav
