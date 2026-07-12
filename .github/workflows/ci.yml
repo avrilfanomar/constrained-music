@@ -111,6 +111,7 @@ jobs:
       with:
         context: .
         push: false
+        load: true
         tags: constrained-music:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
