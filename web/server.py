@@ -1276,6 +1276,75 @@ async def library_export(piece_id: str, fmt: str):
     return FileResponse(str(target), media_type=media_type, filename=download_name)
 
 
+@app.get("/api/library/{piece_id}/export/stem/{track}")
+async def export_stem(piece_id: str, track: str):
+    """Export melody or accompaniment stem as WAV. Track must be 'melody' or 'accomp'."""
+    if not LIBRARY_ID_RE.match(piece_id):
+        raise HTTPException(status_code=400, detail="Invalid piece ID")
+    if track not in ("melody", "accomp"):
+        raise HTTPException(status_code=400, detail="Track must be 'melody' or 'accomp'")
+
+    piece_dir = LIBRARY_DIR / piece_id
+    meta_path = piece_dir / "meta.json"
+    json_path = piece_dir / "session.json"
+
+    if not meta_path.is_file() or not json_path.is_file():
+        raise HTTPException(status_code=404, detail="Piece not found")
+
+    caps = audio_render.capabilities()
+    if not caps["wav"]:
+        raise HTTPException(status_code=503,
+                            detail="Server cannot render audio (missing fluidsynth/soundfont)")
+
+    with open(meta_path, "r") as f:
+        meta = json.load(f)
+    with open(json_path, "r") as f:
+        data = json.load(f)
+
+    # Filter notes by track
+    ACCOMP_VOICE = 10
+    filtered_notes = [n for n in data["notes"]
+                      if (n.get("voice", 1) < ACCOMP_VOICE if track == "melody"
+                          else n.get("voice", 1) >= ACCOMP_VOICE)]
+
+    if len(filtered_notes) == 0:
+        raise HTTPException(status_code=404, detail=f"No {track} notes in this piece")
+
+    # Create filtered data
+    filtered_data = {
+        "notes": filtered_notes,
+        "tempo_changes": data["tempo_changes"],
+        "metadata": data.get("metadata", {}),
+        "pedal_events": data.get("pedal_events", []),
+    }
+
+    # Create temporary MIDI for this stem
+    stem_stem = f"{piece_id}_{track}"
+    tmp_json = Path(tempfile.gettempdir()) / f"stem_{stem_stem}.json"
+    tmp_midi = Path(tempfile.gettempdir()) / f"stem_{stem_stem}.mid"
+    tmp_wav = Path(tempfile.gettempdir()) / f"stem_{stem_stem}.wav"
+
+    try:
+        # Write filtered JSON and convert to MIDI
+        with open(tmp_json, "w") as f:
+            json.dump(filtered_data, f)
+        await asyncio.to_thread(json_to_midi, str(tmp_json), str(tmp_midi))
+
+        # Render to WAV
+        await asyncio.to_thread(audio_render.midi_to_audio, str(tmp_midi), str(tmp_wav))
+
+        download_name = slugify(meta.get("name", piece_id)) + f"_{track}.wav"
+        return FileResponse(str(tmp_wav), media_type="audio/wav", filename=download_name,
+                            background=lambda: [tmp_json.unlink(missing_ok=True),
+                                                tmp_midi.unlink(missing_ok=True),
+                                                tmp_wav.unlink(missing_ok=True)])
+    except Exception as e:
+        # Clean up on error
+        for p in [tmp_json, tmp_midi, tmp_wav]:
+            p.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Stem export failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle hooks
 # ---------------------------------------------------------------------------

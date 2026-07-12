@@ -45,6 +45,8 @@ const downloadMidi = document.getElementById('download-midi');
 const downloadMusicXml = document.getElementById('download-musicxml');
 const downloadWav = document.getElementById('download-wav');
 const downloadMp3 = document.getElementById('download-mp3');
+const downloadStemMelody = document.getElementById('download-stem-melody');
+const downloadStemAccomp = document.getElementById('download-stem-accomp');
 const picatOutput = document.getElementById('picat-output');
 const resetConstraints = document.getElementById('reset-constraints');
 const advancedToggle = document.getElementById('advanced-toggle');
@@ -316,6 +318,12 @@ function wireEvents() {
     downloadMp3.addEventListener('click', () => {
         if (currentLibraryId) window.location.href = `/api/library/${currentLibraryId}/export/mp3`;
     });
+    downloadStemMelody.addEventListener('click', () => {
+        if (currentLibraryId) window.location.href = `/api/library/${currentLibraryId}/export/stem/melody`;
+    });
+    downloadStemAccomp.addEventListener('click', () => {
+        if (currentLibraryId) window.location.href = `/api/library/${currentLibraryId}/export/stem/accomp`;
+    });
 
     // Playback callbacks
     playback.onprogress = (cur, total, beat) => {
@@ -584,6 +592,8 @@ function showPiece(data, libraryMeta) {
     downloadMusicXml.style.display = currentLibraryId ? '' : 'none';
     downloadWav.style.display = (currentLibraryId && exports.wav) ? '' : 'none';
     downloadMp3.style.display = (currentLibraryId && exports.mp3) ? '' : 'none';
+    downloadStemMelody.style.display = (currentLibraryId && exports.wav) ? '' : 'none';
+    downloadStemAccomp.style.display = (currentLibraryId && exports.wav) ? '' : 'none';
 
     outputSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
