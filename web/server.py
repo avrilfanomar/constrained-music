@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -1055,14 +1055,14 @@ async def generate(req: GenerateRequest):
     except Exception as e:
         job.status = "error"
         job.error = str(e)
-        return {"job_id": job.id}, 400
+        return JSONResponse(content={"job_id": job.id}, status_code=400)
 
     # Capture tmp paths and req in a closure
     def finish(picat_output: str) -> dict:
         return finish_generate(tmp_json, tmp_midi, picat_output, req)
 
     asyncio.create_task(_solve_job(job, cmd, timeout, finish))
-    return {"job_id": job.id}, 202
+    return JSONResponse(content={"job_id": job.id}, status_code=202)
 
 
 @app.post("/api/variation")
