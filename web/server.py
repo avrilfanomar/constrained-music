@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -630,6 +631,332 @@ async def run_picat_bounded(cmd: list[str], timeout_sec: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Async job model: solves stream progress, can be polled and cancelled.
+# One solve at a time (CP is CPU-bound); a local machine shouldn't run two.
+# ---------------------------------------------------------------------------
+
+JOB_TTL = 600.0            # keep finished jobs this long for polling
+SOLVE_SEM = asyncio.Semaphore(1)
+
+
+class SolveCancelled(Exception):
+    pass
+
+
+class SolveError(Exception):
+    def __init__(self, message: str, output: str = ""):
+        super().__init__(message)
+        self.message = message
+        self.output = output
+
+
+@dataclass
+class Job:
+    id: str
+    kind: str                               # generate | variation | regenerate
+    status: str = "running"                 # running | done | error | cancelled
+    progress: float = 0.0                   # 0..1
+    stage: str = "Starting…"
+    result: dict | None = None
+    error: str | None = None
+    output_tail: list = field(default_factory=list)
+    proc: object = None                     # asyncio subprocess while running
+    cancelled: bool = False
+    created: float = field(default_factory=time.monotonic)
+    scratch: dict = field(default_factory=dict)  # parser bookkeeping
+
+
+JOBS: dict[str, Job] = {}
+
+
+def _gc_jobs() -> None:
+    """Drop finished jobs older than the TTL so the registry stays small."""
+    now = time.monotonic()
+    stale = [jid for jid, j in JOBS.items()
+             if j.status != "running" and now - j.created > JOB_TTL]
+    for jid in stale:
+        JOBS.pop(jid, None)
+
+
+def _new_job(kind: str) -> Job:
+    _gc_jobs()
+    job = Job(id=uuid.uuid4().hex[:12], kind=kind)
+    JOBS[job.id] = job
+    return job
+
+
+def _kill_proc_group(proc) -> None:
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+# Progress markers emitted by companion.pi / variation.pi (see their stdout).
+_RE_SEG_TOTAL = re.compile(r"Created (\d+) segments")
+_RE_PIECE_ROUNDS = re.compile(r"Per-piece refinement \((\d+) rounds\)")
+_RE_SEG_DONE = re.compile(r"Segment\s+(\d+)\s*(?:\[.\])?\s*:")
+_RE_PIECE_ROUND = re.compile(r"Piece round (\d+):")
+
+
+def parse_solve_progress(job: Job, line: str) -> None:
+    """Map a stdout line to job.progress/stage. Budget: planning 0→.1,
+    segment solving .1→.8 (the slow part), expression/export .8→.96."""
+    sc = job.scratch
+    m = _RE_SEG_TOTAL.search(line)
+    if m:
+        sc["nseg"] = int(m.group(1))
+        sc.setdefault("nrounds", 1)
+        sc.setdefault("done", 0)
+        job.progress = max(job.progress, 0.1)
+        job.stage = f"Planned {sc['nseg']} segments"
+        return
+    m = _RE_PIECE_ROUNDS.search(line)
+    if m:
+        sc["nrounds"] = int(m.group(1))
+        return
+    m = _RE_SEG_DONE.search(line)
+    if m:
+        sc["done"] = sc.get("done", 0) + 1
+        total = max(1, sc.get("nseg", 1) * sc.get("nrounds", 1))
+        frac = min(1.0, sc["done"] / total)
+        job.progress = max(job.progress, 0.1 + 0.7 * frac)
+        seg_k = int(m.group(1))
+        nseg = sc.get("nseg", "?")
+        if sc.get("nrounds", 1) > 1:
+            rnd = min(sc.get("nrounds"), 1 + sc["done"] // max(1, sc.get("nseg", 1)))
+            job.stage = f"Solving segment {seg_k}/{nseg} (take {rnd}/{sc['nrounds']})"
+        else:
+            job.stage = f"Solving segment {seg_k}/{nseg}"
+        return
+    if _RE_PIECE_ROUND.search(line):
+        return
+    if "Generated" in line and "total notes" in line:
+        job.progress = max(job.progress, 0.82)
+        job.stage = "Expression & accompaniment"
+        return
+    if "Applying expression" in line:
+        job.progress = max(job.progress, 0.84)
+        return
+    if "Exporting to JSON" in line:
+        job.progress = max(job.progress, 0.92)
+        job.stage = "Exporting"
+        return
+    if line.strip().startswith("Saved to:"):
+        job.progress = max(job.progress, 0.96)
+
+
+async def run_picat_streaming(job: Job, cmd: list[str], timeout_sec: float) -> str:
+    """Run picat, draining stdout line-by-line so progress updates live.
+    Raises SolveError (failure/timeout) or SolveCancelled. Returns full output."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=str(PROJECT_ROOT),
+        start_new_session=True,
+    )
+    job.proc = proc
+    lines: list[str] = []
+
+    async def drain():
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            lines.append(line)
+            if len(lines) > 500:
+                del lines[0]
+            if not job.cancelled:
+                parse_solve_progress(job, line)
+
+    try:
+        await asyncio.wait_for(drain(), timeout=timeout_sec)
+        await proc.wait()
+    except asyncio.TimeoutError:
+        _kill_proc_group(proc)
+        await proc.wait()
+        job.output_tail = lines[-40:]
+        raise SolveError(
+            f"Generation timed out ({int(timeout_sec)}s); solver process was terminated")
+    finally:
+        job.proc = None
+
+    job.output_tail = lines[-40:]
+    output = "\n".join(lines)
+    if job.cancelled:
+        raise SolveCancelled()
+    if proc.returncode != 0:
+        raise SolveError("Picat generation failed", output)
+    return output
+
+
+async def _solve_job(job: Job, cmd: list[str], timeout_sec: float, finish) -> None:
+    """Run one solve under the global semaphore, then post-process (finish is a
+    sync callable taking picat_output → response dict)."""
+    async with SOLVE_SEM:
+        if job.cancelled:
+            job.status = "cancelled"
+            job.stage = "Cancelled"
+            return
+        try:
+            output = await run_picat_streaming(job, cmd, timeout_sec)
+        except SolveCancelled:
+            job.status = "cancelled"
+            job.stage = "Cancelled"
+            return
+        except SolveError as e:
+            job.status = "error"
+            job.error = e.message
+            if e.output:
+                job.output_tail = e.output.splitlines()[-40:]
+            return
+        except Exception as e:  # pragma: no cover - defensive
+            job.status = "error"
+            job.error = str(e)
+            return
+    # Post-processing (MIDI render + library save) is cheap; keep it off the
+    # semaphore so the next solve can start.
+    try:
+        job.stage = "Rendering MIDI…"
+        job.progress = max(job.progress, 0.97)
+        result = await asyncio.to_thread(finish, output)
+        job.result = result
+        job.status = "done"
+        job.progress = 1.0
+        job.stage = "Done"
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+
+
+# ---------------------------------------------------------------------------
+# Prepare/finish helpers for job-based endpoints
+# ---------------------------------------------------------------------------
+
+def prepare_generate(req: GenerateRequest) -> tuple[list[str], float, str, str]:
+    """Build command for generate. Returns (cmd, timeout_sec, tmp_json, tmp_midi)."""
+    args = build_generate_args(req)
+    tmp_id = uuid.uuid4().hex[:12]
+    tmp_json = os.path.join(tempfile.gettempdir(), f"web_{tmp_id}.json")
+    args.append(f"output={tmp_json}")
+    script_path = str(PROJECT_ROOT / "scripts" / "run_picat.sh")
+    companion_path = "picat/companion.pi"
+    cmd = [script_path, companion_path] + args
+    timeout_sec = 300 + (req.refine - 1) * 30 + (req.refine_piece - 1) * 120
+    tmp_midi = tmp_json.replace(".json", ".mid")
+    return cmd, timeout_sec, tmp_json, tmp_midi
+
+
+def finish_generate(tmp_json: str, tmp_midi: str, picat_output: str, req: GenerateRequest) -> dict:
+    """Post-process generation: read JSON, generate MIDI, save to library."""
+    try:
+        if not os.path.exists(tmp_json):
+            raise ValueError(f"No output JSON produced")
+
+        with open(tmp_json, "r") as f:
+            data = json.load(f)
+
+        # Generate MIDI
+        midi_bytes = None
+        try:
+            json_to_midi(tmp_json, tmp_midi)
+            with open(tmp_midi, "rb") as f:
+                midi_bytes = f.read()
+            midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
+        except Exception as e:
+            midi_base64 = None
+            picat_output += f"\nMIDI conversion error: {e}"
+
+        library_meta = save_to_library("generate", req.model_dump(), data, midi_bytes)
+
+        return {
+            "notes": data.get("notes", []),
+            "tempo_changes": data.get("tempo_changes", []),
+            "metadata": data.get("metadata", {}),
+            "midi_base64": midi_base64,
+            "picat_output": picat_output,
+            "library": library_meta,
+        }
+    finally:
+        for p in [tmp_json, tmp_midi]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+def prepare_variation(req: VariationRequest) -> tuple[list[str], float, str, str]:
+    """Build command for variation. Returns (cmd, timeout_sec, tmp_json, tmp_midi)."""
+    args = [req.mode, f"piece={req.piece}"]
+
+    if req.mode == "continue":
+        args.append(f"split={req.split}")
+        if req.extend != 1.0:
+            args.append(f"extend={req.extend}")
+        if req.genre:
+            args.append(f"genre={req.genre}")
+    elif req.mode == "transform":
+        if req.technique:
+            args.append(f"technique={req.technique}")
+        if req.genre:
+            args.append(f"genre={req.genre}")
+        if not req.technique and not req.genre:
+            raise ValueError("transform requires technique= or genre=")
+
+    args.append(f"randomness={req.randomness}")
+
+    tmp_id = uuid.uuid4().hex[:12]
+    tmp_json = os.path.join(tempfile.gettempdir(), f"web_var_{tmp_id}.json")
+    args.append(f"output={tmp_json}")
+
+    script_path = str(PROJECT_ROOT / "scripts" / "run_picat.sh")
+    cmd = [script_path, "picat/variation.pi"] + args
+    tmp_midi = tmp_json.replace(".json", ".mid")
+    return cmd, 90.0, tmp_json, tmp_midi
+
+
+def finish_variation(tmp_json: str, tmp_midi: str, picat_output: str, req: VariationRequest) -> dict:
+    """Post-process variation: read JSON, generate MIDI, save to library."""
+    try:
+        if not os.path.exists(tmp_json):
+            raise ValueError("No output JSON produced")
+
+        with open(tmp_json, "r") as f:
+            data = json.load(f)
+
+        midi_bytes = None
+        try:
+            json_to_midi(tmp_json, tmp_midi)
+            with open(tmp_midi, "rb") as f:
+                midi_bytes = f.read()
+            midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
+        except Exception as e:
+            midi_base64 = None
+            picat_output += f"\nMIDI conversion error: {e}"
+
+        library_meta = save_to_library("variation", req.model_dump(), data, midi_bytes)
+
+        return {
+            "notes": data.get("notes", []),
+            "tempo_changes": data.get("tempo_changes", []),
+            "metadata": data.get("metadata", {}),
+            "midi_base64": midi_base64,
+            "picat_output": picat_output,
+            "library": library_meta,
+        }
+    finally:
+        for p in [tmp_json, tmp_midi]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # API endpoints
 # ---------------------------------------------------------------------------
 
@@ -719,148 +1046,41 @@ def build_generate_args(req: GenerateRequest) -> list[str]:
     return args
 
 
-async def run_generation(req: GenerateRequest) -> dict:
-    """Run companion.pi for a GenerateRequest, save the take, build response."""
-    args = build_generate_args(req)
-
-    # Temp output file
-    tmp_id = uuid.uuid4().hex[:12]
-    tmp_json = os.path.join(tempfile.gettempdir(), f"web_{tmp_id}.json")
-    args.append(f"output={tmp_json}")
-
-    # Run picat via run_picat.sh
-    script_path = str(PROJECT_ROOT / "scripts" / "run_picat.sh")
-    companion_path = "picat/companion.pi"
-    cmd = [script_path, companion_path] + args
-
-    # Timeout: base 300s + extra for refinement rounds
-    timeout_sec = 300 + (req.refine - 1) * 30 + (req.refine_piece - 1) * 120
-
-    tmp_midi = tmp_json.replace(".json", ".mid")
-    try:
-        picat_output = await run_picat_bounded(cmd, timeout_sec)
-
-        # Read JSON output
-        if not os.path.exists(tmp_json):
-            raise HTTPException(status_code=500, detail={
-                "error": "No output JSON produced",
-                "output": picat_output,
-            })
-
-        with open(tmp_json, "r") as f:
-            data = json.load(f)
-
-        # Generate MIDI
-        midi_bytes = None
-        try:
-            json_to_midi(tmp_json, tmp_midi)
-            with open(tmp_midi, "rb") as f:
-                midi_bytes = f.read()
-            midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
-        except Exception as e:
-            midi_base64 = None
-            picat_output += f"\nMIDI conversion error: {e}"
-
-        library_meta = save_to_library("generate", req.model_dump(), data, midi_bytes)
-
-        return {
-            "notes": data.get("notes", []),
-            "tempo_changes": data.get("tempo_changes", []),
-            "metadata": data.get("metadata", {}),
-            "midi_base64": midi_base64,
-            "picat_output": picat_output,
-            "library": library_meta,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        for p in [tmp_json, tmp_midi]:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-
-
 @app.post("/api/generate")
 async def generate(req: GenerateRequest):
-    return await run_generation(req)
+    _gc_jobs()
+    job = _new_job("generate")
+    try:
+        cmd, timeout, tmp_json, tmp_midi = prepare_generate(req)
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+        return {"job_id": job.id}, 400
+
+    # Capture tmp paths and req in a closure
+    def finish(picat_output: str) -> dict:
+        return finish_generate(tmp_json, tmp_midi, picat_output, req)
+
+    asyncio.create_task(_solve_job(job, cmd, timeout, finish))
+    return {"job_id": job.id}, 202
 
 
 @app.post("/api/variation")
 async def variation_generate(req: VariationRequest):
-    # Build CLI args for variation.pi
-    args = [req.mode, f"piece={req.piece}"]
-
-    if req.mode == "continue":
-        args.append(f"split={req.split}")
-        if req.extend != 1.0:
-            args.append(f"extend={req.extend}")
-        if req.genre:
-            args.append(f"genre={req.genre}")
-    elif req.mode == "transform":
-        if req.technique:
-            args.append(f"technique={req.technique}")
-        if req.genre:
-            args.append(f"genre={req.genre}")
-        if not req.technique and not req.genre:
-            raise HTTPException(status_code=400, detail="transform requires technique= or genre=")
-
-    args.append(f"randomness={req.randomness}")
-
-    tmp_id = uuid.uuid4().hex[:12]
-    tmp_json = os.path.join(tempfile.gettempdir(), f"web_var_{tmp_id}.json")
-    args.append(f"output={tmp_json}")
-
-    script_path = str(PROJECT_ROOT / "scripts" / "run_picat.sh")
-    cmd = [script_path, "picat/variation.pi"] + args
-
-    tmp_midi = tmp_json.replace(".json", ".mid")
+    _gc_jobs()
+    job = _new_job("variation")
     try:
-        picat_output = await run_picat_bounded(cmd, 90)
-
-        if not os.path.exists(tmp_json):
-            raise HTTPException(status_code=500, detail={
-                "error": "No output JSON produced",
-                "output": picat_output,
-            })
-
-        with open(tmp_json, "r") as f:
-            data = json.load(f)
-
-        midi_bytes = None
-        try:
-            json_to_midi(tmp_json, tmp_midi)
-            with open(tmp_midi, "rb") as f:
-                midi_bytes = f.read()
-            midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
-        except Exception as e:
-            midi_base64 = None
-            picat_output += f"\nMIDI conversion error: {e}"
-
-        library_meta = save_to_library("variation", req.model_dump(), data, midi_bytes)
-
-        return {
-            "notes": data.get("notes", []),
-            "tempo_changes": data.get("tempo_changes", []),
-            "metadata": data.get("metadata", {}),
-            "midi_base64": midi_base64,
-            "picat_output": picat_output,
-            "library": library_meta,
-        }
-
-    except HTTPException:
-        raise
+        cmd, timeout, tmp_json, tmp_midi = prepare_variation(req)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        for p in [tmp_json, tmp_midi]:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
+        job.status = "error"
+        job.error = str(e)
+        return {"job_id": job.id}, 400
+
+    def finish(picat_output: str) -> dict:
+        return finish_variation(tmp_json, tmp_midi, picat_output, req)
+
+    asyncio.create_task(_solve_job(job, cmd, timeout, finish))
+    return {"job_id": job.id}, 202
 
 
 # ---------------------------------------------------------------------------
@@ -941,7 +1161,55 @@ async def library_regenerate(piece_id: str):
         req = GenerateRequest(**request)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Stored request invalid: {e}")
-    return await run_generation(req)
+
+    _gc_jobs()
+    job = _new_job("regenerate")
+    try:
+        cmd, timeout, tmp_json, tmp_midi = prepare_generate(req)
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+        return {"job_id": job.id}, 400
+
+    def finish(picat_output: str) -> dict:
+        return finish_generate(tmp_json, tmp_midi, picat_output, req)
+
+    asyncio.create_task(_solve_job(job, cmd, timeout, finish))
+    return {"job_id": job.id}, 202
+
+
+# ---------------------------------------------------------------------------
+# Job polling and cancel
+# ---------------------------------------------------------------------------
+
+@app.get("/api/jobs/{job_id}")
+async def job_status(job_id: str):
+    """Poll job status and result. 404 if job not found or expired."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "id": job.id,
+        "kind": job.kind,
+        "status": job.status,
+        "progress": job.progress,
+        "stage": job.stage,
+        "result": job.result,
+        "error": job.error,
+        "output_tail": job.output_tail[-20:] if job.output_tail else [],
+    }
+
+
+@app.delete("/api/jobs/{job_id}")
+async def job_cancel(job_id: str):
+    """Cancel a running job. Idempotent; 404 if job not found."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status == "running":
+        job.cancelled = True
+        _kill_proc_group(job.proc)
+    return {"cancelled": True}
 
 
 # ---------------------------------------------------------------------------
@@ -984,9 +1252,18 @@ async def library_export(piece_id: str, fmt: str):
                                + (" + ffmpeg" if fmt == "mp3" else "") + ")")
                 if not midi_path.is_file():
                     raise HTTPException(status_code=404, detail="No MIDI for this piece")
-                # Render in a worker thread; fluidsynth is CPU-bound
-                await asyncio.to_thread(
-                    audio_render.midi_to_audio, str(midi_path), str(target))
+                # Render in a worker thread (fluidsynth is CPU-bound) to a
+                # unique temp file, then atomically move into place so a
+                # concurrent request never reads a half-written file.
+                tmp_target = target.with_name(
+                    f"{target.stem}.{uuid.uuid4().hex[:8]}.tmp{target.suffix}")
+                try:
+                    await asyncio.to_thread(
+                        audio_render.midi_to_audio, str(midi_path), str(tmp_target))
+                    os.replace(tmp_target, target)
+                finally:
+                    if tmp_target.is_file():
+                        tmp_target.unlink()
         except HTTPException:
             raise
         except Exception as e:
@@ -994,6 +1271,18 @@ async def library_export(piece_id: str, fmt: str):
 
     download_name = slugify(meta.get("name", piece_id)) + ext
     return FileResponse(str(target), media_type=media_type, filename=download_name)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle hooks
+# ---------------------------------------------------------------------------
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Kill any running solver processes on server shutdown."""
+    for job in JOBS.values():
+        if job.status == "running":
+            _kill_proc_group(job.proc)
 
 
 # ---------------------------------------------------------------------------
