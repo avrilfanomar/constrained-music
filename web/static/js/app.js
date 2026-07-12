@@ -85,10 +85,13 @@ const VARY_LOADING_MESSAGES = [
 
 // --- Init ---
 async function init() {
-    playback.init();
-
     const resp = await fetch('/api/config');
     config = await resp.json();
+
+    // Warm up the Tone.js sampler ONLY when it will actually be used — it
+    // streams samples from a CDN, so on machines with server audio (the
+    // offline path) we must not fetch it on page load.
+    if (!(config.exports && config.exports.wav)) playback.init();
 
     // Populate mood pad presets
     moodPad.setPresets(config.mood_presets);
@@ -218,6 +221,12 @@ function wireEvents() {
     // Generate
     generateBtn.addEventListener('click', doGenerate);
 
+    // Cancel
+    const cancelBtn = document.getElementById('cancel-btn');
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', cancelCurrentJob);
+    }
+
     // Vary
     varyBtn.addEventListener('click', doVary);
 
@@ -270,6 +279,17 @@ function wireEvents() {
         playBtn.disabled = playing;
         pauseBtn.disabled = !playing;
         stopBtn.disabled = false;
+    };
+
+    // First Play on the server engine triggers a fluidsynth render — show it.
+    playback.onbuffering = (isBuffering) => {
+        playBtn.classList.toggle('buffering', isBuffering);
+        if (isBuffering) {
+            timeDisplay.textContent = 'Rendering audio…';
+        } else {
+            timeDisplay.textContent =
+                `${fmtTime(0)} / ${fmtTime(playback.totalDurationSec)}`;
+        }
     };
 
     // Vary mode description updates
@@ -351,18 +371,23 @@ async function doVary() {
 // Shared request runner
 // -------------------------------------------------------------------------
 
+let currentJobId = null;
+let pollInterval = null;
+
 async function runRequest(endpoint, body, messages, triggerBtn) {
     triggerBtn.disabled = true;
     loadingOverlay.style.display = 'flex';
+    loadingText.textContent = 'Starting…';
 
-    let msgIdx = 0;
-    loadingText.textContent = messages[0];
-    loadingInterval = setInterval(() => {
-        msgIdx = (msgIdx + 1) % messages.length;
-        loadingText.textContent = messages[msgIdx];
-    }, 3000);
+    // Show cancel button
+    const cancelBtn = document.getElementById('cancel-btn');
+    if (cancelBtn) {
+        cancelBtn.style.display = 'inline-block';
+        cancelBtn.disabled = false;
+    }
 
     try {
+        // Start the job
         const resp = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -372,20 +397,83 @@ async function runRequest(endpoint, body, messages, triggerBtn) {
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
             const msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
-            alert('Generation failed: ' + msg);
-            return;
+            throw new Error(msg);
         }
 
-        const data = await resp.json();
-        showPiece(data, data.library || null);
-        library.refresh();
+        const jobResp = await resp.json();
+        const jobId = Array.isArray(jobResp) ? jobResp[0].job_id : jobResp.job_id;
+        currentJobId = jobId;
+
+        // Poll for completion
+        await pollJob(jobId);
 
     } catch (e) {
-        alert('Error: ' + e.message);
+        loadingText.textContent = 'Error: ' + e.message;
+        loadingText.style.color = '#ff4444';
+        await new Promise(r => setTimeout(r, 3000));
     } finally {
-        clearInterval(loadingInterval);
+        currentJobId = null;
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+        if (cancelBtn) cancelBtn.style.display = 'none';
         loadingOverlay.style.display = 'none';
+        loadingText.style.color = '';
         triggerBtn.disabled = false;
+    }
+}
+
+async function pollJob(jobId) {
+    return new Promise((resolve, reject) => {
+        const poll = async () => {
+            try {
+                const resp = await fetch(`/api/jobs/${jobId}`);
+                if (!resp.ok) {
+                    reject(new Error('Job not found'));
+                    return;
+                }
+
+                const job = await resp.json();
+                const progress = Math.round(job.progress * 100);
+                loadingText.textContent = `${progress}% — ${job.stage}`;
+
+                if (job.status === 'done') {
+                    if (pollInterval) clearInterval(pollInterval);
+                    pollInterval = null;
+                    showPiece(job.result, job.result.library || null);
+                    library.refresh();
+                    resolve();
+                } else if (job.status === 'error') {
+                    if (pollInterval) clearInterval(pollInterval);
+                    pollInterval = null;
+                    reject(new Error(job.error || 'Generation failed'));
+                } else if (job.status === 'cancelled') {
+                    if (pollInterval) clearInterval(pollInterval);
+                    pollInterval = null;
+                    reject(new Error('Cancelled'));
+                }
+            } catch (e) {
+                if (pollInterval) clearInterval(pollInterval);
+                pollInterval = null;
+                reject(e);
+            }
+        };
+
+        poll();
+        pollInterval = setInterval(poll, 1000);
+    });
+}
+
+async function cancelCurrentJob() {
+    if (!currentJobId) return;
+    const cancelBtn = document.getElementById('cancel-btn');
+    if (cancelBtn) cancelBtn.disabled = true;
+
+    try {
+        await fetch(`/api/jobs/${currentJobId}`, { method: 'DELETE' });
+    } catch (e) {
+        console.error('Cancel failed:', e);
     }
 }
 
@@ -398,8 +486,14 @@ function showPiece(data, libraryMeta) {
     outputPieceName.textContent = libraryMeta ? `— ${libraryMeta.name}` : '';
 
     outputSection.style.display = 'block';
-    pianoRoll.setNotes(data.notes, data.tempo_changes);
-    playback.setNotes(data.notes, data.tempo_changes, data.midi_base64);
+    // Prefer the server-rendered WAV (preview == export, meter-correct, offline);
+    // fall back to the Tone.js sampler when this machine can't render audio.
+    const exports = (config && config.exports) || {};
+    const wavUrl = (currentLibraryId && exports.wav)
+        ? `/api/library/${currentLibraryId}/export/wav`
+        : null;
+    pianoRoll.setNotes(data.notes, data.tempo_changes, data.metadata);
+    playback.setNotes(data.notes, data.tempo_changes, data.midi_base64, data.metadata, wavUrl);
     picatOutput.textContent = data.picat_output || '';
     timeDisplay.textContent = `0:00 / ${fmtTime(playback.totalDurationSec)}`;
     progressBar.style.width = '0%';
@@ -409,7 +503,6 @@ function showPiece(data, libraryMeta) {
     stopBtn.disabled = true;
     downloadMidi.style.display = (data.midi_base64 || currentLibraryId) ? '' : 'none';
     downloadMusicXml.style.display = currentLibraryId ? '' : 'none';
-    const exports = (config && config.exports) || {};
     downloadWav.style.display = (currentLibraryId && exports.wav) ? '' : 'none';
     downloadMp3.style.display = (currentLibraryId && exports.mp3) ? '' : 'none';
 

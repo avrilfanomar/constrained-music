@@ -1048,6 +1048,31 @@ body::before {
     40% { transform: scale(1); opacity: 1; }
 }
 
+/* --- Cancel Button --- */
+.cancel-btn {
+    margin-top: 20px;
+    padding: 10px 24px;
+    background: rgba(255, 68, 68, 0.1);
+    border: 1px solid rgba(255, 68, 68, 0.3);
+    color: #ff6b6b;
+    border-radius: var(--radius-base);
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cancel-btn:hover:not(:disabled) {
+    background: rgba(255, 68, 68, 0.15);
+    border-color: rgba(255, 68, 68, 0.5);
+    transform: translateY(-1px);
+}
+
+.cancel-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* --- Mood Coordinate Badges --- */
 .mood-coordinates span {
     background: var(--bg-surface);
