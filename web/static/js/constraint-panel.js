@@ -118,7 +118,7 @@ export class ConstraintPanel {
 
         const name = document.createElement('span');
         name.className = 'constraint-name';
-        name.textContent = c.id.replace(/_/g, ' ');
+        name.textContent = c.label || c.id.replace(/_/g, ' ');
         name.title = c.description;
 
         const weightDiv = document.createElement('div');
