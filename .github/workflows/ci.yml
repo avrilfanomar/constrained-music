@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+
+    - name: Install Picat
+      run: |
+        cd /opt
+        sudo wget http://picat-lang.org/download/picat39_linux64.tar.gz
+        sudo tar -xzf picat39_linux64.tar.gz
+        sudo rm picat39_linux64.tar.gz
+        sudo ln -s /opt/Picat/picat /usr/local/bin/picat
+        picat --version
+
+    - name: Install audio dependencies (for smoke test)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fluidsynth fluid-soundfont-gm ffmpeg
+
+    - name: Run Picat test suite
+      run: |
+        export PICATPATH="${GITHUB_WORKSPACE}/picat"
+        ./scripts/run_all_tests.sh
+
+    - name: End-to-end smoke test
+      run: |
+        export PICATPATH="${GITHUB_WORKSPACE}/picat"
+        export CMS_SOUNDFONT=/usr/share/sounds/sf2/FluidR3_GM.sf2
+
+        # Generate a short piece
+        ./scripts/run_picat.sh --midi --output smoke_test picat/companion.pi demo duration=10 randomness=0.5
+
+        # Verify MIDI was created
+        test -f smoke_test.mid || (echo "MIDI file not created" && exit 1)
+
+        # Verify JSON was created
+        test -f smoke_test.json || (echo "JSON file not created" && exit 1)
+
+        # Run evaluation (sanity bounds check)
+        python3 scripts/evaluate.py smoke_test.json --json > eval_result.json
+
+        # Check that evaluation produced valid output
+        python3 -c "
+import json
+import sys
+with open('eval_result.json') as f:
+    data = json.load(f)
+if not isinstance(data, list) or len(data) == 0:
+    print('Invalid evaluation output')
+    sys.exit(1)
+result = data[0]
+distance = result.get('distance')
+if distance is None or distance < 0:
+    print(f'Invalid distance score: {distance}')
+    sys.exit(1)
+print(f'✓ Smoke test passed - distance: {distance:.2f}')
+"
+
+        # Render to WAV (check audio pipeline)
+        python3 scripts/audio_render.py smoke_test.mid smoke_test.wav
+        test -f smoke_test.wav || (echo "WAV file not created" && exit 1)
+
+        echo "✓ All smoke tests passed"
+
+    - name: Upload artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-outputs
+        path: |
+          smoke_test.*
+          eval_result.json
+          picat/*.qi
+        retention-days: 7
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: constrained-music:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker image
+      run: |
+        # Start container
+        docker run -d --name cms-test -p 8000:8000 constrained-music:test
+
+        # Wait for service to be ready
+        timeout 30 bash -c 'until curl -f http://localhost:8000/api/config; do sleep 2; done'
+
+        # Check health
+        docker ps | grep cms-test
+
+        # Stop container
+        docker stop cms-test
+
+        echo "✓ Docker image test passed"

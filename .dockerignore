@@ -1,0 +1,61 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.venv
+venv
+env
+
+# Picat compiled files
+*.qi
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+output/
+library/
+*.mid
+*.midi
+*.wav
+*.mp3
+*.json
+*.dat
+*.xml
+*.ly
+*.pdf
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+
+# Documentation build
+docs/_build
+
+# Keep important data files
+!data/*.json
+!data/*.dat
+!picat/famous_pieces/*.dat

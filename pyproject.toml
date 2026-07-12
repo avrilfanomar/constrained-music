@@ -1,0 +1,50 @@
+[project]
+name = "constrained-music"
+version = "1.0.0"
+description = "Constraint-based music generation system using Picat and emotional expression models"
+authors = [
+    {name = "Andrii Andriichuk", email = "andrey000mar@gmail.com"}
+]
+readme = "README.md"
+license = {text = "PolyForm Noncommercial 1.0.0"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Multimedia :: Sound/Audio :: MIDI",
+    "Topic :: Artistic Software",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "midiutil>=1.2.1",
+    "mido>=1.2.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/andriichuk/constrained-music"
+Repository = "https://github.com/andriichuk/constrained-music"
+Issues = "https://github.com/andriichuk/constrained-music/issues"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []  # No Python package, just scripts
+
+[tool.setuptools.package-data]
+"*" = ["*.pi", "*.dat", "*.json"]

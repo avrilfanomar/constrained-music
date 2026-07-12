@@ -5,6 +5,7 @@ that respects musical theory rules while maintaining emotional expressiveness.
 
 ## Features
 
+### Music Generation
 - **Constraint-Based Melody Generation**: Generate melodies using constraint programming with rules for intervals,
   contours, voice leading, and resolutions
 - **Soft Constraints with Optimization**: Relaxable constraints with weighted costs - minimize violations instead of
@@ -15,7 +16,22 @@ that respects musical theory rules while maintaining emotional expressiveness.
   whole-tone, and more
 - **Emotional Music System**: Valence-Arousal mood model that maps emotional states to musical parameters
 - **Smooth Transitions**: Plan musical journeys between emotional states with configurable easing functions
-- **MIDI Export**: Generate playable MIDI files from constraint-solved compositions
+
+### Export Formats
+- **MIDI**: Standard MIDI files with multi-track support, program changes, dynamics, pedal markings
+- **Audio (WAV/MP3)**: Professional-quality renders with FluidSynth + reverb + loudness normalization
+- **MusicXML**: Notation-ready scores for MuseScore, Sibelius, Dorico, Finale
+- **LilyPond**: Engraving-quality sheet music source files
+- **Sampler MIDI**: Browser-playback-optimized MIDI for the web UI
+
+### Web Interface
+- **Interactive Mood Pad**: Visual Valence-Arousal emotional space for expressive control
+- **Genre & Style Cards**: 12+ genre presets with visual selection
+- **Piano Roll Visualization**: Real-time note display with playback cursor
+- **Constraint Panel**: Fine-tune 45+ individual constraint weights per genre
+- **Section Reroll**: Regenerate specific bar ranges while keeping the rest intact
+- **Multi-take Generation**: Generate multiple scored variations, A/B compare
+- **Library Management**: Auto-saved pieces with quality scoring
 
 ## Project Structure
 
@@ -71,32 +87,96 @@ constrained-music/
 
 ## Requirements
 
+### Core
 - **Picat 3.9+** - Download from [picat-lang.org](http://picat-lang.org/)
-- **Python 3.6+**
-- **midiutil** - `pip install midiutil`
-- **timidity** (optional) - For audio playback
+- **Python 3.8+**
 
-### Additional for Web Interface
+### Python Dependencies
+Install via `pip install -e .` (uses `pyproject.toml`):
+- **midiutil** - MIDI file writing
+- **mido** - MIDI file reading (for variation/import features)
+- **fastapi** - Web server (if using web interface)
+- **uvicorn** - ASGI server (if using web interface)
 
-- **fastapi** - `pip install fastapi`
-- **uvicorn** - `pip install uvicorn`
+### Audio Rendering (Optional)
+For WAV/MP3 export:
+- **FluidSynth** - `sudo apt install fluidsynth` (Linux) / `brew install fluid-synth` (macOS)
+- **FFmpeg** - `sudo apt install ffmpeg` (Linux) / `brew install ffmpeg` (macOS)
+- **GM Soundfont** - FluidR3_GM recommended (usually at `/usr/share/sounds/sf2/FluidR3_GM.sf2`)
 
-(The `run_web.sh` script automatically installs these from `web/requirements.txt`)
+Check capabilities: `python3 scripts/audio_render.py --check`
 
 ## Installation
 
+### Quick Start (with pip)
+
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/yourusername/constrained-music.git
 cd constrained-music
 
-# Set up Python environment
-python -m venv .venv
-source .venv/bin/activate
-pip install midiutil
+# Install Python dependencies
+pip install -e .
 
-# Set Picat path
-export PICATPATH=/path/to/constrained-music/picat
+# Install Picat (download from picat-lang.org and add to PATH)
+# On Linux:
+wget http://picat-lang.org/download/picat39_linux64.tar.gz
+tar -xzf picat39_linux64.tar.gz
+sudo ln -s $(pwd)/Picat/picat /usr/local/bin/picat
+
+# Optional: Install audio dependencies
+sudo apt install fluidsynth fluid-soundfont-gm ffmpeg
+```
+
+### Docker (One-Command Experience)
+
+```bash
+# Build image
+docker build -t constrained-music .
+
+# Run web interface
+docker run -p 8000:8000 constrained-music
+
+# Visit http://localhost:8000
+```
+
+## Quickstart for Musicians
+
+**Compose your first piece in 2 minutes:**
+
+```bash
+# 1. Launch the web interface
+./scripts/run_web.sh
+
+# 2. Open http://localhost:8000 in your browser
+
+# 3. Click on the mood pad to set start/end emotional states
+#    (e.g., start bottom-left "sad", end top-right "joyful")
+
+# 4. Pick a genre card (Classical, Baroque, Jazz, Folk...)
+
+# 5. Click "Generate"
+
+# 6. Listen in the browser, download MIDI for your DAW, or export WAV/MP3
+```
+
+**Command-line quickstart:**
+
+```bash
+# Generate a 60-second baroque harpsichord piece
+./scripts/run_picat.sh --midi picat/companion.pi demo genre=baroque
+
+# Render to high-quality MP3
+python3 scripts/audio_render.py demo.mid demo.mp3
+
+# Generate emotional journey: sad → energized, 5 minutes, classical style
+./scripts/run_picat.sh --midi picat/companion.pi \
+  from=sad_depressed to=energized duration=300 \
+  genre=classical_period randomness=0.3
+
+# Create 3 takes, pick the best
+./scripts/run_picat.sh picat/companion.pi demo count=3 randomness=0.4
+# (Web UI shows quality scores for each take)
 ```
 
 ## Web Interface
@@ -180,7 +260,9 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 ./scripts/run_picat.sh picat/companion.pi from=calm_peaceful to=happy count=5 randomness=0.3
 ```
 
-### Generate MIDI File
+### Export Formats
+
+#### MIDI Export
 
 ```bash
 # Generate melody and convert to MIDI
@@ -191,6 +273,70 @@ Use the helper script `scripts/run_picat.sh` which sets up the correct module pa
 
 # Custom output name
 ./scripts/run_picat.sh --midi --output mytrack picat/companion.pi demo
+
+# Manual conversion (if you already have session.json)
+python3 scripts/midi_writer.py session.json session.mid
+```
+
+MIDI files include:
+- Multi-track support (melody on Track 0, accompaniment on Track 1)
+- Per-genre instrument assignments (GM program changes)
+- Time signature and tempo changes
+- Dynamics (note velocities from humanization)
+- Pedal markings (CC64 sustain)
+
+#### Audio Rendering (WAV/MP3)
+
+Professional-quality audio with FluidSynth synthesis + reverb + loudness normalization:
+
+```bash
+# Render MIDI to WAV (44.1kHz, peak-normalized)
+python3 scripts/audio_render.py session.mid session.wav
+
+# Render MIDI to MP3 (VBR ~190kbps, EBU R128 loudness-normalized)
+python3 scripts/audio_render.py session.mid session.mp3
+
+# Or use the shell wrapper for generation → MIDI → audio in one step:
+./scripts/run_picat.sh --midi picat/companion.pi demo genre=baroque
+python3 scripts/audio_render.py demo.mid demo.mp3
+```
+
+**Audio Features:**
+- FluidSynth reverb (medium room: 0.6 room size, 0.5 damp, 0.3 level)
+- WAV: Peak-normalized via ffmpeg loudnorm (EBU R128: -16 LUFS, -1.0 dBTP)
+- MP3: VBR quality 2, loudness-normalized (EBU R128: -16 LUFS, -1.5 dBTP, LRA 11)
+- Soundfont resolution: `$CMS_SOUNDFONT` env var → FluidR3_GM → common locations
+- Kill-switch: `CMS_NO_AUDIO=1` disables server audio (web UI falls back to Tone.js)
+
+**Dependencies:** `fluidsynth`, `ffmpeg`, GM soundfont. Check capabilities:
+```bash
+python3 scripts/audio_render.py --check
+```
+
+#### MusicXML Export
+
+Notation-ready scores for MuseScore, Sibelius, Dorico, Finale:
+
+```bash
+python3 scripts/musicxml_writer.py session.json session.musicxml
+```
+
+Includes:
+- Pitch and rhythm notation
+- Dynamics from velocities (p/mp/mf/f/ff)
+- Hairpins (crescendo/diminuendo) from velocity ramps
+- Time signatures and key signatures
+- Per-genre instrument assignments
+
+#### LilyPond Export
+
+Engraving-quality sheet music source files:
+
+```bash
+python3 scripts/lilypond_writer.py session.json session.ly
+
+# Compile to PDF (requires LilyPond installed)
+lilypond session.ly
 ```
 
 ### Run Tests
@@ -431,3 +577,20 @@ soft_constraints_for_genre(folk)      % Soft with weights
 - Whole-Tone
 - Chromatic
 - Diminished
+
+## License
+
+Constrained Music is licensed under the **PolyForm Noncommercial License 1.0.0**.
+
+**Free for musicians and noncommercial use:**
+- Create music for personal projects, portfolios, hobby work
+- Use in educational institutions, research, and nonprofit organizations
+- Modify and distribute for noncommercial purposes
+
+**You own your music:**
+You retain full copyright and ownership of all musical works you generate with this software. No royalties or attribution required for your compositions.
+
+**Commercial licensing:**
+Commercial use (SaaS platforms, commercial products, production environments) requires a separate paid license. Contact andrey000mar@gmail.com for commercial licensing.
+
+See the [LICENSE](LICENSE) file for complete terms.
