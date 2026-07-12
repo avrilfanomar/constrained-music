@@ -1074,13 +1074,13 @@ async def variation_generate(req: VariationRequest):
     except Exception as e:
         job.status = "error"
         job.error = str(e)
-        return {"job_id": job.id}, 400
+        return JSONResponse(content={"job_id": job.id}, status_code=400)
 
     def finish(picat_output: str) -> dict:
         return finish_variation(tmp_json, tmp_midi, picat_output, req)
 
     asyncio.create_task(_solve_job(job, cmd, timeout, finish))
-    return {"job_id": job.id}, 202
+    return JSONResponse(content={"job_id": job.id}, status_code=202)
 
 
 # ---------------------------------------------------------------------------
@@ -1169,13 +1169,13 @@ async def library_regenerate(piece_id: str):
     except Exception as e:
         job.status = "error"
         job.error = str(e)
-        return {"job_id": job.id}, 400
+        return JSONResponse(content={"job_id": job.id}, status_code=400)
 
     def finish(picat_output: str) -> dict:
         return finish_generate(tmp_json, tmp_midi, picat_output, req)
 
     asyncio.create_task(_solve_job(job, cmd, timeout, finish))
-    return {"job_id": job.id}, 202
+    return JSONResponse(content={"job_id": job.id}, status_code=202)
 
 
 # ---------------------------------------------------------------------------
