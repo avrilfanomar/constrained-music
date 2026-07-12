@@ -1559,6 +1559,10 @@ set_arg(Map, "tempo", Value) = Map =>
     Map.put(tempo, to_integer(Value)).
 set_arg(Map, "seed", Value) = Map =>
     Map.put(seed, to_integer(Value)).
+set_arg(Map, "instrument", Value) = Map =>
+    Map.put(melody_instrument, to_integer(Value)).
+set_arg(Map, "accomp_instrument", Value) = Map =>
+    Map.put(accomp_instrument, to_integer(Value)).
 set_arg(Map, Key, Value) = Map =>
     % Check for weight:constraint=value pattern
     if append("weight:", ConstraintStr, Key) then
@@ -1723,9 +1727,25 @@ build_export_metadata(KeyRoot, Segments, Genre, StartMood, EndMood, Preferences)
         Mode = major,
         BaseTempo = 120
     end,
+    % Extract instrument assignments: CLI args override genre defaults
+    if find_first_key(Preferences, melody_instrument, MelodyOverride) then
+        MelodyInst = MelodyOverride
+    else if Genre != none, genre_profiles.genre_exists(Genre) then
+        MelodyInst = genre_profiles.get_param(Genre, melody_instrument, 0)
+    else
+        MelodyInst = 0
+    end end,
+    if find_first_key(Preferences, accomp_instrument, AccompOverride) then
+        AccompInst = AccompOverride
+    else if Genre != none, genre_profiles.genre_exists(Genre) then
+        AccompInst = genre_profiles.get_param(Genre, accomp_instrument, 0)
+    else
+        AccompInst = 0
+    end end,
     Meta0 = [(key_root, KeyRoot), (mode, Mode),
              (key_name, key_name_string(KeyRoot, Mode)),
              (base_tempo, BaseTempo), (genre, Genre),
+             (melody_instrument, MelodyInst), (accomp_instrument, AccompInst),
              (from_valence, get_valence(StartMood)),
              (from_arousal, get_arousal(StartMood)),
              (to_valence, get_valence(EndMood)),
@@ -1930,6 +1950,15 @@ build_preferences(ParsedArgs) = Preferences =>
     SeedPref = get_arg(ParsedArgs, seed, none),
     if SeedPref != none then
         Prefs := Prefs ++ [seed=SeedPref]
+    end,
+    % Add instrument overrides (GM program numbers)
+    MelodyInst = get_arg(ParsedArgs, melody_instrument, none),
+    if MelodyInst != none, MelodyInst >= 0, MelodyInst =< 127 then
+        Prefs := Prefs ++ [melody_instrument=MelodyInst]
+    end,
+    AccompInst = get_arg(ParsedArgs, accomp_instrument, none),
+    if AccompInst != none, AccompInst >= 0, AccompInst =< 127 then
+        Prefs := Prefs ++ [accomp_instrument=AccompInst]
     end,
     Preferences = Prefs.
 

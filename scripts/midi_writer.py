@@ -55,10 +55,15 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
         return 1 if v >= ACCOMP_VOICE else 0
 
     TRACK_NAMES = {0: "Melody (RH)", 1: "Accompaniment (LH)"}
-    PROGRAM = 0  # Acoustic Grand Piano
+
+    # Read instrument assignments from metadata (default to piano)
+    melody_instrument = metadata.get('melody_instrument', 0)
+    accomp_instrument = metadata.get('accomp_instrument', 0)
+    TRACK_INSTRUMENTS = {0: melody_instrument, 1: accomp_instrument}
 
     track_labels = [TRACK_NAMES[i] for i in range(num_tracks)]
     print(f"  Tracks: {num_tracks} ({', '.join(track_labels)})")
+    print(f"  Instruments: Melody=GM{melody_instrument}, Accompaniment=GM{accomp_instrument}")
 
     # Create MIDI file
     # Use deinterleave=False to avoid issues with overlapping notes
@@ -70,7 +75,8 @@ def json_to_midi(json_path: str, midi_path: str) -> None:
         name = TRACK_NAMES.get(track_idx, f"Track {track_idx}")
         midi.addTrackName(track_idx, 0, name)
         channel = min(track_idx, 15)  # MIDI channels 0-15
-        midi.addProgramChange(track_idx, channel, 0, PROGRAM)
+        program = TRACK_INSTRUMENTS.get(track_idx, 0)
+        midi.addProgramChange(track_idx, channel, 0, program)
 
     # Default tempo (will be overwritten by first tempo change)
     initial_tempo = 120

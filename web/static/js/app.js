@@ -401,7 +401,7 @@ async function runRequest(endpoint, body, messages, triggerBtn) {
         }
 
         const jobResp = await resp.json();
-        const jobId = Array.isArray(jobResp) ? jobResp[0].job_id : jobResp.job_id;
+        const jobId = jobResp.job_id;
         currentJobId = jobId;
 
         // Poll for completion
@@ -517,29 +517,43 @@ function loadLibraryPiece(data, meta) {
 async function regenerateLibraryPiece(id) {
     playback.stop();
     const fakeBtn = generateBtn;   // reuse the loading UX
+    fakeBtn.disabled = true;
     loadingOverlay.style.display = 'flex';
-    let msgIdx = 0;
-    loadingText.textContent = LOADING_MESSAGES[0];
-    loadingInterval = setInterval(() => {
-        msgIdx = (msgIdx + 1) % LOADING_MESSAGES.length;
-        loadingText.textContent = LOADING_MESSAGES[msgIdx];
-    }, 3000);
+    loadingText.textContent = 'Starting…';
+
+    const cancelBtn = document.getElementById('cancel-btn');
+    if (cancelBtn) {
+        cancelBtn.style.display = 'inline-block';
+        cancelBtn.disabled = false;
+    }
+
     try {
         const resp = await fetch(`/api/library/${id}/regenerate`, { method: 'POST' });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
             const msg = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
-            alert('Regeneration failed: ' + msg);
-            return;
+            throw new Error(msg);
         }
-        const data = await resp.json();
-        showPiece(data, data.library || null);
-        await library.refresh();
+
+        const jobResp = await resp.json();
+        const jobId = jobResp.job_id;
+        currentJobId = jobId;
+
+        await pollJob(jobId);
+
     } catch (e) {
-        alert('Error: ' + e.message);
+        loadingText.textContent = 'Error: ' + e.message;
+        loadingText.style.color = '#ff4444';
+        await new Promise(r => setTimeout(r, 3000));
     } finally {
-        clearInterval(loadingInterval);
+        currentJobId = null;
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+        if (cancelBtn) cancelBtn.style.display = 'none';
         loadingOverlay.style.display = 'none';
+        loadingText.style.color = '';
         fakeBtn.disabled = false;
     }
 }

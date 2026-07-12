@@ -65,8 +65,8 @@ def capabilities():
 
 
 def midi_to_wav(midi_path: str, wav_path: str, sample_rate: int = 44100,
-                gain: float = 0.7) -> None:
-    """Render MIDI to WAV via FluidSynth. Raises RuntimeError on failure."""
+                gain: float = 0.7, reverb: bool = True) -> None:
+    """Render MIDI to WAV via FluidSynth with reverb. Raises RuntimeError on failure."""
     caps = capabilities()
     if not caps["fluidsynth"]:
         raise RuntimeError("fluidsynth is not installed (apt install fluidsynth)")
@@ -79,35 +79,71 @@ def midi_to_wav(midi_path: str, wav_path: str, sample_rate: int = 44100,
         "-g", str(gain),
         "-F", wav_path,
         "-r", str(sample_rate),
-        caps["soundfont"], midi_path,
     ]
+    # Enable reverb for a professional studio sound (medium room)
+    if reverb:
+        cmd.extend([
+            "-o", "synth.reverb.active=1",
+            "-o", "synth.reverb.room-size=0.6",
+            "-o", "synth.reverb.damp=0.5",
+            "-o", "synth.reverb.width=5.0",
+            "-o", "synth.reverb.level=0.3",
+        ])
+    cmd.extend([caps["soundfont"], midi_path])
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if proc.returncode != 0 or not Path(wav_path).is_file():
         raise RuntimeError(f"fluidsynth failed: {proc.stderr or proc.stdout}")
 
 
-def wav_to_mp3(wav_path: str, mp3_path: str, quality: int = 2) -> None:
-    """Encode WAV to MP3 via ffmpeg (VBR ~190kbps at quality 2)."""
+def normalize_wav(wav_path: str) -> None:
+    """Peak-normalize WAV file in-place to -1.0 dBFS using ffmpeg."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return  # Silently skip if ffmpeg not available
+    tmp_path = str(Path(wav_path).with_suffix(".norm.wav"))
+    try:
+        cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", wav_path,
+               "-af", "loudnorm=I=-16:TP=-1.0:LRA=11",
+               tmp_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if proc.returncode == 0 and Path(tmp_path).is_file():
+            os.replace(tmp_path, wav_path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def wav_to_mp3(wav_path: str, mp3_path: str, quality: int = 2, normalize: bool = True) -> None:
+    """Encode WAV to MP3 via ffmpeg (VBR ~190kbps at quality 2) with loudness normalization."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("ffmpeg is not installed (apt install ffmpeg)")
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", wav_path,
-           "-codec:a", "libmp3lame", "-qscale:a", str(quality), mp3_path]
+    # EBU R128 loudness normalization for professional broadcast-ready audio
+    if normalize:
+        cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", wav_path,
+               "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+               "-codec:a", "libmp3lame", "-qscale:a", str(quality), mp3_path]
+    else:
+        cmd = [ffmpeg, "-y", "-loglevel", "error", "-i", wav_path,
+               "-codec:a", "libmp3lame", "-qscale:a", str(quality), mp3_path]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if proc.returncode != 0 or not Path(mp3_path).is_file():
         raise RuntimeError(f"ffmpeg failed: {proc.stderr}")
 
 
 def midi_to_audio(midi_path: str, out_path: str) -> None:
-    """Render MIDI to WAV or MP3 depending on out_path extension."""
+    """Render MIDI to WAV or MP3 depending on out_path extension with normalization."""
     out = Path(out_path)
     if out.suffix.lower() == ".wav":
         midi_to_wav(midi_path, out_path)
+        normalize_wav(out_path)  # Peak-normalize WAV for consistent volume
     elif out.suffix.lower() == ".mp3":
         tmp_wav = str(out.with_suffix(".tmp.wav"))
         try:
             midi_to_wav(midi_path, tmp_wav)
-            wav_to_mp3(tmp_wav, out_path)
+            wav_to_mp3(tmp_wav, out_path)  # MP3 normalization happens inside wav_to_mp3
         finally:
             try:
                 os.unlink(tmp_wav)

@@ -59,7 +59,8 @@ genre_profile(
         (registral_return, 50),
         (consonant_outline, 75)
     ],
-    [max_interval=5, tempo_range=(80,140), accomp_pattern=alberti]
+    [max_interval=5, tempo_range=(80,140), accomp_pattern=alberti,
+     melody_instrument=0, accomp_instrument=0]
 ).
 
 % BAROQUE (Bach, Handel)
@@ -89,7 +90,8 @@ genre_profile(
         (leap_presence, 30),
         (consonant_outline, 70)
     ],
-    [max_interval=6, tempo_range=(60,120), accomp_pattern=arpeggiated]
+    [max_interval=6, tempo_range=(60,120), accomp_pattern=arpeggiated,
+     melody_instrument=6, accomp_instrument=42]
 ).
 
 % ROMANTIC (Chopin, Brahms)
@@ -116,7 +118,8 @@ genre_profile(
         (leap_presence, 35),
         (consonant_outline, 50)
     ],
-    [max_interval=7, tempo_range=(50,160), min_range=7, accomp_pattern=arpeggiated]
+    [max_interval=7, tempo_range=(50,160), min_range=7, accomp_pattern=arpeggiated,
+     melody_instrument=0, accomp_instrument=0]
 ).
 
 % TRADITIONAL JAZZ (Bebop, Standards)
@@ -141,7 +144,8 @@ genre_profile(
         (prefer_smaller_intervals, 30),
         (consonant_outline, 35)
     ],
-    [max_interval=8, tempo_range=(100,240), min_range=10, accomp_pattern=stride]
+    [max_interval=8, tempo_range=(100,240), min_range=10, accomp_pattern=stride,
+     melody_instrument=0, accomp_instrument=32]
 ).
 
 % FOLK/TRADITIONAL
@@ -171,7 +175,8 @@ genre_profile(
         (sequential_repetition, 45),
         (consonant_outline, 80)
     ],
-    [max_interval=4, tempo_range=(70,130), max_range=12, accomp_pattern=block]
+    [max_interval=4, tempo_range=(70,130), max_range=12, accomp_pattern=block,
+     melody_instrument=24, accomp_instrument=24]
 ).
 
 % CONTEMPORARY/ATONAL
@@ -192,7 +197,8 @@ genre_profile(
         (consonant_leaps_only, 20),
         (consonant_outline, 25)
     ],
-    [max_interval=10, tempo_range=(40,200), accomp_pattern=block]
+    [max_interval=10, tempo_range=(40,200), accomp_pattern=block,
+     melody_instrument=1, accomp_instrument=1]
 ).
 
 % SACRED CHANT (Gregorian)
@@ -217,7 +223,8 @@ genre_profile(
         (no_repetitive_intervals, 35),
         (consonant_outline, 80)
     ],
-    [max_interval=3, tempo_range=(50,80), max_range=10, accomp_pattern=block]
+    [max_interval=3, tempo_range=(50,80), max_range=10, accomp_pattern=block,
+     melody_instrument=19, accomp_instrument=19]
 ).
 
 % CHILDREN'S SONGS
@@ -242,7 +249,8 @@ genre_profile(
         (no_repetitive_intervals, 45),
         (consonant_outline, 85)
     ],
-    [max_interval=4, tempo_range=(80,120), max_range=8, accomp_pattern=block]
+    [max_interval=4, tempo_range=(80,120), max_range=8, accomp_pattern=block,
+     melody_instrument=10, accomp_instrument=0]
 ).
 
 % MINIMALIST (Reich, Glass)
@@ -263,7 +271,8 @@ genre_profile(
         (no_repetitive_intervals, 25),   % low weight - repetition is the style!
         (consonant_outline, 60)
     ],
-    [max_interval=3, tempo_range=(90,140), max_range=7, accomp_pattern=block]
+    [max_interval=3, tempo_range=(90,140), max_range=7, accomp_pattern=block,
+     melody_instrument=4, accomp_instrument=4]
 ).
 
 % MODAL/IMPRESSIONIST (Debussy, Ravel)
@@ -286,7 +295,8 @@ genre_profile(
         (register_target, 40),
         (consonant_outline, 55)
     ],
-    [max_interval=6, tempo_range=(50,100), accomp_pattern=arpeggiated]
+    [max_interval=6, tempo_range=(50,100), accomp_pattern=arpeggiated,
+     melody_instrument=73, accomp_instrument=48]
 ).
 
 % BLUES
@@ -307,7 +317,8 @@ genre_profile(
         (weak_beat_justified, 50),
         (consonant_outline, 40)
     ],
-    [max_interval=7, tempo_range=(60,120), min_range=5, accomp_pattern=stride]
+    [max_interval=7, tempo_range=(60,120), min_range=5, accomp_pattern=stride,
+     melody_instrument=3, accomp_instrument=3]
 ).
 
 % ==============================================================================
@@ -343,7 +354,8 @@ genre_profile(
         (register_target, 45),
         (consonant_outline, 80)
     ],
-    [max_interval=4, tempo_range=(80,130), max_range=12, accomp_pattern=alberti]
+    [max_interval=4, tempo_range=(80,130), max_range=12, accomp_pattern=alberti,
+     melody_instrument=6, accomp_instrument=6]
 ).
 
 % HIGH CLASSICAL (Mature Mozart/Haydn)
@@ -390,7 +402,8 @@ genre_profile(
         (registral_return, 50),
         (consonant_outline, 75)
     ],
-    [max_interval=5, tempo_range=(80,140), accomp_pattern=alberti]
+    [max_interval=5, tempo_range=(80,140), accomp_pattern=alberti,
+     melody_instrument=0, accomp_instrument=0]
 ).
 
 % STURM UND DRANG (Dramatic passages)
@@ -426,7 +439,8 @@ genre_profile(
         (registral_return, 35),
         (consonant_outline, 45)
     ],
-    [max_interval=7, tempo_range=(70,160), accomp_pattern=arpeggiated]
+    [max_interval=7, tempo_range=(70,160), accomp_pattern=arpeggiated,
+     melody_instrument=0, accomp_instrument=0]
 ).
 
 % ROMANTIC PIANO (Chopin, Liszt, Fur Elise-era Beethoven)
@@ -455,7 +469,8 @@ genre_profile(
         (register_target, 40),
         (consonant_outline, 40)
     ],
-    [max_interval=14, tempo_range=(40,180), min_range=10, accomp_pattern=arpeggiated]
+    [max_interval=14, tempo_range=(40,180), min_range=10, accomp_pattern=arpeggiated,
+     melody_instrument=0, accomp_instrument=0]
 ).
 
 % ==============================================================================
