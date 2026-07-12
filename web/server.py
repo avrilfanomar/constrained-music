@@ -495,6 +495,7 @@ class GenerateRequest(BaseModel):
     rhythm: bool = Field(True)
     refine: int = Field(1, ge=1, le=10)
     refine_piece: int = Field(1, ge=1, le=5)
+    count: int = Field(1, ge=1, le=10)  # Generate N takes
     # Artist musical controls (empty/None = derived from mood)
     key: str = Field("", max_length=24)
     tempo: int | None = Field(None, ge=40, le=220)
@@ -538,7 +539,7 @@ def _auto_name(kind: str, request: dict, piece_meta: dict) -> str:
     return f"Take {take} — " + ", ".join(bits)
 
 
-def save_to_library(kind: str, request: dict, data: dict, midi_bytes: bytes | None) -> dict:
+def save_to_library(kind: str, request: dict, data: dict, midi_bytes: bytes | None, score: float | None = None) -> dict:
     """Persist a generated piece; returns its library meta entry."""
     piece_id = uuid.uuid4().hex[:12]
     entry_dir = LIBRARY_DIR / piece_id
@@ -559,6 +560,8 @@ def save_to_library(kind: str, request: dict, data: dict, midi_bytes: bytes | No
         "seed": piece_meta.get("seed"),
         "duration": request.get("duration"),
     }
+    if score is not None:
+        meta["score"] = round(score, 2)
     with open(entry_dir / "piece.json", "w") as f:
         json.dump(data, f)
     if midi_bytes:
@@ -854,8 +857,33 @@ def prepare_generate(req: GenerateRequest) -> tuple[list[str], float, str, str]:
     return cmd, timeout_sec, tmp_json, tmp_midi
 
 
+def run_evaluate(json_path: str) -> float | None:
+    """Run evaluate.py on a generated piece and return the distance score (synchronous)."""
+    try:
+        import subprocess
+        evaluate_script = PROJECT_ROOT / "scripts" / "evaluate.py"
+        result = subprocess.run(
+            [sys.executable, str(evaluate_script), json_path, "--json"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            if isinstance(data, list) and len(data) > 0:
+                return data[0].get("distance")
+    except Exception:
+        pass
+    return None
+
+
 def finish_generate(tmp_json: str, tmp_midi: str, picat_output: str, req: GenerateRequest) -> dict:
     """Post-process generation: read JSON, generate MIDI, save to library."""
+    # Handle multiple takes (count > 1)
+    if req.count > 1:
+        return finish_generate_multiple(tmp_json, tmp_midi, picat_output, req)
+
     try:
         if not os.path.exists(tmp_json):
             raise ValueError(f"No output JSON produced")
@@ -874,7 +902,10 @@ def finish_generate(tmp_json: str, tmp_midi: str, picat_output: str, req: Genera
             midi_base64 = None
             picat_output += f"\nMIDI conversion error: {e}"
 
-        library_meta = save_to_library("generate", req.model_dump(), data, midi_bytes)
+        # Run evaluation
+        score = run_evaluate(tmp_json)
+
+        library_meta = save_to_library("generate", req.model_dump(), data, midi_bytes, score)
 
         return {
             "notes": data.get("notes", []),
@@ -886,6 +917,66 @@ def finish_generate(tmp_json: str, tmp_midi: str, picat_output: str, req: Genera
         }
     finally:
         for p in [tmp_json, tmp_midi]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+def finish_generate_multiple(tmp_json: str, tmp_midi: str, picat_output: str, req: GenerateRequest) -> dict:
+    """Post-process generation with multiple takes: read all numbered JSONs, evaluate, save to library."""
+    base_path = tmp_json.replace(".json", "")
+    takes = []
+    cleanup_files = []
+
+    try:
+        for i in range(1, req.count + 1):
+            numbered_json = f"{base_path}_{i}.json"
+            numbered_midi = f"{base_path}_{i}.mid"
+            cleanup_files.extend([numbered_json, numbered_midi])
+
+            if not os.path.exists(numbered_json):
+                continue
+
+            with open(numbered_json, "r") as f:
+                data = json.load(f)
+
+            # Generate MIDI
+            midi_bytes = None
+            midi_base64 = None
+            try:
+                json_to_midi(numbered_json, numbered_midi)
+                with open(numbered_midi, "rb") as f:
+                    midi_bytes = f.read()
+                midi_base64 = base64.b64encode(midi_bytes).decode("ascii")
+            except Exception as e:
+                picat_output += f"\nMIDI conversion error (take {i}): {e}"
+
+            # Run evaluation
+            score = run_evaluate(numbered_json)
+
+            library_meta = save_to_library("generate", req.model_dump(), data, midi_bytes, score)
+
+            takes.append({
+                "notes": data.get("notes", []),
+                "tempo_changes": data.get("tempo_changes", []),
+                "metadata": data.get("metadata", {}),
+                "midi_base64": midi_base64,
+                "library": library_meta,
+                "score": score,
+            })
+
+        if not takes:
+            raise ValueError("No output files produced for multi-take generation")
+
+        # Return the first take as the main result, with all takes in a list
+        result = takes[0].copy()
+        result["takes"] = takes
+        result["picat_output"] = picat_output
+        return result
+
+    finally:
+        for p in cleanup_files:
             try:
                 os.unlink(p)
             except OSError:
@@ -1039,6 +1130,9 @@ def build_generate_args(req: GenerateRequest) -> list[str]:
 
     if req.seed is not None:
         args.append(f"seed={req.seed}")
+
+    if req.count > 1:
+        args.append(f"count={req.count}")
 
     for c in req.disabled_constraints:
         args.append(f"disable={c}")

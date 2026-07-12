@@ -127,6 +127,18 @@ export class Library {
         nameLine.className = 'lib-name-line';
         nameLine.appendChild(star);
         nameLine.appendChild(name);
+
+        // Add score badge if available
+        if (piece.score !== undefined && piece.score !== null) {
+            const scoreBadge = document.createElement('span');
+            scoreBadge.className = 'lib-score-badge';
+            const scoreClass = piece.score < 3 ? 'good' : piece.score < 6 ? 'fair' : 'poor';
+            scoreBadge.classList.add(scoreClass);
+            scoreBadge.textContent = `${piece.score.toFixed(1)}`;
+            scoreBadge.title = `Corpus distance: ${piece.score.toFixed(2)} (lower = better)`;
+            nameLine.appendChild(scoreBadge);
+        }
+
         main.appendChild(nameLine);
         main.appendChild(details);
 

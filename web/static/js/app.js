@@ -30,6 +30,7 @@ const accompSelect = document.getElementById('accomp-select');
 const rhythmToggle = document.getElementById('rhythm-toggle');
 const refineSelect = document.getElementById('refine-select');
 const refinePieceSelect = document.getElementById('refine-piece-select');
+const countSelect = document.getElementById('count-select');
 const generateBtn = document.getElementById('generate-btn');
 const varyBtn = document.getElementById('vary-btn');
 const outputSection = document.getElementById('output-section');
@@ -415,6 +416,7 @@ async function doGenerate() {
         rhythm: rhythmToggle.checked,
         refine: parseInt(refineSelect.value),
         refine_piece: parseInt(refinePieceSelect.value),
+        count: parseInt(countSelect.value),
         disabled_constraints: overrides.disabled_constraints,
         weight_overrides: overrides.weight_overrides,
         key: keySelect.value === 'auto' ? '' : keySelect.value,

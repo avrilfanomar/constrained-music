@@ -1679,6 +1679,34 @@ body::before {
 
 .lib-name:hover { border-bottom-color: var(--text-muted); }
 
+.lib-score-badge {
+    display: inline-block;
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    margin-left: 4px;
+}
+
+.lib-score-badge.good {
+    background: rgba(102, 187, 106, 0.15);
+    color: #66bb6a;
+    border: 1px solid rgba(102, 187, 106, 0.3);
+}
+
+.lib-score-badge.fair {
+    background: rgba(255, 183, 77, 0.15);
+    color: #ffb74d;
+    border: 1px solid rgba(255, 183, 77, 0.3);
+}
+
+.lib-score-badge.poor {
+    background: rgba(239, 83, 80, 0.15);
+    color: #ef5350;
+    border: 1px solid rgba(239, 83, 80, 0.3);
+}
+
 .lib-rename-input {
     font-family: var(--font-display);
     font-size: 1rem;
