@@ -35,6 +35,11 @@ export class Playback {
         this._audioSrc = null;         // currently-loaded src
         this.buffering = false;
 
+        // Mixer controls
+        this.volume = 1.0;             // 0..1
+        this.melodyMuted = false;
+        this.accompMuted = false;
+
         this.onprogress = null;    // (currentSec, totalSec, currentBeat) => {}
         this.onstatechange = null; // (playing) => {}
         this.onbuffering = null;   // (isBuffering) => {}  (server engine only)
@@ -86,13 +91,15 @@ export class Playback {
             const startBeat = noteStartBeat(n, this.ts);
             const durBeats = noteDurBeats(n);
             const voice = n.voice || 1;
+            const isAccomp = voice >= ACCOMP_VOICE;
             return {
                 time: beatToSec(tempoMap, startBeat),
                 beat: startBeat,
                 duration: beatToSec(tempoMap, startBeat + durBeats) - beatToSec(tempoMap, startBeat),
                 pitch: n.pitch,
                 velocity: (n.velocity || 80) / 127,
-                gain: voice >= ACCOMP_VOICE ? 0.55 : 1.0,
+                gain: isAccomp ? 0.55 : 1.0,
+                isAccomp,
             };
         });
 
@@ -151,12 +158,36 @@ export class Playback {
         if (this.onstatechange) this.onstatechange(false);
     }
 
+    seek(seconds) {
+        if (this.engine === 'server') {
+            if (this._audio) {
+                try {
+                    this._audio.currentTime = Math.max(0, Math.min(seconds, this.totalDurationSec));
+                } catch (e) {
+                    // Not seekable yet (metadata not loaded)
+                }
+            }
+        } else {
+            // Sampler engine: rebuild part from the new position
+            if (this.playing) {
+                this.stop();
+                Tone.Transport.seconds = seconds;
+                this._playSampler();
+            } else {
+                Tone.Transport.seconds = seconds;
+                const beat = secToBeat(this._tempoMap, seconds);
+                if (this.onprogress) this.onprogress(seconds, this.totalDurationSec, beat);
+            }
+        }
+    }
+
     // --- Server (WAV) engine ------------------------------------------------
 
     async _playServer() {
         if (!this._audio) {
             this._audio = new Audio();
             this._audio.preload = 'auto';
+            this._audio.volume = this.volume;
             this._audio.addEventListener('waiting', () => this._setBuffering(true));
             this._audio.addEventListener('playing', () => this._setBuffering(false));
             this._audio.addEventListener('ended', () => this.stop());
@@ -167,6 +198,7 @@ export class Playback {
             this._audio.src = this.wavUrl;
             this._audioSrc = this.wavUrl;
         }
+        this._audio.volume = this.volume;
         this.playing = true;
         this._setBuffering(true);
         if (this.onstatechange) this.onstatechange(true);
@@ -217,13 +249,20 @@ export class Playback {
 
         this._disposePart();
 
-        const partEvents = this._scheduledEvents.map(evt => ({
-            time: evt.time,
-            note: this._midiToNoteName(evt.pitch),
-            duration: Math.max(0.05, evt.duration),
-            velocity: evt.velocity * evt.gain,
-            beat: evt.beat,
-        }));
+        const partEvents = this._scheduledEvents
+            .filter(evt => {
+                // Apply mute settings (sampler engine only)
+                if (evt.isAccomp && this.accompMuted) return false;
+                if (!evt.isAccomp && this.melodyMuted) return false;
+                return true;
+            })
+            .map(evt => ({
+                time: evt.time,
+                note: this._midiToNoteName(evt.pitch),
+                duration: Math.max(0.05, evt.duration),
+                velocity: evt.velocity * evt.gain * this.volume,
+                beat: evt.beat,
+            }));
 
         this._part = new Tone.Part((time, evt) => {
             this.sampler.triggerAttackRelease(evt.note, evt.duration, time, evt.velocity);
@@ -256,6 +295,48 @@ export class Playback {
             this._part.dispose();
             this._part = null;
         }
+    }
+
+    // --- Mixer controls ------------------------------------------------------
+
+    setVolume(v) {
+        this.volume = Math.max(0, Math.min(1, v));
+        if (this.engine === 'server' && this._audio) {
+            this._audio.volume = this.volume;
+        } else if (this.playing) {
+            // Restart sampler part with new volume
+            const wasPlaying = this.playing;
+            const currentSec = this.engine === 'sampler' ? Tone.Transport.seconds : 0;
+            this.stop();
+            if (wasPlaying) {
+                Tone.Transport.seconds = currentSec;
+                this._playSampler();
+            }
+        }
+    }
+
+    setMelodyMute(muted) {
+        this.melodyMuted = muted;
+        if (this.engine === 'sampler' && this.playing) {
+            // Restart part
+            const currentSec = Tone.Transport.seconds;
+            this.stop();
+            Tone.Transport.seconds = currentSec;
+            this._playSampler();
+        }
+        // Server engine: mute/solo not available (mixed audio)
+    }
+
+    setAccompMute(muted) {
+        this.accompMuted = muted;
+        if (this.engine === 'sampler' && this.playing) {
+            // Restart part
+            const currentSec = Tone.Transport.seconds;
+            this.stop();
+            Tone.Transport.seconds = currentSec;
+            this._playSampler();
+        }
+        // Server engine: mute/solo not available (mixed audio)
     }
 
     /** Halt and reset BOTH engines so a piece switch never double-plays. */

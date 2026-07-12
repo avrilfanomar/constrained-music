@@ -283,10 +283,18 @@
                 <button id="play-btn" class="btn-transport" title="Play">&#9654;</button>
                 <button id="pause-btn" class="btn-transport" title="Pause" disabled>&#10074;&#10074;</button>
                 <button id="stop-btn" class="btn-transport" title="Stop" disabled>&#9632;</button>
-                <div class="progress-container">
+                <div class="progress-container" id="progress-container">
                     <div class="progress-bar" id="progress-bar"></div>
                 </div>
                 <span id="time-display" class="time-display">0:00 / 0:00</span>
+                <div class="mixer-controls">
+                    <button id="melody-mute-btn" class="btn-mixer" title="Mute melody">M</button>
+                    <button id="accomp-mute-btn" class="btn-mixer" title="Mute accompaniment">A</button>
+                    <div class="volume-control">
+                        <span class="volume-icon">&#128266;</span>
+                        <input type="range" id="volume-slider" min="0" max="100" value="100" class="volume-slider">
+                    </div>
+                </div>
                 <div class="export-group" id="export-group">
                     <button id="download-midi" class="btn-small btn-download" title="Download MIDI for your DAW">&#11015; MIDI</button>
                     <button id="download-musicxml" class="btn-small btn-download" title="Download MusicXML for MuseScore / Sibelius / Dorico / Finale">&#11015; MusicXML</button>

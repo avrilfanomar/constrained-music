@@ -62,6 +62,10 @@ const errorPanel = document.getElementById('error-panel');
 const errorMessage = document.getElementById('error-message');
 const errorOutput = document.getElementById('error-output');
 const errorClose = document.getElementById('error-close');
+const volumeSlider = document.getElementById('volume-slider');
+const melodyMuteBtn = document.getElementById('melody-mute-btn');
+const accompMuteBtn = document.getElementById('accomp-mute-btn');
+const progressContainer = document.getElementById('progress-container');
 
 let config = null;
 let currentIntensity = 'standard';
@@ -258,6 +262,32 @@ function wireEvents() {
         pianoRoll.setCursor(-1);
     });
 
+    // Volume slider
+    volumeSlider.addEventListener('input', () => {
+        const vol = volumeSlider.value / 100;
+        playback.setVolume(vol);
+    });
+
+    // Mute buttons
+    melodyMuteBtn.addEventListener('click', () => {
+        playback.setMelodyMute(!playback.melodyMuted);
+        melodyMuteBtn.classList.toggle('muted', playback.melodyMuted);
+    });
+
+    accompMuteBtn.addEventListener('click', () => {
+        playback.setAccompMute(!playback.accompMuted);
+        accompMuteBtn.classList.toggle('muted', playback.accompMuted);
+    });
+
+    // Click to seek on progress bar
+    progressContainer.addEventListener('click', (e) => {
+        const rect = progressContainer.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const pct = x / rect.width;
+        const seekSec = pct * playback.totalDurationSec;
+        playback.seek(seekSec);
+    });
+
     // Ornaments slider
     ornamentsSlider.addEventListener('input', () => {
         ornamentsValue.textContent = (ornamentsSlider.value / 100).toFixed(2);
@@ -311,6 +341,24 @@ function wireEvents() {
                 `${fmtTime(0)} / ${fmtTime(playback.totalDurationSec)}`;
         }
     };
+
+    // Click to seek on piano roll
+    pianoRoll.canvas.addEventListener('click', (e) => {
+        if (pianoRoll.totalBeats === 0) return;
+        const rect = pianoRoll.canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const margin = 36; // left margin from piano-roll.js
+        const plotW = rect.width - margin - 12;
+        if (x < margin) return; // clicked on pitch labels
+        const pct = (x - margin) / plotW;
+        const beat = pct * pianoRoll.totalBeats;
+        // Convert beat to seconds using the tempo map
+        import('./timeline.js').then(({ buildTempoMap, beatToSec }) => {
+            const tempoMap = buildTempoMap(playback.tempoChanges, playback.ts);
+            const sec = beatToSec(tempoMap, beat);
+            playback.seek(sec);
+        });
+    });
 
     // Vary mode description updates
     document.querySelectorAll('#vary-mode-control button').forEach(btn => {

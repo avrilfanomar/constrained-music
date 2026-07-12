@@ -809,6 +809,7 @@ body::before {
     width: 100%;
     height: 240px;
     border-radius: var(--radius);
+    cursor: pointer;
 }
 
 /* --- Transport Bar --- */
@@ -854,6 +855,13 @@ body::before {
     border-radius: 2px;
     overflow: hidden;
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    position: relative;
+}
+
+.progress-container:hover {
+    height: 6px;
+    transition: height 0.1s ease;
 }
 
 .progress-bar {
@@ -863,6 +871,93 @@ body::before {
     border-radius: 2px;
     transition: width 0.1s linear;
     box-shadow: 0 0 8px rgba(212, 168, 67, 0.3);
+    pointer-events: none;
+}
+
+.mixer-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-mixer {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-surface);
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-soft);
+    cursor: pointer;
+    transition: all var(--transition);
+    box-shadow: var(--shadow-inset);
+}
+
+.btn-mixer:hover {
+    border-color: var(--gold-dark);
+    background: var(--gold-muted);
+    color: var(--gold);
+}
+
+.btn-mixer.muted {
+    background: rgba(255, 68, 68, 0.15);
+    border-color: rgba(255, 68, 68, 0.3);
+    color: #ff6b6b;
+}
+
+.volume-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.volume-icon {
+    font-size: 1rem;
+    color: var(--text-muted);
+}
+
+.volume-slider {
+    width: 80px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-surface);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--gold);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+    background: var(--gold-bright);
+    transform: scale(1.2);
+}
+
+.volume-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--gold);
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+
+.volume-slider::-moz-range-thumb:hover {
+    background: var(--gold-bright);
+    transform: scale(1.2);
 }
 
 .time-display {
