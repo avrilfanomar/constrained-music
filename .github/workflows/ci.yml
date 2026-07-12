@@ -119,10 +119,27 @@ jobs:
     - name: Test Docker image
       run: |
         # Start container
-        docker run -d --name cms-test -p 8000:8000 constrained-music:test
+        echo "Starting container..."
+        CONTAINER_ID=$(docker run -d --name cms-test -p 8000:8000 constrained-music:test)
+        echo "Container ID: $CONTAINER_ID"
+
+        # Check if container is running
+        sleep 2
+        docker ps -a | grep cms-test
+
+        # Check container logs
+        echo "Container logs:"
+        docker logs cms-test
 
         # Wait for service to be ready
-        timeout 30 bash -c 'until curl -f http://localhost:8000/api/config; do sleep 2; done'
+        echo "Waiting for service..."
+        timeout 30 bash -c 'until curl -f http://localhost:8000/api/config; do sleep 2; done' || {
+          echo "Service failed to start. Final container state:"
+          docker ps -a | grep cms-test
+          echo "Final logs:"
+          docker logs cms-test
+          exit 1
+        }
 
         # Check health
         docker ps | grep cms-test
